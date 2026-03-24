@@ -1,0 +1,11 @@
+spring:
+  application:
+    name: wallet
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+
+  otlp:
+    tracing:
+      endpoint: http://localhost:4317

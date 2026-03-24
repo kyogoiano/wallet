@@ -1,0 +1,84 @@
+package br.com.wallet.infrasctructure.persistence;
+
+import org.jspecify.annotations.NonNull;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.stereotype.Repository;
+
+import java.math.BigDecimal;
+import java.util.*;
+
+@Repository
+public class AccountDao {
+
+    private final JdbcTemplate jdbc;
+
+    public AccountDao(final JdbcTemplate jdbc) {
+        this.jdbc = jdbc;
+    }
+
+
+    public void insertAccount(final UUID walletId, final BigDecimal initialBalance) {
+        jdbc.update("""
+            INSERT INTO accounts (id, balance, version)
+            VALUES (?, ?, 0)
+        """, walletId, initialBalance);
+    }
+
+    public Optional<BigDecimal> findWalletBalance(@NonNull UUID walletId) {
+        return jdbc.query("""
+                SELECT balance FROM accounts WHERE id = ?
+                """, rs -> {
+                    if (rs.next()) {
+                        return Optional.of(rs.getBigDecimal("balance"));
+                    }
+                    return Optional.empty();
+        }, walletId);
+    }
+
+    public Optional<BigDecimal> findWalletBalanceForUpdate(@NonNull UUID walletId) {
+        return jdbc.query("""
+                SELECT balance FROM accounts WHERE id = ? FOR UPDATE
+                """, rs -> {
+            if (rs.next()) {
+                return Optional.of(rs.getBigDecimal("balance"));
+            }
+            return Optional.empty();
+        }, walletId);
+    }
+
+    public Long nextAccountSequence(@NonNull UUID walletId) {
+        return jdbc.queryForObject("""
+                    UPDATE accounts
+                    SET last_sequence = last_sequence + 1
+                    WHERE id = ?
+                    RETURNING last_sequence
+                """, Long.class, walletId);
+    }
+
+    public void updateBalance(@NonNull UUID accountId, @NonNull BigDecimal amount) {
+        jdbc.update("""
+            UPDATE accounts
+            SET balance = balance + ?, version = version + 1
+            WHERE id = ?
+        """, amount, accountId);
+    }
+
+    public Map<UUID, BigDecimal> getBalancesFromWallets(List<@NonNull UUID> ordered) {
+        return jdbc.query("""
+            SELECT id, balance
+            FROM accounts
+            WHERE id IN (?, ?)
+            FOR UPDATE
+        """, rs -> {
+            Map<UUID, BigDecimal> map = new HashMap<>();
+            while (rs.next()) {
+                map.put(
+                        rs.getObject("id", UUID.class),
+                        rs.getBigDecimal("balance")
+                );
+            }
+            return map;
+        }, ordered.get(0), ordered.get(1));
+    }
+
+}

@@ -1,13 +1,15 @@
 package br.com.wallet.domain.event;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.math.BigDecimal;
 import java.util.UUID;
 
 public record TransferCompletedEvent(
-        UUID from,
-        UUID to,
-        BigDecimal amount,
-        UUID operationId
+        @JsonProperty(value = "from", required = true) UUID from,
+        @JsonProperty(value = "to", required = true) UUID to,
+        @JsonProperty(value = "amount", required = true) BigDecimal amount,
+        @JsonProperty(value = "operationId", required = true) UUID operationId
 ) implements DomainEvent {
 
     @Override

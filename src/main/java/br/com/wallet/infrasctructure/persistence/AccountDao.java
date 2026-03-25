@@ -17,11 +17,15 @@ public class AccountDao {
     }
 
 
-    public void insertAccount(final UUID walletId, final BigDecimal initialBalance) {
+    /**
+     * Insert new accounts, always starts with 0!
+     * @param walletId wallet id
+     */
+    public void insertAccount(final UUID walletId) {
         jdbc.update("""
             INSERT INTO accounts (id, balance, version)
             VALUES (?, ?, 0)
-        """, walletId, initialBalance);
+        """, walletId, BigDecimal.ZERO);
     }
 
     public Optional<BigDecimal> findWalletBalance(@NonNull UUID walletId) {

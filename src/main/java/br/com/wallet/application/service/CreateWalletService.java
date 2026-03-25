@@ -1,21 +1,28 @@
 package br.com.wallet.application.service;
 
 import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.application.core.WalletOperationService;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
+import br.com.wallet.domain.LedgerType;
 import br.com.wallet.infrasctructure.persistence.AccountDao;
 import jakarta.annotation.Nonnull;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
+import java.time.Clock;
 import java.util.UUID;
 
 @Service
 public class CreateWalletService implements CreateWalletUseCase {
 
     private final AccountDao accountDao;
+    private final WalletOperationService core;
+    private final Clock clock;
 
-    public CreateWalletService(final AccountDao accountDao) {
+    public CreateWalletService(final AccountDao accountDao, WalletOperationService core, Clock clock) {
         this.accountDao = accountDao;
+        this.core = core;
+        this.clock = clock;
     }
 
 
@@ -24,20 +31,30 @@ public class CreateWalletService implements CreateWalletUseCase {
     public UUID execute() {
         final UUID walletId = UUID.randomUUID();
 
-        final var initialBalance = BigDecimal.ZERO;
-
-        accountDao.insertAccount(walletId, initialBalance);
+        accountDao.insertAccount(walletId);
 
         return walletId;
     }
 
 
-
+    /**
+     * This only works with positive amounts
+     * @param initialBalance initial balance > 0
+     * @return return wallet id
+     */
     @Override
     public UUID execute(@Nonnull final BigDecimal initialBalance) {
         final UUID walletId = UUID.randomUUID();
 
-        accountDao.insertAccount(walletId, initialBalance);
+        accountDao.insertAccount(walletId);
+
+        core.applyTransaction(
+                walletId,
+                initialBalance,
+                LedgerType.CREDIT,
+                UUID.randomUUID(),
+                clock.instant()
+        );
 
         return walletId;
     }

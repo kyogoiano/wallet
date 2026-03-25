@@ -8,6 +8,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,9 +16,11 @@ import java.util.UUID;
 public class OutboxDao {
 
     private final JdbcTemplate jdbc;
+    private final JsonUtils jsonUtils;
 
-    public OutboxDao(final JdbcTemplate jdbc) {
+    public OutboxDao(final JdbcTemplate jdbc, JsonUtils jsonUtils) {
         this.jdbc = jdbc;
+        this.jsonUtils = jsonUtils;
     }
 
     public void save(@NonNull final DomainEvent event) {
@@ -35,7 +38,7 @@ public class OutboxDao {
                 event.aggregateType(),
                 event.aggregateId(),
                 event.eventType(),
-                JsonUtils.toJson(event)
+                jsonUtils.toJson(event)
         );
     }
 
@@ -53,7 +56,7 @@ public class OutboxDao {
                 rs.getObject("id", UUID.class),
                 rs.getString("event_type"),
                 rs.getString("payload")
-        ), now);
+        ), now.atOffset(ZoneOffset.UTC));
     }
 
     /**
@@ -69,7 +72,7 @@ public class OutboxDao {
                 retry_count = retry_count + 1,
                 next_retry_at = ? + (INTERVAL '1 second' * POWER(2, retry_count +1))
             WHERE id = ?
-        """, now, id);
+        """, now.atOffset(ZoneOffset.UTC), id);
     }
 
     /**
@@ -80,6 +83,6 @@ public class OutboxDao {
             UPDATE outbox
             SET status = 'PROCESSED', processed_at = ?
             WHERE id = ?
-        """, now, id);
+        """, now.atOffset(ZoneOffset.UTC), id);
     }
 }

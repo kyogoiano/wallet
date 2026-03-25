@@ -3,7 +3,7 @@ CREATE TABLE accounts (
     id UUID PRIMARY KEY,
     balance NUMERIC(19,2) NOT NULL CHECK (balance >= 0),
     version BIGINT NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 ALTER TABLE accounts ADD last_sequence BIGINT DEFAULT 0;
@@ -16,12 +16,12 @@ CREATE TABLE ledger (
     type VARCHAR(10) NOT NULL,
     reference_id UUID,
     operation_id UUID NOT NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- tamper-proof fields
     sequence BIGINT NOT NULL,
-    hash VARCHAR(64) NOT NULL,
-    previous_hash VARCHAR(64), -- correctness depends on ordering
+    hash VARCHAR(128) NOT NULL,
+    previous_hash VARCHAR(128), -- correctness depends on ordering
 
     CONSTRAINT ledger_wallet_fk
         FOREIGN KEY (wallet_id) REFERENCES accounts(id),
@@ -61,11 +61,13 @@ CREATE TABLE outbox (
     payload JSONB NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     retry_count INT NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW(),
-    processed_at TIMESTAMP NULL,
-    next_retry_at TIMESTAMP NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at TIMESTAMPTZ NULL,
+    next_retry_at TIMESTAMPTZ NULL,
     CONSTRAINT outbox_status_chk
-        CHECK (status IN ('PENDING', 'FAILED', 'PROCESSED'))
+        CHECK (status IN ('PENDING', 'FAILED', 'PROCESSED')),
+    CONSTRAINT outbox_event_type_chk -- might be removed for flexibility
+        CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED'))
 );
 
 CREATE INDEX idx_outbox_unprocessed
@@ -78,5 +80,5 @@ CREATE INDEX idx_outbox_ready
 
 CREATE TABLE wallet_operations (
     operation_id UUID PRIMARY KEY,
-    created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

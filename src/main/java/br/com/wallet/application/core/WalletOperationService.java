@@ -30,7 +30,7 @@ public class WalletOperationService {
      * Core transaction operations (technical execution)
      * * Stateless and reusable *
      * @param walletId wallet id (account)
-     * @param amount operation on amount of ( IMPORTANT NOTICE: use negative values for DEBIT ops)
+     * @param amount operation on amount of ( IMPORTANT NOTICE: do not use negative values for DEBIT ops)
      * @param ledgerType type of operation
      * @param operationId operation id
      * @param now operation instant
@@ -45,8 +45,12 @@ public class WalletOperationService {
         // sequence
         final Long sequence = accountDao.nextAccountSequence(walletId);
 
+
+        final BigDecimal signedAmount = (ledgerType == LedgerType.DEBIT)
+                ? amount.negate()
+                : amount;
         // balance update
-        accountDao.updateBalance(walletId, amount);
+        accountDao.updateBalance(walletId, signedAmount);
 
         // hash
         final var previousHash = ledgerDao.findPreviousHash(walletId);

@@ -1,12 +1,18 @@
 package br.com.wallet.integration.outbox;
 
+import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.infrasctructure.outbox.OutboxRelay;
+import br.com.wallet.infrasctructure.outbox.OutboxStatus;
 import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -23,7 +29,10 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
  * idempotence
  * deterministic operations (operationId)
  */
-public class OutboxIT extends IntegrationTestBase {
+
+@SpringBootTest
+@Import(IntegrationTestBase.class)
+class OutboxIT {
 
     @Autowired
     TestDataHelper testDataHelper;
@@ -36,12 +45,26 @@ public class OutboxIT extends IntegrationTestBase {
 
     @Autowired
     FailingEventPublisher failingEventPublisher;
+    
+    @Autowired
+    CreateWalletUseCase createWalletUseCase;
+
+    @Autowired
+    JdbcTemplate jdbc;
+
+    @BeforeEach
+    void cleanDatabase() {
+        jdbc.execute("DELETE FROM ledger");
+        jdbc.execute("DELETE FROM accounts");
+        jdbc.execute("DELETE FROM outbox");
+        jdbc.execute("DELETE FROM wallet_operations");
+    }
 
     @Test
     void shouldProcessOutboxEvents() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
 
         transferFundsUseCase.execute(from, to,
@@ -61,13 +84,13 @@ public class OutboxIT extends IntegrationTestBase {
     @Test
     void shouldNotMarkEventAsProcessedOnFailure() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to,
                 new BigDecimal("50"), opId);
 
-        failingEventPublisher.enableFailure(true);
+        failingEventPublisher.failNext(1);
 
         assertThatCode(() -> outboxRelay.process())
                 .doesNotThrowAnyException();
@@ -81,8 +104,8 @@ public class OutboxIT extends IntegrationTestBase {
     @Test
     void shouldRetryProcessingLater() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
 
         UUID opId = UUID.randomUUID();
 
@@ -90,21 +113,22 @@ public class OutboxIT extends IntegrationTestBase {
                 new BigDecimal("50"), opId);
 
         // first try fails
-        failingEventPublisher.enableFailure(true);
+        failingEventPublisher.failNext(1);
         outboxRelay.process();
 
 
         var failedId = testDataHelper.getOutboxIdByOperation(opId);
 
-        assertThat(testDataHelper.getStatus(failedId)).isEqualTo("FAILED");
+        assertThat(testDataHelper.getStatus(failedId)).isEqualTo(OutboxStatus.FAILED);
 
+
+        testDataHelper.forceRetryNow(failedId);
         // second try succeeds
-        failingEventPublisher.enableFailure(false);
         outboxRelay.process();
         var eventId = testDataHelper.getOutboxIdByOperation(opId);
 
         assertThat(eventId).isNotNull();
-        assertThat(testDataHelper.getStatus(eventId)).isEqualTo("PROCESSED");
+        assertThat(testDataHelper.getStatus(eventId)).isEqualTo(OutboxStatus.PROCESSED);
         assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(1);
         assertThat(testDataHelper.getProcessedAt(eventId)).isNotNull();
     }
@@ -112,8 +136,8 @@ public class OutboxIT extends IntegrationTestBase {
     @Test
     void shouldHandleInvalidPayloadGracefully() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to,
                 new BigDecimal("50"), opId);
@@ -125,14 +149,14 @@ public class OutboxIT extends IntegrationTestBase {
         outboxRelay.process();
 
         // process failed!
-        assertThat(testDataHelper.getStatus(eventId)).isEqualTo("FAILED");
+        assertThat(testDataHelper.getStatus(eventId)).isEqualTo(OutboxStatus.FAILED);
     }
 
     @Test
     void shouldNotReprocessAlreadyProcessedEvent() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to,
                 new BigDecimal("50"), opId);
@@ -148,15 +172,17 @@ public class OutboxIT extends IntegrationTestBase {
     @Test
     void shouldStopRetryingAfterMaxAttempts() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to, new BigDecimal("50"), opId);
 
-        failingEventPublisher.enableFailure(true);
+        failingEventPublisher.failNext(5);
 
         for (int i = 0; i < 5; i++) {
             outboxRelay.process();
+            var failedId = testDataHelper.getOutboxIdByOperation(opId);
+            testDataHelper.forceRetryNow(failedId);
         }
 
         var eventId = testDataHelper.getOutboxIdByOperation(opId);
@@ -167,13 +193,13 @@ public class OutboxIT extends IntegrationTestBase {
     @Test
     void shouldNotProcessBeforeRetryTime() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
 
         transferFundsUseCase.execute(from, to, new BigDecimal("50"), opId);
 
-        failingEventPublisher.enableFailure(true);
+        failingEventPublisher.failNext(2);
         outboxRelay.process();
 
         // try again with no delay

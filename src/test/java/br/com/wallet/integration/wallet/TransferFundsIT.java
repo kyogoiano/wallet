@@ -1,14 +1,18 @@
 package br.com.wallet.integration.wallet;
 
+import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.exceptions.InsufficientFundsException;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
@@ -18,7 +22,10 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
-class TransferFundsIT extends IntegrationTestBase {
+
+@SpringBootTest
+@Import(IntegrationTestBase.class)
+class TransferFundsIT {
 
     @Autowired
     JdbcTemplate jdbc;
@@ -29,7 +36,8 @@ class TransferFundsIT extends IntegrationTestBase {
     @Autowired
     TransferFundsUseCase transferFundsUseCase;
 
-
+    @Autowired
+    CreateWalletUseCase createWalletUseCase;
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -48,10 +56,18 @@ class TransferFundsIT extends IntegrationTestBase {
                 new TransferScenario(
                         new BigDecimal("50"),
                         new BigDecimal("50"),
-                        new BigDecimal("0"),
+                        BigDecimal.ZERO,
                         new BigDecimal("50")
                 )
         );
+    }
+
+    @BeforeEach
+    void cleanDatabase() {
+        jdbc.execute("DELETE FROM ledger");
+        jdbc.execute("DELETE FROM accounts");
+        jdbc.execute("DELETE FROM outbox");
+        jdbc.execute("DELETE FROM wallet_operations");
     }
 
     @ParameterizedTest
@@ -59,8 +75,8 @@ class TransferFundsIT extends IntegrationTestBase {
     void shouldTransferFundsAndUpdateBothBalances(
             TransferScenario scenario) {
         // given
-        UUID from = testDataHelper.createWallet(scenario.initialFrom());
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(scenario.initialFrom());
+        UUID to = createWalletUseCase.execute();
 
         // when
         transferFundsUseCase.execute(from, to, scenario.transferAmount(), UUID.randomUUID());
@@ -73,8 +89,8 @@ class TransferFundsIT extends IntegrationTestBase {
     @Test
     void shouldFailWhenInsufficientBalance() {
         // given
-        UUID from = testDataHelper.createWallet(BigDecimal.TEN);
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(BigDecimal.TEN);
+        UUID to = createWalletUseCase.execute();
 
         // when / then
         assertThatThrownBy(() ->
@@ -84,7 +100,7 @@ class TransferFundsIT extends IntegrationTestBase {
 
     @Test
     void shouldNotAllowTransferToSameWallet() {
-        UUID wallet = testDataHelper.createWallet(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
 
         assertThatThrownBy(() ->
                 transferFundsUseCase.execute(wallet, wallet, BigDecimal.TEN, UUID.randomUUID())
@@ -94,8 +110,8 @@ class TransferFundsIT extends IntegrationTestBase {
     @Test
     void shouldInsertOutboxEventOnTransfer() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
 
         UUID opId = UUID.randomUUID();
 
@@ -110,8 +126,8 @@ class TransferFundsIT extends IntegrationTestBase {
     @Test
     void shouldNotDuplicateOutboxEventOnRetry() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute(BigDecimal.ONE);
 
         UUID opId = UUID.randomUUID();
 

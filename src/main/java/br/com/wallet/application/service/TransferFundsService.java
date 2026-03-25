@@ -83,7 +83,7 @@ public class TransferFundsService implements TransferFundsUseCase {
         }
 
         final var now = Instant.now();
-        core.applyTransaction(from, amount.negate(), LedgerType.DEBIT, operationId, now);
+        core.applyTransaction(from, amount, LedgerType.DEBIT, operationId, now);
         core.applyTransaction(to, amount, LedgerType.CREDIT, operationId, now);
 
         // 🧾 ledger entries

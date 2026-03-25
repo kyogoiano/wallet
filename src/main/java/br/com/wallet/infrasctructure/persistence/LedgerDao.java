@@ -9,6 +9,7 @@ import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -36,8 +37,7 @@ public class LedgerDao {
                     FROM ledger
                     WHERE wallet_id = ?
                     AND created_at <= ?
-                    ORDER BY created_at
-                """, BigDecimal.class, walletId, createdAt);
+                """, BigDecimal.class, walletId, createdAt.atOffset(ZoneOffset.UTC));
     }
 
     /**
@@ -85,7 +85,7 @@ public class LedgerDao {
                 amount,
                 ledgerType.name(),
                 operationId,
-                now,
+                now.atOffset(ZoneOffset.UTC),
                 nextSequence,
                 hashInput,
                 prevHash

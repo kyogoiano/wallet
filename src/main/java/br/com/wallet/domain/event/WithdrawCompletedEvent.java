@@ -1,12 +1,14 @@
 package br.com.wallet.domain.event;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
+
 import java.math.BigDecimal;
 import java.util.UUID;
 
 public record WithdrawCompletedEvent(
-        UUID walletId,
-        BigDecimal amount,
-        UUID operationId
+        @JsonProperty(value = "walletId", required = true) UUID walletId,
+        @JsonProperty(value = "amount", required = true) BigDecimal amount,
+        @JsonProperty(value = "operationId", required = true) UUID operationId
 ) implements DomainEvent {
 
     @Override

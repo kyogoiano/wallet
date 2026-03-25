@@ -1,11 +1,16 @@
 package br.com.wallet.integration.wallet;
 
 import br.com.wallet.application.usecase.BalanceUseCase;
+import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -13,7 +18,9 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class BalanceIT extends IntegrationTestBase {
+@SpringBootTest
+@Import(IntegrationTestBase.class)
+class BalanceIT {
 
     @Autowired
     BalanceUseCase balanceUseCase;
@@ -24,10 +31,24 @@ class BalanceIT extends IntegrationTestBase {
     @Autowired
     TestDataHelper testDataHelper;
 
+    @Autowired
+    CreateWalletUseCase createWalletUseCase;
+
+    @Autowired
+    JdbcTemplate jdbc;
+
+    @BeforeEach
+    void cleanDatabase() {
+        jdbc.execute("DELETE FROM ledger");
+        jdbc.execute("DELETE FROM accounts");
+        jdbc.execute("DELETE FROM outbox");
+        jdbc.execute("DELETE FROM wallet_operations");
+    }
+
     @Test
     void shouldReturnCurrentBalance() {
 
-        UUID wallet = testDataHelper.createWallet(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -37,8 +58,8 @@ class BalanceIT extends IntegrationTestBase {
     @Test
     void shouldReturnUpdatedBalanceAfterTransfer() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(from, to,
                 new BigDecimal("40"), UUID.randomUUID());
@@ -53,8 +74,8 @@ class BalanceIT extends IntegrationTestBase {
     @Test
     void shouldReturnHistoricalBalance() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
 
         Instant before = Instant.now();
 
@@ -75,8 +96,8 @@ class BalanceIT extends IntegrationTestBase {
     @Test
     void shouldCalculateHistoricalBalanceWithMultipleTransactions() {
 
-        UUID wallet = testDataHelper.createWallet(new BigDecimal("200"));
-        UUID other = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"));
+        UUID other = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(wallet, other,
                 new BigDecimal("50"), UUID.randomUUID());
@@ -94,7 +115,7 @@ class BalanceIT extends IntegrationTestBase {
     @Test
     void shouldReturnZeroWhenNoTransactions() {
 
-        UUID wallet = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID wallet = createWalletUseCase.execute();
 
         var result = balanceUseCase.getHistoricalBalance(wallet, Instant.now());
 

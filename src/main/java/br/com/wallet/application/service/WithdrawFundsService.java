@@ -61,7 +61,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
         }
 
         final var now = Instant.now();
-        core.applyTransaction(walletId, amount.negate(), LedgerType.DEBIT, operationId, now);
+        core.applyTransaction(walletId, amount, LedgerType.DEBIT, operationId, now);
         outboxDao.save(
                 new WithdrawCompletedEvent(walletId, amount, operationId)
         );

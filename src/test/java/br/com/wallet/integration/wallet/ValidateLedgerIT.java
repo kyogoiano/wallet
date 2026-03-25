@@ -1,5 +1,6 @@
 package br.com.wallet.integration.wallet;
 
+import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.application.usecase.ValidateLedgerUseCase;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
@@ -25,6 +26,9 @@ class ValidateLedgerIT {
 
     @Autowired
     TransferFundsUseCase transferFundsUseCase;
+
+    @Autowired
+    CreateWalletUseCase createWalletUseCase;
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -53,8 +57,8 @@ class ValidateLedgerIT {
     @MethodSource("transferScenarios")
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
 
-        UUID from = testDataHelper.createWallet(scenario.initialFrom());
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(scenario.initialFrom());
+        UUID to = createWalletUseCase.execute();
 
         // simulate transactions
         transferFundsUseCase.execute(from, to, scenario.transferAmount(), UUID.randomUUID());
@@ -76,8 +80,8 @@ class ValidateLedgerIT {
     @Test
     void shouldValidateLedgerAfterMultipleTransfers() {
 
-        UUID from = testDataHelper.createWallet(new BigDecimal("300"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID from = createWalletUseCase.execute(new BigDecimal("300"));
+        UUID to = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(from, to, new BigDecimal("50"), UUID.randomUUID());
         transferFundsUseCase.execute(from, to, new BigDecimal("100"), UUID.randomUUID());
@@ -96,9 +100,9 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectTamperedLedger() {
 
-        UUID wallet = testDataHelper.createWallet(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
 
-        transferFundsUseCase.execute(wallet, testDataHelper.createWallet(BigDecimal.ZERO),
+        transferFundsUseCase.execute(wallet, createWalletUseCase.execute(BigDecimal.ZERO),
                 new BigDecimal("50"), UUID.randomUUID());
 
         // 💥 fraud
@@ -113,8 +117,8 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectBrokenSequence() {
 
-        UUID wallet = testDataHelper.createWallet(new BigDecimal("100"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(wallet, to,
                 new BigDecimal("50"), UUID.randomUUID());
@@ -135,8 +139,8 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectBrokenHashChain() {
 
-        UUID wallet = testDataHelper.createWallet(new BigDecimal("200"));
-        UUID to = testDataHelper.createWallet(BigDecimal.ZERO);
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"));
+        UUID to = createWalletUseCase.execute();
 
 
         transferFundsUseCase.execute(wallet, to,

@@ -3,10 +3,13 @@ package br.com.wallet.integration.wallet;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.math.BigDecimal;
@@ -15,7 +18,9 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-class CreateWalletIT extends IntegrationTestBase {
+@SpringBootTest
+@Import(IntegrationTestBase.class)
+class CreateWalletIT {
 
     @Autowired
     JdbcTemplate jdbc;
@@ -26,10 +31,17 @@ class CreateWalletIT extends IntegrationTestBase {
     @Autowired
     CreateWalletUseCase createWalletUseCase;
 
+    @BeforeEach
+    void cleanDatabase() {
+        jdbc.execute("DELETE FROM ledger");
+        jdbc.execute("DELETE FROM accounts");
+        jdbc.execute("DELETE FROM outbox");
+        jdbc.execute("DELETE FROM wallet_operations");
+    }
 
     static Stream<BigDecimal> initialBalances() {
         return Stream.of(
-                BigDecimal.ZERO,
+                BigDecimal.ONE,
                 new BigDecimal("10.00"),
                 new BigDecimal("999999.99")
         );

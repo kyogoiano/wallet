@@ -16,15 +16,6 @@ public class TestDataHelper {
     @Autowired
     JdbcTemplate jdbc;
 
-    public UUID createWallet(BigDecimal balance) {
-        UUID id = UUID.randomUUID();
-        jdbc.update("""
-            INSERT INTO accounts (id, balance, version)
-            VALUES (?, ?, 0)
-        """, id, balance);
-        return id;
-    }
-
 
     public void assertBalance(UUID walletId, BigDecimal expected) {
         BigDecimal balance = jdbc.queryForObject("""
@@ -116,9 +107,17 @@ public class TestDataHelper {
         return jdbc.queryForObject("""
             SELECT id
             FROM outbox
-            WHERE operation_id = ?
+            WHERE aggregate_id = ?
             ORDER BY created_at DESC
             LIMIT 1
         """, UUID.class, operationId);
+    }
+
+    public void forceRetryNow(UUID eventId) {
+        jdbc.update("""
+        UPDATE outbox
+        SET next_retry_at = NOW()
+        WHERE id = ?
+    """, eventId);
     }
 }

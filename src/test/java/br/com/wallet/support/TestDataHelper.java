@@ -1,5 +1,7 @@
 package br.com.wallet.support;
 
+import br.com.wallet.domain.LedgerEntry;
+import br.com.wallet.domain.LedgerType;
 import br.com.wallet.infrasctructure.outbox.OutboxStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -7,6 +9,7 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
@@ -55,13 +58,14 @@ public class TestDataHelper {
         """, newSequence, walletId, originalSequence);
     }
 
-    public void tamperPreviousHash(UUID walletId, long sequence, String fakeHash) {
+    public void tamperPreviousHash(UUID walletId, long sequence, String fakeHash, UUID opId) {
         jdbc.update("""
             UPDATE ledger
             SET previous_hash = ?
             WHERE wallet_id = ?
             AND sequence = ?
-        """, fakeHash, walletId, sequence);
+            AND operation_id = ?
+        """, fakeHash, walletId, sequence, opId);
     }
 
     public Integer countProcessedOutbox(UUID operationId) {
@@ -119,5 +123,44 @@ public class TestDataHelper {
         SET next_retry_at = NOW()
         WHERE id = ?
     """, eventId);
+    }
+
+    public List<LedgerEntry> getLedgerEntries(UUID walletId) {
+        return jdbc.query("""
+            SELECT wallet_id, amount, type, operation_id,
+                   sequence, hash, previous_hash, created_at
+            FROM ledger
+            WHERE wallet_id = ?
+            ORDER BY sequence ASC
+        """, (rs, rowNum) -> new LedgerEntry(
+                UUID.fromString(rs.getString("wallet_id")),
+                rs.getBigDecimal("amount"),
+                LedgerType.valueOf(rs.getString("type")),
+                UUID.fromString(rs.getString("operation_id")),
+                rs.getLong("sequence"),
+                rs.getString("hash"),
+                rs.getString("previous_hash"),
+                rs.getTimestamp("created_at").toInstant()
+        ), walletId);
+    }
+
+    public void tamperAmount(UUID walletId, Long sequence, BigDecimal amount, UUID opId) {
+        jdbc.update("""
+            UPDATE ledger
+            SET amount = ?
+            WHERE wallet_id = ?
+            AND sequence = ?
+            AND operation_id = ?
+        """, amount, walletId, sequence, opId);
+    }
+
+    public Long getOutboxEventsByOperation(UUID opId) {
+        return jdbc.queryForObject("""
+            SELECT  COUNT(aggregate_id)
+            FROM outbox
+            WHERE aggregate_id = ?
+            GROUP BY aggregate_id, created_at
+            ORDER BY created_at DESC
+        """, Long.class, opId);
     }
 }

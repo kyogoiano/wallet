@@ -3,6 +3,8 @@ package br.com.wallet.integration.wallet;
 import br.com.wallet.application.usecase.BalanceUseCase;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
+import br.com.wallet.application.usecase.WithdrawFundsUseCase;
+import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -15,6 +17,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -29,20 +33,20 @@ class BalanceIT {
     TransferFundsUseCase transferFundsUseCase;
 
     @Autowired
-    TestDataHelper testDataHelper;
-
-    @Autowired
     CreateWalletUseCase createWalletUseCase;
 
     @Autowired
-    JdbcTemplate jdbc;
+    WithdrawFundsUseCase withdrawFundsUseCase;
+
+    @Autowired
+    TestDataHelper testDataHelper;
+
+    @Autowired
+    DatabaseCleaner cleaner;
 
     @BeforeEach
-    void cleanDatabase() {
-        jdbc.execute("DELETE FROM ledger");
-        jdbc.execute("DELETE FROM accounts");
-        jdbc.execute("DELETE FROM outbox");
-        jdbc.execute("DELETE FROM wallet_operations");
+    void setup() {
+        cleaner.clean();
     }
 
     @Test
@@ -56,7 +60,7 @@ class BalanceIT {
     }
 
     @Test
-    void shouldReturnUpdatedBalanceAfterTransfer() {
+    void shouldDecreaseSourceBalanceAndIncreaseTargetBalanceAfterTransfer() {
 
         UUID from = createWalletUseCase.execute(new BigDecimal("100"));
         UUID to = createWalletUseCase.execute();
@@ -121,4 +125,48 @@ class BalanceIT {
 
         assertThat(result).isEqualByComparingTo("0");
     }
+
+    /**
+     * Idempotence test
+     * NOTE - when we create a wallet we create a deposit operation
+     */
+    @Test
+    void shouldNotApplySameOperationTwice() {
+
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID opId = UUID.randomUUID();
+
+        withdrawFundsUseCase.execute(wallet, new BigDecimal("30"), opId);
+        withdrawFundsUseCase.execute(wallet, new BigDecimal("30"), opId);
+
+        var balance = balanceUseCase.getBalance(wallet);
+
+        assertThat(balance).isEqualByComparingTo("70");
+
+        var ledgerEntries = testDataHelper.getLedgerEntries(wallet);
+        assertThat(ledgerEntries).hasSize(2);
+    }
+
+    @Test
+    void shouldHandleConcurrentWithdrawalsSafely() throws Exception {
+
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+
+        try (final var executor = Executors.newFixedThreadPool(2)) {
+
+            var op1 = UUID.randomUUID();
+            var op2 = UUID.randomUUID();
+
+            executor.submit(() -> withdrawFundsUseCase.execute(wallet, new BigDecimal("80"), op1));
+            executor.submit(() -> withdrawFundsUseCase.execute(wallet, new BigDecimal("80"), op2));
+
+            executor.shutdown();
+            executor.awaitTermination(3, TimeUnit.SECONDS);
+        }
+
+        var balance = balanceUseCase.getBalance(wallet);
+
+        assertThat(balance.compareTo(new BigDecimal(20))).isEqualTo(0);
+    }
+
 }

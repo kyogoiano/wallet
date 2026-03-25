@@ -54,10 +54,10 @@ public class WalletOperationService {
 
         // hash
         final var previousHash = ledgerDao.findPreviousHash(walletId);
-        final var hashInput = HashUtils.buildLedgerHashInput(previousHash, walletId, amount, ledgerType, sequence, operationId, now);
+        final var hash = HashUtils.calculateHash(previousHash, walletId, amount, ledgerType, sequence, operationId, now);
 
         // ledger insert
-        ledgerDao.insertLedger(walletId, amount, ledgerType, operationId, sequence, hashInput, now, previousHash);
+        ledgerDao.insertLedger(walletId, amount, ledgerType, operationId, sequence, hash, now, previousHash);
         log.info("Transaction applied!");
     }
 

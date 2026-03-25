@@ -4,6 +4,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.exceptions.InsufficientFundsException;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
+import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -26,18 +27,6 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 @SpringBootTest
 @Import(IntegrationTestBase.class)
 class TransferFundsIT {
-
-    @Autowired
-    JdbcTemplate jdbc;
-
-    @Autowired
-    TestDataHelper testDataHelper;
-
-    @Autowired
-    TransferFundsUseCase transferFundsUseCase;
-
-    @Autowired
-    CreateWalletUseCase createWalletUseCase;
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -62,12 +51,21 @@ class TransferFundsIT {
         );
     }
 
+    @Autowired
+    TestDataHelper testDataHelper;
+
+    @Autowired
+    TransferFundsUseCase transferFundsUseCase;
+
+    @Autowired
+    CreateWalletUseCase createWalletUseCase;
+
+    @Autowired
+    DatabaseCleaner cleaner;
+
     @BeforeEach
-    void cleanDatabase() {
-        jdbc.execute("DELETE FROM ledger");
-        jdbc.execute("DELETE FROM accounts");
-        jdbc.execute("DELETE FROM outbox");
-        jdbc.execute("DELETE FROM wallet_operations");
+    void setup() {
+        cleaner.clean();
     }
 
     @ParameterizedTest
@@ -139,4 +137,19 @@ class TransferFundsIT {
         assertThat(count).isEqualTo(1);
     }
 
+    @Test
+    void shouldHaveStrictlyIncreasingSequence() {
+
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
+
+        transferFundsUseCase.execute(wallet, to, new BigDecimal("10"), UUID.randomUUID());
+        transferFundsUseCase.execute(wallet, to, new BigDecimal("10"), UUID.randomUUID());
+
+        var entries = testDataHelper.getLedgerEntries(wallet);
+
+        assertThat(entries.get(0).sequence()).isEqualTo(1);
+        assertThat(entries.get(1).sequence()).isEqualTo(2);
+        assertThat(entries.get(2).sequence()).isEqualTo(3);
+    }
 }

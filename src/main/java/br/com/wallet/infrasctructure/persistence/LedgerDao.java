@@ -62,7 +62,7 @@ public class LedgerDao {
      * @param ledgerType ledger operation type
      * @param operationId operation id
      * @param nextSequence next sequence
-     * @param hashInput hash input ( used to calculate hash on db)
+     * @param hash hash input ( used to calculate hash on db)
      * @param now operation instant
      * @param prevHash previous hash
      */
@@ -71,14 +71,14 @@ public class LedgerDao {
                               @NonNull final LedgerType ledgerType,
                               @NonNull final UUID operationId,
                               @NonNull final Long nextSequence,
-                              @NonNull final String hashInput,
+                              @NonNull final String hash,
                               @NonNull final Instant now,
                               @Nullable final String prevHash) {
         jdbc.update("""
                             INSERT INTO ledger (
                                 id, wallet_id, amount, type, operation_id, created_at, sequence, hash, previous_hash
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, encode(digest(?::text, 'sha512'), 'hex'), ?)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                 UUID.randomUUID(),
                 walletId,
@@ -87,7 +87,7 @@ public class LedgerDao {
                 operationId,
                 now.atOffset(ZoneOffset.UTC),
                 nextSequence,
-                hashInput,
+                hash,
                 prevHash
         );
     }

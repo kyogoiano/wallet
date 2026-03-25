@@ -4,11 +4,16 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.application.usecase.ValidateLedgerUseCase;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
+import br.com.wallet.support.DatabaseCleaner;
+import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -16,19 +21,9 @@ import java.util.stream.Stream;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
+@SpringBootTest
+@Import(IntegrationTestBase.class)
 class ValidateLedgerIT {
-
-    @Autowired
-    TestDataHelper testDataHelper;
-
-    @Autowired
-    ValidateLedgerUseCase validateLedgerUseCase;
-
-    @Autowired
-    TransferFundsUseCase transferFundsUseCase;
-
-    @Autowired
-    CreateWalletUseCase createWalletUseCase;
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -53,6 +48,27 @@ class ValidateLedgerIT {
         );
     }
 
+    @Autowired
+    TestDataHelper testDataHelper;
+
+    @Autowired
+    ValidateLedgerUseCase validateLedgerUseCase;
+
+    @Autowired
+    TransferFundsUseCase transferFundsUseCase;
+
+    @Autowired
+    CreateWalletUseCase createWalletUseCase;
+
+    @Autowired
+    DatabaseCleaner cleaner;
+
+    @BeforeEach
+    void setup() {
+        cleaner.clean();
+    }
+
+
     @ParameterizedTest
     @MethodSource("transferScenarios")
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
@@ -68,7 +84,7 @@ class ValidateLedgerIT {
 
         assertThat(fromResult.valid()).isTrue();
 
-        assertThat(fromResult.validatedEntriesSize()).isEqualTo(1);
+        assertThat(fromResult.validatedEntriesSize()).isEqualTo(2);
 
         var toResult = validateLedgerUseCase.execute(to);
 
@@ -91,7 +107,7 @@ class ValidateLedgerIT {
         var toResult = validateLedgerUseCase.execute(to);
 
         assertThat(fromResult.valid()).isTrue();
-        assertThat(fromResult.validatedEntriesSize()).isEqualTo(3);
+        assertThat(fromResult.validatedEntriesSize()).isEqualTo(4);
 
         assertThat(toResult.valid()).isTrue();
         assertThat(toResult.validatedEntriesSize()).isEqualTo(3);
@@ -102,7 +118,7 @@ class ValidateLedgerIT {
 
         UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
 
-        transferFundsUseCase.execute(wallet, createWalletUseCase.execute(BigDecimal.ZERO),
+        transferFundsUseCase.execute(wallet, createWalletUseCase.execute(),
                 new BigDecimal("50"), UUID.randomUUID());
 
         // 💥 fraud
@@ -135,26 +151,51 @@ class ValidateLedgerIT {
     /**
      * Two operations were used to simulate a real chain of hashes,
      * after that broke hash chain
+     * sequence	operation	type	impact
+     * 1	    op1	        DEBIT	-50
+     * 2	    op2	        DEBIT	-50
+     * (TODO: better filter by ledge on tampering)
      */
     @Test
     void shouldDetectBrokenHashChain() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"));
+        UUID fromWallet = createWalletUseCase.execute(new BigDecimal("200"));
+        UUID toWallet = createWalletUseCase.execute();
+
+        var opId1 = UUID.randomUUID();
+        transferFundsUseCase.execute(fromWallet, toWallet,
+                new BigDecimal("50"), opId1);
+
+        var opId2 = UUID.randomUUID();
+        transferFundsUseCase.execute(fromWallet, toWallet,
+                new BigDecimal("50"), opId2);
+
+        // 💥 broke chaining (second entry) -- on the credit operation for opId1
+        testDataHelper.tamperPreviousHash(fromWallet, 2L, "fake_hash", opId1);
+
+        var result = validateLedgerUseCase.execute(fromWallet);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.error()).contains("Broken chain");
+    }
+
+    /**
+     * Note: As creation is at sequence 2 is for opId, as sequence 1 is for initial amount deposit
+     */
+    @Test
+    void shouldDetectTamperedAmount() {
+
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
         UUID to = createWalletUseCase.execute();
-
-
+        UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("50"), UUID.randomUUID());
+                new BigDecimal("50"), opId);
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("50"), UUID.randomUUID());
-
-        // 💥 broke chaining (second entry)
-        testDataHelper.tamperPreviousHash(wallet, 2L, "fake_hash");
+        testDataHelper.tamperAmount(wallet, 2L, new BigDecimal("999"), opId);
 
         var result = validateLedgerUseCase.execute(wallet);
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.error()).contains("Broken chain");
+        assertThat(result.error()).contains("Invalid hash");
     }
 }

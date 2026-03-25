@@ -26,16 +26,6 @@ public class ValidateLedgerService implements ValidateLedgerUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(ValidateLedgerService.class);
 
-    private static final MessageDigest digest;
-
-    static {
-        try {
-            digest = MessageDigest.getInstance("SHA-512");
-        } catch (NoSuchAlgorithmException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     private final JdbcTemplate jdbc;
 
     /**
@@ -51,21 +41,6 @@ public class ValidateLedgerService implements ValidateLedgerUseCase {
     @Override
     public LedgerValidationResult execute(@NonNull final UUID walletId) {
         return  this.validLedgerEntries(walletId);
-    }
-
-    private String calculateHash(
-            @Nullable String previousHash,
-            @NonNull UUID walletId,
-            @NonNull BigDecimal amount,
-            @NonNull LedgerType ledgerType,
-            @NonNull Long sequence,
-            @NonNull UUID operationId,
-            @NonNull Instant createdAt
-    ) {
-        final var hashInput = HashUtils.buildLedgerHashInput(previousHash, walletId, amount, ledgerType, sequence, operationId, createdAt);
-
-        final byte[] hashBytes = digest.digest(hashInput.getBytes(StandardCharsets.UTF_8));
-        return HexFormat.of().formatHex(hashBytes);
     }
 
     /**
@@ -115,8 +90,8 @@ public class ValidateLedgerService implements ValidateLedgerUseCase {
                 }
 
                 // 🔐 recompute hash
-                final var recomputed = this.calculateHash(
-                        actualPrev,
+                final var recomputed = HashUtils.calculateHash(
+                        expectedPrev,
                         walletId,
                         amount,
                         ledgerType,

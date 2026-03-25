@@ -1,6 +1,7 @@
 package br.com.wallet.integration.wallet;
 
 import br.com.wallet.application.usecase.CreateWalletUseCase;
+import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,12 +32,12 @@ class CreateWalletIT {
     @Autowired
     CreateWalletUseCase createWalletUseCase;
 
+    @Autowired
+    DatabaseCleaner cleaner;
+
     @BeforeEach
-    void cleanDatabase() {
-        jdbc.execute("DELETE FROM ledger");
-        jdbc.execute("DELETE FROM accounts");
-        jdbc.execute("DELETE FROM outbox");
-        jdbc.execute("DELETE FROM wallet_operations");
+    void setup() {
+        cleaner.clean();
     }
 
     static Stream<BigDecimal> initialBalances() {

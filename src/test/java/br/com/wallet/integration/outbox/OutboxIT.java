@@ -5,6 +5,7 @@ import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.infrasctructure.outbox.OutboxRelay;
 import br.com.wallet.infrasctructure.outbox.OutboxStatus;
 import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
+import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
@@ -50,14 +51,12 @@ class OutboxIT {
     CreateWalletUseCase createWalletUseCase;
 
     @Autowired
-    JdbcTemplate jdbc;
+    DatabaseCleaner cleaner;
 
     @BeforeEach
-    void cleanDatabase() {
-        jdbc.execute("DELETE FROM ledger");
-        jdbc.execute("DELETE FROM accounts");
-        jdbc.execute("DELETE FROM outbox");
-        jdbc.execute("DELETE FROM wallet_operations");
+    void setup() {
+        cleaner.clean();
+        failingEventPublisher.failNext(0);
     }
 
     @Test
@@ -75,7 +74,7 @@ class OutboxIT {
         UUID eventId = testDataHelper.getOutboxIdByOperation(opId);
 
         assertThat(eventId).isNotNull();
-        assertThat(testDataHelper.getStatus(eventId)).isEqualTo("PROCESSED");
+        assertThat(testDataHelper.getStatus(eventId)).isEqualTo(OutboxStatus.PROCESSED);
     }
 
     /**
@@ -97,7 +96,7 @@ class OutboxIT {
 
         UUID failedId = testDataHelper.getOutboxIdByOperation(opId);
 
-        assertThat(testDataHelper.getStatus(failedId)).isEqualTo("FAILED");
+        assertThat(testDataHelper.getStatus(failedId)).isEqualTo(OutboxStatus.FAILED);
         assertThat(testDataHelper.getRetryCount(failedId)).isEqualTo(1);
     }
 
@@ -209,5 +208,21 @@ class OutboxIT {
 
         // still failed as retry didn't happen on time
         assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(1);
+    }
+
+    @Test
+    void shouldNotDuplicateOutboxEventsForSameOperation() {
+
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID to = createWalletUseCase.execute();
+
+        UUID opId = UUID.randomUUID();
+
+        transferFundsUseCase.execute(from, to, new BigDecimal("50"), opId);
+        transferFundsUseCase.execute(from, to, new BigDecimal("50"), opId);
+
+        var events = testDataHelper.getOutboxEventsByOperation(opId);
+
+        assertThat(events).isEqualTo(1L);
     }
 }

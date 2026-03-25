@@ -331,6 +331,7 @@ Kafka integration can be added later without changing business logic.
 * Multi-currency support
 * Ledger hash chaining (tamper-proof audit)
 * Rate limiting / compliance rules
+* Build tuning (gradle configuration caching) 
 
 ---
 

@@ -5,6 +5,14 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.math.BigDecimal;
 import java.util.UUID;
 
+/**
+ * Transfer funds completed event
+ * Jackson is useful here to validate event contracts
+ * @param from
+ * @param to
+ * @param amount
+ * @param operationId
+ */
 public record TransferCompletedEvent(
         @JsonProperty(value = "from", required = true) UUID from,
         @JsonProperty(value = "to", required = true) UUID to,
@@ -28,7 +36,7 @@ public record TransferCompletedEvent(
     }
 
     /**
-     * Partition by source wallet to ensure debit ordering.
+     * Partition by source wallet (from) to ensure debit ordering.
      * Credit side may arrive out of order (acceptable trade-off).
      * But dual events will increase complexity
      */

@@ -3,21 +3,13 @@ package br.com.wallet.application.service;
 import br.com.wallet.application.usecase.ValidateLedgerUseCase;
 import br.com.wallet.domain.LedgerType;
 import br.com.wallet.domain.LedgerValidationResult;
-import br.com.wallet.infrasctructure.persistence.LedgerDao;
 import br.com.wallet.util.HashUtils;
 import org.jspecify.annotations.NonNull;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
-import java.time.Instant;
-import java.util.HexFormat;
 import java.util.Objects;
 import java.util.UUID;
 

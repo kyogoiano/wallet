@@ -5,6 +5,6 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 public interface CreateWalletUseCase {
+    UUID execute(BigDecimal initialBalance, UUID operationId);
     UUID execute();
-    UUID execute(BigDecimal initialBalance);
 }

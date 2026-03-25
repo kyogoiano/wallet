@@ -73,7 +73,7 @@ class ValidateLedgerIT {
     @MethodSource("transferScenarios")
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
 
-        UUID from = createWalletUseCase.execute(scenario.initialFrom());
+        UUID from = createWalletUseCase.execute(scenario.initialFrom(), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         // simulate transactions
@@ -96,7 +96,7 @@ class ValidateLedgerIT {
     @Test
     void shouldValidateLedgerAfterMultipleTransfers() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("300"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("300"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(from, to, new BigDecimal("50"), UUID.randomUUID());
@@ -116,7 +116,7 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectTamperedLedger() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
 
         transferFundsUseCase.execute(wallet, createWalletUseCase.execute(),
                 new BigDecimal("50"), UUID.randomUUID());
@@ -133,7 +133,7 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectBrokenSequence() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(wallet, to,
@@ -159,7 +159,7 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectBrokenHashChain() {
 
-        UUID fromWallet = createWalletUseCase.execute(new BigDecimal("200"));
+        UUID fromWallet = createWalletUseCase.execute(new BigDecimal("200"), UUID.randomUUID());
         UUID toWallet = createWalletUseCase.execute();
 
         var opId1 = UUID.randomUUID();
@@ -185,7 +185,7 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectTamperedAmount() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(wallet, to,

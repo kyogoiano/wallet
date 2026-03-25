@@ -40,7 +40,7 @@ public class WithdrawFundsIT {
     void shouldWithdrawFundsAndUpdateBalance() {
         // given
         BigDecimal initialBalance = new BigDecimal("100.00");
-        UUID walletId = createWalletUseCase.execute(initialBalance);
+        UUID walletId = createWalletUseCase.execute(initialBalance, UUID.randomUUID());
         BigDecimal withdrawAmount = new BigDecimal("30.00");
         UUID operationId = UUID.randomUUID();
 
@@ -54,7 +54,7 @@ public class WithdrawFundsIT {
     @Test
     void shouldFailWhenInsufficientFunds() {
         // given
-        UUID walletId = createWalletUseCase.execute(BigDecimal.TEN);
+        UUID walletId = createWalletUseCase.execute(BigDecimal.TEN, UUID.randomUUID());
         BigDecimal withdrawAmount = new BigDecimal("50.00");
 
         // when / then
@@ -66,7 +66,7 @@ public class WithdrawFundsIT {
     @Test
     void shouldBeIdempotentWhenSameOperationIdIsUsed() {
         // given
-        UUID walletId = createWalletUseCase.execute(new BigDecimal("100.00"));
+        UUID walletId = createWalletUseCase.execute(new BigDecimal("100.00"), UUID.randomUUID());
         BigDecimal withdrawAmount = new BigDecimal("40");
         UUID operationId = UUID.randomUUID();
 

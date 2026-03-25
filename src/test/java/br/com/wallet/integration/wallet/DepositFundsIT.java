@@ -60,7 +60,7 @@ public class DepositFundsIT {
     @Test
     void shouldBeIdempotentWhenSameOperationIdIsUsed() {
         // given
-        UUID walletId = createWalletUseCase.execute(BigDecimal.TEN);
+        UUID walletId = createWalletUseCase.execute(BigDecimal.TEN, UUID.randomUUID());
         BigDecimal depositAmount = new BigDecimal("50.00");
         UUID operationId = UUID.randomUUID();
 

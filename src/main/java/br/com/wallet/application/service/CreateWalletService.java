@@ -6,6 +6,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.domain.LedgerType;
 import br.com.wallet.infrasctructure.persistence.AccountDao;
 import jakarta.annotation.Nonnull;
+import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Service;
 
 import java.math.BigDecimal;
@@ -43,7 +44,7 @@ public class CreateWalletService implements CreateWalletUseCase {
      * @return return wallet id
      */
     @Override
-    public UUID execute(@Nonnull final BigDecimal initialBalance) {
+    public UUID execute(@NonNull final BigDecimal initialBalance, @Nonnull final UUID operationId) {
         final UUID walletId = UUID.randomUUID();
 
         accountDao.insertAccount(walletId);
@@ -52,7 +53,7 @@ public class CreateWalletService implements CreateWalletUseCase {
                 walletId,
                 initialBalance,
                 LedgerType.CREDIT,
-                UUID.randomUUID(),
+                operationId,
                 clock.instant()
         );
 

@@ -94,19 +94,22 @@ public class LedgerDao {
 
 
     /**
-     * Get ledger entries from a wallet
-     * This is an O(n) CPU+Memory operation, I kept it here as an old example since I refactored it for performance direct on the service
+     * Get all ledger entries from a wallet
+     * Notice: This is an O(n) CPU+Memory operation, I kept it here as a back-office operation
+     * since I refactored it for performance direct on the validate ledger service
+     *
      * @param walletId wallet id
+     * @param limit entries limit
      * @return ledger entries
      */
-    @Deprecated()
-    public @NonNull List<LedgerEntry> getLedgerEntries(@NonNull UUID walletId) {
+    public @NonNull List<LedgerEntry> getLedgerEntries(@NonNull UUID walletId, @NonNull Integer limit) {
         return jdbc.query("""
             SELECT wallet_id, amount, type, operation_id,
                    sequence, hash, previous_hash, created_at
             FROM ledger
             WHERE wallet_id = ?
             ORDER BY sequence ASC
+            LIMIT ?
         """, (rs, rowNum) -> new LedgerEntry(
                 UUID.fromString(rs.getString("wallet_id")),
                 rs.getBigDecimal("amount"),
@@ -116,7 +119,7 @@ public class LedgerDao {
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
                 rs.getTimestamp("created_at").toInstant()
-        ), walletId);
+        ), walletId, limit);
     }
 
     public @Nullable Long validateSequenceContinuity(@NonNull UUID walletId) {

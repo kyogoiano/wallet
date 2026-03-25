@@ -61,7 +61,7 @@ class OutboxIT {
     @Test
     void shouldProcessOutboxEvents() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
 
@@ -82,7 +82,7 @@ class OutboxIT {
     @Test
     void shouldNotMarkEventAsProcessedOnFailure() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to,
@@ -102,7 +102,7 @@ class OutboxIT {
     @Test
     void shouldRetryProcessingLater() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         UUID opId = UUID.randomUUID();
@@ -134,7 +134,7 @@ class OutboxIT {
     @Test
     void shouldHandleInvalidPayloadGracefully() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to,
@@ -153,7 +153,7 @@ class OutboxIT {
     @Test
     void shouldNotReprocessAlreadyProcessedEvent() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to,
@@ -170,7 +170,7 @@ class OutboxIT {
     @Test
     void shouldStopRetryingAfterMaxAttempts() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.execute(from, to, new BigDecimal("50"), opId);
@@ -191,7 +191,7 @@ class OutboxIT {
     @Test
     void shouldNotProcessBeforeRetryTime() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
 
@@ -212,7 +212,7 @@ class OutboxIT {
     @Test
     void shouldNotDuplicateOutboxEventsForSameOperation() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         UUID opId = UUID.randomUUID();

@@ -51,7 +51,7 @@ class BalanceIT {
     @Test
     void shouldReturnCurrentBalance() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -61,7 +61,7 @@ class BalanceIT {
     @Test
     void shouldDecreaseSourceBalanceAndIncreaseTargetBalanceAfterTransfer() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(from, to,
@@ -77,7 +77,7 @@ class BalanceIT {
     @Test
     void shouldReturnHistoricalBalance() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         Instant before = Instant.now();
@@ -99,7 +99,7 @@ class BalanceIT {
     @Test
     void shouldCalculateHistoricalBalanceWithMultipleTransactions() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"), UUID.randomUUID());
         UUID other = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(wallet, other,
@@ -132,7 +132,7 @@ class BalanceIT {
     @Test
     void shouldNotApplySameOperationTwice() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID opId = UUID.randomUUID();
 
         withdrawFundsUseCase.execute(wallet, new BigDecimal("30"), opId);
@@ -149,7 +149,7 @@ class BalanceIT {
     @Test
     void shouldHandleConcurrentWithdrawalsSafely() throws Exception {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
 
         try (final var executor = Executors.newFixedThreadPool(2)) {
 

@@ -29,6 +29,8 @@ The architecture follows a **clean and pragmatic approach**, combining:
 * **Immutability for auditability**
 * **Event-driven ready (without runtime complexity)**
 * **Cross-cutting concerns via AOP (lower boilerplate and observability standards)**
+* **API Contract as Interface**
+* **Stripe style idempotent requests**
 
 ## 🧩 Design Principles
 
@@ -332,6 +334,9 @@ Kafka integration can be added later without changing business logic.
 * Ledger hash chaining (tamper-proof audit)
 * Rate limiting / compliance rules
 * Build tuning (gradle configuration caching) 
+* Fine graining exceptions (also improving exception handling)
+* Improve stripe style (tracked replies)
+* Include security
 
 ---
 

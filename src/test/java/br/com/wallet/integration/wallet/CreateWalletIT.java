@@ -83,7 +83,7 @@ class CreateWalletIT {
     @ParameterizedTest
     @MethodSource("initialBalances")
     void shouldCreateWalletWithGivenInitialBalance(BigDecimal initialBalance) {
-        var walletId = createWalletUseCase.execute(initialBalance);
+        var walletId = createWalletUseCase.execute(initialBalance, UUID.randomUUID());
 
         testDataHelper.assertBalance(walletId, initialBalance);
     }

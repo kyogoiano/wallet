@@ -1,6 +1,9 @@
 spring:
   application:
     name: wallet
+  threads:
+    virtual:
+      enabled: true
 management:
   tracing:
     sampling:

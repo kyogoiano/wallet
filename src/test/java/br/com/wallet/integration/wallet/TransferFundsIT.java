@@ -72,7 +72,7 @@ class TransferFundsIT {
     void shouldTransferFundsAndUpdateBothBalances(
             TransferScenario scenario) {
         // given
-        UUID from = createWalletUseCase.execute(scenario.initialFrom());
+        UUID from = createWalletUseCase.execute(scenario.initialFrom(), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         // when
@@ -86,7 +86,7 @@ class TransferFundsIT {
     @Test
     void shouldFailWhenInsufficientBalance() {
         // given
-        UUID from = createWalletUseCase.execute(BigDecimal.TEN);
+        UUID from = createWalletUseCase.execute(BigDecimal.TEN, UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         // when / then
@@ -97,7 +97,7 @@ class TransferFundsIT {
 
     @Test
     void shouldNotAllowTransferToSameWallet() {
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
 
         assertThatThrownBy(() ->
                 transferFundsUseCase.execute(wallet, wallet, BigDecimal.TEN, UUID.randomUUID())
@@ -107,7 +107,7 @@ class TransferFundsIT {
     @Test
     void shouldInsertOutboxEventOnTransfer() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         UUID opId = UUID.randomUUID();
@@ -123,8 +123,8 @@ class TransferFundsIT {
     @Test
     void shouldNotDuplicateOutboxEventOnRetry() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"));
-        UUID to = createWalletUseCase.execute(BigDecimal.ONE);
+        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID to = createWalletUseCase.execute(BigDecimal.ONE, UUID.randomUUID());
 
         UUID opId = UUID.randomUUID();
 
@@ -139,7 +139,7 @@ class TransferFundsIT {
     @Test
     void shouldHaveStrictlyIncreasingSequence() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"));
+        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
         UUID to = createWalletUseCase.execute();
 
         transferFundsUseCase.execute(wallet, to, new BigDecimal("10"), UUID.randomUUID());

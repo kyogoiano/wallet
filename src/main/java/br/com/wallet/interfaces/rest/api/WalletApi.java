@@ -56,4 +56,12 @@ public interface WalletApi {
     ResponseEntity<List<LedgerEntryResponse>> getLedger(
             UUID walletId, Integer limit
     );
+
+    @Operation(summary = "Replay wallet balance")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Success"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "404", description = "Wallet not found")
+    })
+    BalanceResponse replay(UUID walletId);
 }

@@ -3,13 +3,14 @@ package br.com.wallet.interfaces.rest.controller;
 import br.com.wallet.application.usecase.BalanceUseCase;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.LedgerUseCase;
+import br.com.wallet.application.usecase.ReplayWalletUseCase;
 import br.com.wallet.interfaces.rest.api.WalletApi;
 import br.com.wallet.interfaces.rest.dto.BalanceResponse;
 import br.com.wallet.interfaces.rest.dto.CreateWalletCommand;
 import br.com.wallet.interfaces.rest.dto.CreateWalletResponse;
 import br.com.wallet.interfaces.rest.dto.LedgerEntryResponse;
 import br.com.wallet.interfaces.rest.mapper.LedgerMapper;
-import jakarta.validation.constraints.NotNull;
+import jakarta.validation.Valid;
 import org.jspecify.annotations.NonNull;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,17 +29,19 @@ public class WalletController implements WalletApi {
     private final BalanceUseCase balanceUseCase;
     private final CreateWalletUseCase createWalletUseCase;
     private final LedgerUseCase ledgerUseCase;
+    private final ReplayWalletUseCase replayWalletUseCase;
 
     public WalletController(final BalanceUseCase balanceUseCase,
-                            final CreateWalletUseCase createWalletUseCase, LedgerUseCase ledgerUseCase) {
+                            final CreateWalletUseCase createWalletUseCase, LedgerUseCase ledgerUseCase, ReplayWalletUseCase replayWalletUseCase) {
         this.balanceUseCase = balanceUseCase;
         this.createWalletUseCase = createWalletUseCase;
         this.ledgerUseCase = ledgerUseCase;
+        this.replayWalletUseCase = replayWalletUseCase;
     }
 
     @GetMapping("/{walletId}/balance")
     @Override
-    public BalanceResponse getBalance(@PathVariable @NotNull final UUID walletId) {
+    public BalanceResponse getBalance(@PathVariable final UUID walletId) {
         return new BalanceResponse(
                 balanceUseCase.getBalance(walletId)
         );
@@ -46,9 +49,7 @@ public class WalletController implements WalletApi {
 
     @GetMapping("/{walletId}/balance/historical")
     @Override
-    public BalanceResponse getHistorical(
-            @PathVariable final UUID walletId,
-            @RequestParam final Instant at
+    public BalanceResponse getHistorical(@PathVariable final UUID walletId, @RequestParam final Instant at
     ) {
         return new BalanceResponse(
                 balanceUseCase.getHistoricalBalance(walletId, at)
@@ -65,7 +66,7 @@ public class WalletController implements WalletApi {
     @Override
     public ResponseEntity<CreateWalletResponse> createWallet(
             @RequestHeader(value = "Idempotency-Key", required = false) UUID operationId,
-            @RequestBody(required = false) CreateWalletCommand command
+            @Valid @RequestBody(required = false) CreateWalletCommand command
     ) {
         final var initialBalance = resolveInitialBalance(command);
         final var walletId = initialBalance.compareTo(BigDecimal.ZERO) > 0 && operationId != null ?
@@ -86,7 +87,7 @@ public class WalletController implements WalletApi {
     @GetMapping("/{walletId}/ledger")
     @Override
     public ResponseEntity<List<LedgerEntryResponse>> getLedger(
-            @PathVariable @NotNull UUID walletId,
+            @PathVariable UUID walletId,
             @RequestParam(defaultValue = "100") Integer limit
     ) {
 
@@ -100,6 +101,12 @@ public class WalletController implements WalletApi {
                 .toList();
 
         return ResponseEntity.of(Optional.of(entries));
+    }
+
+    @GetMapping("/{walletId}/replay")
+    @Override
+    public BalanceResponse replay(@PathVariable UUID walletId) {
+        return new BalanceResponse(replayWalletUseCase.execute(walletId));
     }
 
     /**

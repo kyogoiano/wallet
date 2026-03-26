@@ -122,6 +122,29 @@ public class LedgerDao {
         ), walletId, limit);
     }
 
+    /**
+     * Get all ledger entries from a wallet
+     * This is required only for full replays (O(n))
+     */
+    public @NonNull List<LedgerEntry> getLedgerEntries(@NonNull UUID walletId) {
+        return jdbc.query("""
+            SELECT wallet_id, amount, type, operation_id,
+                   sequence, hash, previous_hash, created_at
+            FROM ledger
+            WHERE wallet_id = ?
+            ORDER BY sequence ASC
+        """, (rs, rowNum) -> new LedgerEntry(
+                UUID.fromString(rs.getString("wallet_id")),
+                rs.getBigDecimal("amount"),
+                LedgerType.valueOf(rs.getString("type")),
+                UUID.fromString(rs.getString("operation_id")),
+                rs.getLong("sequence"),
+                rs.getString("hash"),
+                rs.getString("previous_hash"),
+                rs.getTimestamp("created_at").toInstant()
+        ), walletId);
+    }
+
     public @Nullable Long validateSequenceContinuity(@NonNull UUID walletId) {
 
         return jdbc.queryForObject("""

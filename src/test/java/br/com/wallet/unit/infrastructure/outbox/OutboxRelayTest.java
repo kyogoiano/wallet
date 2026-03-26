@@ -1,4 +1,4 @@
-package br.com.wallet.unit.outbox;
+package br.com.wallet.unit.infrastructure.outbox;
 
 import br.com.wallet.infrasctructure.messaging.EventPublisher;
 import br.com.wallet.infrasctructure.outbox.OutboxEvent;

@@ -1,4 +1,4 @@
-package br.com.wallet.unit;
+package br.com.wallet.unit.infrastructure;
 
 import br.com.wallet.domain.LedgerType;
 import br.com.wallet.util.HashUtils;

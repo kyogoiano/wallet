@@ -1,4 +1,4 @@
-package br.com.wallet.unit;
+package br.com.wallet.unit.infrastructure;
 
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import org.junit.jupiter.api.Test;

@@ -2,32 +2,52 @@
 
 ## 📌 Overview
 
-This project implements a **wallet transaction system** with strong consistency guarantees, auditability, and scalability in mind.
+This project is a **wallet service** built with **Spring Boot 4**, designed to demonstrate:
+- Strong domain modeling
+- Clean architecture principles
+- Test-Driven Development (TDD)
+- Production-oriented thinking (idempotency, auditability, resilience)
 
-The system supports:
+Supported operations:
+- Transfer between wallets
+- Deposit
+- Withdraw
+- Balance retrieval (current + historical)
+- Ledger inspection (audit/debug)
 
-* Create Wallet
-* Retrieve Current Balance
-* Retrieve Historical Balance
-* Deposit Funds
-* Withdraw Funds
-* Transfer Funds
-
-The architecture follows a **clean and pragmatic approach**, combining:
+The development follows a **clean and pragmatic approach**, combining:
 
 * **ACID transactions (PostgreSQL)**
 * **Ledger-based accounting model**
 * **Transactional Outbox pattern (event-ready)** 
 * **End-to-end traceability using OpenTelemetry**
+* **Future extensions over outbox pattern**
 ---
 
 ## 🧠 Architectural Principles
 
+The system follows **Clean Architecture principles**:
+
+```
+[ REST Controllers ]
+        ↓
+[ Use Cases / Application ]
+        ↓
+[ Domain ]
+        ↓
+[ Infrastructure (DB, Outbox, etc.) ]
+```
+### Key Design Choices
+
+- **Thin controllers** → only validation + orchestration
+- **Use cases own business flow**
+- **Domain is framework-agnostic**
+- **Explicit boundaries between layers**
 * **Ledger is the source of truth**
 * **Accounts table is a fast, consistent projection model**
 * **All financial operations are atomic**
 * **Immutability for auditability**
-* **Event-driven ready (without runtime complexity)**
+* **Outbox gives Event-driven ready extension**
 * **Cross-cutting concerns via AOP (lower boilerplate and observability standards)**
 * **API Contract as Interface**
 * **Stripe style idempotent requests**
@@ -65,15 +85,97 @@ The codebase emphasizes:
 - this improves maintainability and onboarding for new developers.
 ---
 
+
+## 🧪 Testing Strategy
+
+This project was developed using **TDD-first approach**.
+
+### Domain & Use Cases
+- Fully unit tested
+- Covers financial correctness (balances, transfers, edge cases)
+
+### Integration Tests
+- Testcontainers bootstrap with PostgreSQL runtime
+- Validate persistence, ledger, and outbox behavior
+- Ensure correctness of:
+  - Hash chain integrity
+  - Historical balance
+  - Retry mechanisms
+
+### REST Layer
+- Tested with `MockMvc`
+- Use cases mocked via Mockito (Spring Boot 4)
+
+Focus:
+- HTTP contract
+- Validation
+- Error handling
+
+---
+
+## 🔐 Ledger & Auditability
+
+The system maintains a **hash-chained ledger**, ensuring:
+
+- Tamper detection
+- Historical reconstruction
+- Auditability
+
+Each entry includes:
+- Previous hash
+- Deterministic hash input
+- Sequence ordering
+
+Validation detects:
+- Broken chains
+- Hash inconsistencies
+
+---
+
+## 🧠 Engineering Highlights
+
+- Deterministic hashing (BigDecimal normalization issue solved)
+- Ledger integrity validation
+- Retry-safe event processing
+- Isolation of business logic from frameworks
+- Realistic financial modeling
+
+## 🔁 Idempotency
+
+Operations support **idempotency via header**:
+
+```
+Idempotency-Key: <UUID>
+```
+
+Prevents:
+- Duplicate transfers
+- Double processing
+
+---
+
+## 📦 Outbox Pattern
+
+Implemented for reliability (and for future extensions):
+
+- Events stored in DB
+- Processed asynchronously
+- Retry on failure
+- Status tracking (PENDING, FAILED, PROCESSED)
+
+---
+
 ## 🔍 Observability & Traceability
 
 The system is designed with **end-to-end traceability** using OpenTelemetry.
 
 Each request (e.g. transfer, deposit) is traced across:
 
-- API layer
 - Application (use case execution)
 - Database interactions
+- DEV NOTES: "We started with debug exporter to validate telemetry flow, 
+  but in a real production system we would switch to a proper backend like Prometheus or Grafana, 
+  and carefully control metric cardinality and export frequency to avoid unnecessary overhead."
 
 ### What is traced
 
@@ -92,9 +194,9 @@ In financial systems, observability is critical for:
 
 ### Future Extensions
 
-- Distributed tracing with Kafka consumers
+- Distributed tracing with Messaging consumers
 - Correlation between API requests and emitted events
-- Integration with tools like Jaeger / Grafana Tempo
+- Integration with other tools like Jaeger / Grafana Tempo
 ---
 
 
@@ -153,7 +255,7 @@ flowchart TD
 * Stores events inside the same DB transaction
 * Never loose an event
 * Support retries!
-* Enables reliable event publishing (future Kafka/Messaging cluster integration)
+* Enables reliable event publishing (future Messaging cluster integration)
 
 ---
 
@@ -169,10 +271,11 @@ sequenceDiagram
   participant Trace as OpenTelemetry
 
   Client->>API: Transfer Request
-  API->>Trace: Start Span
+  
 
   API->>Service: execute()
-
+  Service->>Trace: Start Span
+    
   Service->>DB: BEGIN TRANSACTION
   Service->>DB: Lock Wallets (FOR UPDATE)
   Service->>DB: Update Accounts
@@ -181,11 +284,95 @@ sequenceDiagram
 
   Service->>DB: COMMIT
 
-  API->>Trace: End Span
+  Service->>Trace: End Span
   API-->>Client: Success Response
 ```
 
 ---
+## 📊 Actuator
+
+Enabled endpoints:
+
+- `/actuator/health`
+- `/actuator/info`
+- `/actuator/metrics`
+
+---
+
+## 🧱 C4 Model
+
+### Level 1 — System Context
+
+```
+[ Client ]
+    ↓
+[ Wallet Service ]
+    ↓
+[ Database ]
+```
+
+---
+
+### Level 2 — Container Diagram
+
+```
+[ REST API (Spring Boot) ]
+        ↓
+[ Application Layer (Use Cases) ]
+        ↓
+[ Domain ]
+        ↓
+[ PostgreSQL ]
+
+[ Outbox Relay ] → [ Event Publisher ]
+```
+
+---
+
+### Level 3 — Component Diagram
+
+```
+OperationsController
+    ↓
+TransferUseCase
+    ↓
+Ledger + Accounts
+
+WalletController
+    ↓
+BalanceUseCase
+```
+
+---
+
+## ⏱️ Development Time Tracking
+
+- Start with **tests and domain modeling**
+- Keep architecture **simple but scalable**
+- Optimize for **clarity, correctness, and resilience**
+
+| Phase                    | Time |
+|--------------------------|------|
+| Setup                    | 1h   |
+| Domain + Use Cases (TDD) | 5h   |
+| Ledger + Validation      | 4h   |
+| Outbox + Retry           | 4h   |
+| REST Layer               | 3h   |
+| Tests + Debugging        | 7h   |
+| Extra Features/DOC       | 2h   |
+| Docker/Telemetry         | 2h   |
+
+
+**Total:** ~28–29 hours
+
+### Notes
+
+- Prioritized **correctness over completeness**
+- Focused on **real-world failure scenarios**
+- Iterated heavily through tests
+
+---
+
 
 ## 📊 Read Flow (Queries)
 
@@ -214,15 +401,6 @@ flowchart LR
     API --> Ledger[(Ledger Table)]
     Ledger --> API
     API --> Client
-```
-
-Computed using:
-
-```sql
-SELECT SUM(amount)
-FROM ledger
-WHERE wallet_id = :walletId
-AND created_at <= :timestamp;
 ```
 
 ---
@@ -296,38 +474,12 @@ Each operation includes an `operation_id`:
 
 ---
 
-## 🧩 Why Not Event Sourcing?
-
-Event sourcing was considered but not chosen due to:
-
-* Higher operational complexity
-* Rebuild overhead
-* Steeper learning curve
-
-The **ledger-based model** provides:
-
-* sufficient auditability
-* simpler implementation
-* strong consistency
-
----
-
-## 🔌 Event-Driven Readiness
-
-The system uses the **Transactional Outbox pattern**:
-
-* Events are stored in the same DB transaction
-* Guarantees no data/event mismatch
-
-Kafka integration can be added later without changing business logic.
-
----
-
 ## 🚀 Future Improvements
 
 * Ledger Historic Balance Snapshot 
   - instead of O(n), we reduce to O(k), where k is last snapshot size (we can take periodic snapshots)
 * Ledger Incremental Validation, validate only new entries since last validation (O(1) amortized)
+* Pagination for ledger
 * Kafka integration (Outbox → Kafka relay)
 * Fraud detection consumers
 * Multi-currency support
@@ -337,27 +489,16 @@ Kafka integration can be added later without changing business logic.
 * Fine graining exceptions (also improving exception handling)
 * Improve stripe style (tracked replies)
 * Include security
+* Configure GRPC protocol for opentelemetry as default
 
 ---
 
 ## ⚙️ Tech Stack
 
-* Java 26
+* Java 25
 * Spring Boot 4
 * PostgreSQL
 * Docker (for local setup)
-
----
-
-## 🧪 Testing Strategy
-
-* Unit tests for use cases
-* Integration tests for transaction flows
-* Focus on:
-
-    * transfers
-    * concurrency
-    * balance correctness
 
 ---
 
@@ -381,3 +522,4 @@ This system prioritizes:
 * **Extensibility without overengineering**
 
 It is designed to evolve into a fully event-driven architecture while remaining simple and reliable.
+

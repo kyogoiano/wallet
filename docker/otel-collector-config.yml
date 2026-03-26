@@ -1,0 +1,31 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+
+exporters:
+  debug:
+    verbosity: basic
+
+processors:
+  filter:
+    metrics:
+      include:
+        match_type: strict
+        metric_names:
+          - http.server.requests
+          - jvm.memory.used
+  batch:
+
+service:
+  pipelines:
+    metrics:
+      receivers: [ otlp ]
+      processors: [ filter, batch ]
+      exporters: [ debug ]
+    traces:
+      receivers: [ otlp ]
+      processors: [ filter, batch ]
+      exporters: [ debug ]

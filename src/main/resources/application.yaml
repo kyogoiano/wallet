@@ -1,14 +1,39 @@
 spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/wallet
+    username: wallet
+    password: wallet
+  jpa:
+    hibernate:
+      ddl-auto: none
+  sql:
+    init:
+      mode: always
   application:
     name: wallet
   threads:
     virtual:
       enabled: true
 management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,env,loggers
+  endpoint:
+    health:
+      show-details: always
   tracing:
     sampling:
       probability: 1.0
-
   otlp:
     tracing:
-      endpoint: http://localhost:4317
+      endpoint: http://otel-collector:4318/v1/traces
+    metrics:
+      export:
+        url: http://otel-collector:4318/v1/metrics
+        step: 3m
+
+otel:
+  exporter:
+    otlp:
+      endpoint: http://otel-collector:4318

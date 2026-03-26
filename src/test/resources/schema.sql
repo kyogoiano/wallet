@@ -1,15 +1,15 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY,
     balance NUMERIC(19,2) NOT NULL CHECK (balance >= 0),
     version BIGINT NOT NULL DEFAULT 0,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_sequence BIGINT DEFAULT 0
 );
 
-ALTER TABLE accounts ADD last_sequence BIGINT DEFAULT 0;
 
 -- Ledger: source of truth
-CREATE TABLE ledger (
+CREATE TABLE IF NOT EXISTS ledger (
     id UUID PRIMARY KEY,
     wallet_id UUID NOT NULL,
     amount NUMERIC(19,2) NOT NULL,
@@ -40,20 +40,20 @@ CREATE TABLE ledger (
 );
 
 -- Indexes for performance
-CREATE INDEX idx_ledger_wallet_time
+CREATE INDEX IF NOT EXISTS idx_ledger_wallet_time
     ON ledger (wallet_id, created_at);
 
-CREATE INDEX idx_ledger_reference
+CREATE INDEX IF NOT EXISTS idx_ledger_reference
     ON ledger (reference_id);
 
-CREATE INDEX idx_ledger_prev_hash
+CREATE INDEX IF NOT EXISTS idx_ledger_prev_hash
     ON ledger (previous_hash);
 
-CREATE INDEX idx_ledger_wallet_sequence_desc
+CREATE INDEX IF NOT EXISTS idx_ledger_wallet_sequence_desc
     ON ledger (wallet_id, sequence DESC);
 
 -- Outbox for event publishing
-CREATE TABLE outbox (
+CREATE TABLE IF NOT EXISTS outbox (
     id UUID PRIMARY KEY,
     aggregate_type VARCHAR(50) NOT NULL, -- wallet operation
     aggregate_id UUID NOT NULL, -- operation id
@@ -70,15 +70,15 @@ CREATE TABLE outbox (
         CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED'))
 );
 
-CREATE INDEX idx_outbox_unprocessed
+CREATE INDEX IF NOT EXISTS idx_outbox_unprocessed
     ON outbox (processed_at)
     WHERE processed_at IS NULL;
 
-CREATE INDEX idx_outbox_ready
+CREATE INDEX IF NOT EXISTS idx_outbox_ready
     ON outbox (status, next_retry_at)
     WHERE status IN ('PENDING', 'FAILED');
 
-CREATE TABLE wallet_operations (
+CREATE TABLE IF NOT EXISTS wallet_operations (
     operation_id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -1,5 +1,6 @@
 package br.com.wallet.application.service;
 
+import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.application.usecase.LedgerUseCase;
 import br.com.wallet.domain.LedgerEntry;
 import br.com.wallet.infrasctructure.persistence.LedgerDao;
@@ -22,6 +23,7 @@ public class LedgerService implements LedgerUseCase {
         this.ledgerDao = ledgerDao;
     }
 
+    @Traceable("wallet.getLedger")
     @Override
     public List<LedgerEntry> getLedger(@NonNull UUID walletId, Integer limit) {
         log.info("Getting ledger for walletId={}", walletId);

@@ -3,11 +3,16 @@ package br.com.wallet.interfaces.rest.controller;
 import br.com.wallet.application.usecase.DepositFundsUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.application.usecase.WithdrawFundsUseCase;
+import br.com.wallet.domain.context.Deposit;
+import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.interfaces.rest.api.OperationsApi;
 import br.com.wallet.interfaces.rest.dto.DepositCommand;
 import br.com.wallet.interfaces.rest.dto.TransferCommand;
 import br.com.wallet.interfaces.rest.dto.WithdrawCommand;
 import jakarta.validation.Valid;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -17,18 +22,20 @@ import java.util.UUID;
 @RequestMapping("/operations")
 public class OperationsController implements OperationsApi {
 
-    private final TransferFundsUseCase transfer;
-    private final DepositFundsUseCase deposit;
-    private final WithdrawFundsUseCase withdraw;
+
+    private static final Logger log = LoggerFactory.getLogger(OperationsController.class);
+    private final TransferFundsUseCase transferUseCase;
+    private final DepositFundsUseCase depositUseCase;
+    private final WithdrawFundsUseCase withdrawUseCase;
 
     public OperationsController(
-            final TransferFundsUseCase transfer,
-            final DepositFundsUseCase deposit,
-            final WithdrawFundsUseCase withdraw
+            final TransferFundsUseCase transferUseCase,
+            final DepositFundsUseCase depositUseCase,
+            final WithdrawFundsUseCase withdrawUseCase
     ) {
-        this.transfer = transfer;
-        this.deposit = deposit;
-        this.withdraw = withdraw;
+        this.transferUseCase = transferUseCase;
+        this.depositUseCase = depositUseCase;
+        this.withdrawUseCase = withdrawUseCase;
     }
 
     /**
@@ -43,11 +50,11 @@ public class OperationsController implements OperationsApi {
     public void transfer(
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final TransferCommand command) {
-        transfer.execute(
-                command.from(),
-                command.to(),
-                command.amount(),
-                operationId
+        log.info("Transfer requested: from={}, to={}, amount={}",
+                command.from(), command.to(), command.amount());
+        var transfer = new Transfer(command.from(), command.to(), command.amount(), operationId);
+        transferUseCase.execute(
+                transfer
         );
     }
 
@@ -57,11 +64,8 @@ public class OperationsController implements OperationsApi {
     public void deposit(
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final DepositCommand command) {
-        deposit.execute(
-                command.walletId(),
-                command.amount(),
-                operationId
-        );
+        var deposit = new Deposit(command.walletId(), command.amount(), operationId);
+        depositUseCase.execute(deposit);
     }
 
     @PostMapping("/withdraw")
@@ -70,10 +74,7 @@ public class OperationsController implements OperationsApi {
     public void withdraw(
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final WithdrawCommand command) {
-        withdraw.execute(
-                command.walletId(),
-                command.amount(),
-                operationId
-        );
+        var withdraw = new Withdraw(command.walletId(), command.amount(), operationId);
+        withdrawUseCase.execute(withdraw);
     }
 }

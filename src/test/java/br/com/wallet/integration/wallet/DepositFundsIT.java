@@ -4,6 +4,8 @@ package br.com.wallet.integration.wallet;
 import br.com.wallet.application.usecase.BalanceUseCase;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.DepositFundsUseCase;
+import br.com.wallet.domain.context.Deposit;
+import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
@@ -49,7 +51,7 @@ public class DepositFundsIT {
         UUID operationId =  UUID.randomUUID();
 
         // when
-        depositFundsUseCase.execute(walletId, depositAmount, operationId);
+        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId));
 
         // then
         testDataHelper.assertBalance(walletId, depositAmount);
@@ -60,13 +62,13 @@ public class DepositFundsIT {
     @Test
     void shouldBeIdempotentWhenSameOperationIdIsUsed() {
         // given
-        UUID walletId = createWalletUseCase.execute(BigDecimal.TEN, UUID.randomUUID());
+        UUID walletId = createWalletUseCase.execute(new Wallet(BigDecimal.TEN, UUID.randomUUID()));
         BigDecimal depositAmount = new BigDecimal("50.00");
         UUID operationId = UUID.randomUUID();
 
         // when
-        depositFundsUseCase.execute(walletId, depositAmount, operationId);
-        depositFundsUseCase.execute(walletId, depositAmount, operationId); // retry
+        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId));
+        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId)); // retry
 
         // then
         // Initial 10 + one deposit of 50 = 60

@@ -1,6 +1,7 @@
 package br.com.wallet.application.service;
 
 import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -14,9 +15,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.UUID;
 
 @Service
 class DepositFundsService implements DepositFundsUseCase {
@@ -36,19 +35,19 @@ class DepositFundsService implements DepositFundsUseCase {
 
     @Traceable("wallet.deposit")
     @Transactional
-    public void execute(@NonNull UUID walletId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
+    public void execute(@NonNull Deposit deposit) {
         // validations
-        Validations.validatePositiveAmount(amount);
+        Validations.validatePositiveAmount(deposit.amount());
 
-        if (operationsDao.registerOperation(operationId)) {
-            log.info("Idempotent operation ignored. operationId={}", operationId);
+        if (operationsDao.registerOperation(deposit.operationId())) {
+            log.info("Idempotent operation ignored. operationId={}", deposit.operationId());
             return; // idempotent: already processed!
         }
 
         final var now = Instant.now();
-        core.applyTransaction(walletId, amount, LedgerType.CREDIT, operationId, now);
+        core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), now);
         outboxDao.save(
-                new DepositCompletedEvent(walletId, amount, operationId)
+                new DepositCompletedEvent(deposit.walletId(), deposit.amount(), deposit.operationId())
         );
     }
 

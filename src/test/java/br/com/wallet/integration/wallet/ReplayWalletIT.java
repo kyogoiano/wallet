@@ -4,6 +4,8 @@ package br.com.wallet.integration.wallet;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.ReplayWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
+import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
@@ -45,14 +47,15 @@ public class ReplayWalletIT {
     @Test
     void shouldReplayWalletBalanceCorrectly() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(wallet, to,
+        var transfer50 = new Transfer(wallet, to,
                 new BigDecimal("50"), UUID.randomUUID());
-
-        transferFundsUseCase.execute(wallet, to,
+        transferFundsUseCase.execute(transfer50);
+        var transfer30 = new Transfer(wallet, to,
                 new BigDecimal("30"), UUID.randomUUID());
+        transferFundsUseCase.execute(transfer30);
 
         var replayed = replayWalletUseCase.execute(wallet);
 
@@ -62,11 +65,11 @@ public class ReplayWalletIT {
     @Test
     void replayShouldMatchStoredBalance() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("150"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("150"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("40"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("40"), UUID.randomUUID()));
 
         var replayed = replayWalletUseCase.execute(wallet);
         testDataHelper.assertBalance(wallet, replayed);
@@ -75,13 +78,13 @@ public class ReplayWalletIT {
     @Test
     void replayShouldStillWorkEvenIfLedgerIsCorrupted() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
         var opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("50"), opId);
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("50"), opId));
 
         // 💥 tamper
         testDataHelper.tamperAmount(wallet, 2L, new BigDecimal("999"), opId);

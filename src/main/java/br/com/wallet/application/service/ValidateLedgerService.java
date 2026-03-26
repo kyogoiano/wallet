@@ -1,5 +1,6 @@
 package br.com.wallet.application.service;
 
+import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.application.usecase.ValidateLedgerUseCase;
 import br.com.wallet.domain.LedgerType;
 import br.com.wallet.domain.LedgerValidationResult;
@@ -29,7 +30,7 @@ public class ValidateLedgerService implements ValidateLedgerUseCase {
         this.jdbc = jdbc;
     }
 
-
+    @Traceable("wallet.validateLedger")
     @Override
     public LedgerValidationResult execute(@NonNull final UUID walletId) {
         return  this.validLedgerEntries(walletId);

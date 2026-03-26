@@ -5,6 +5,8 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.LedgerUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.domain.LedgerType;
+import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
@@ -56,11 +58,11 @@ public class LedgerIT {
     @Test
     void shouldReturnLedgerEntriesAfterTransfer() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(from, to,
-                new BigDecimal("40"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(from, to,
+                new BigDecimal("40"), UUID.randomUUID()));
 
         var result = ledgerUseCase.getLedger(from, 100);
 
@@ -78,14 +80,14 @@ public class LedgerIT {
     @Test
     void shouldReturnEntriesOrderedBySequence() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("50"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("50"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("30"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("30"), UUID.randomUUID()));
 
         var result = ledgerUseCase.getLedger(wallet, 3);
 
@@ -99,17 +101,17 @@ public class LedgerIT {
     @Test
     void shouldRespectLimit() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("200"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("10"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("10"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("10"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("10"), UUID.randomUUID()));
 
         var result = ledgerUseCase.getLedger(wallet, 2);
 
@@ -119,16 +121,16 @@ public class LedgerIT {
     @Test
     void shouldNotMixLedgerBetweenWallets() {
 
-        UUID wallet1 = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
-        UUID wallet2 = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID wallet1 = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
+        UUID wallet2 = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
 
         UUID other = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(wallet1, other,
-                new BigDecimal("10"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet1, other,
+                new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(wallet2, other,
-                new BigDecimal("20"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet2, other,
+                new BigDecimal("20"), UUID.randomUUID()));
 
         var ledger1 = ledgerUseCase.getLedger(wallet1, 100);
         var ledger2 = ledgerUseCase.getLedger(wallet2, 100);
@@ -145,11 +147,11 @@ public class LedgerIT {
     @Test
     void shouldReturnCorrectTypesForDebitAndCredit() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(from, to,
-                new BigDecimal("25"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(from, to,
+                new BigDecimal("25"), UUID.randomUUID()));
 
         var fromLedger = ledgerUseCase.getLedger(from, 100);
         var toLedger = ledgerUseCase.getLedger(to, 100);
@@ -165,11 +167,11 @@ public class LedgerIT {
     @Test
     void ledgerSumShouldMatchCurrentBalance() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("40"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("40"), UUID.randomUUID()));
 
         var ledger = ledgerUseCase.getLedger(wallet, 100);
 

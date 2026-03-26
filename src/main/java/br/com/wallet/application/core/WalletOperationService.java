@@ -51,14 +51,14 @@ public class WalletOperationService {
                 : amount;
         // balance update
         accountDao.updateBalance(walletId, signedAmount);
-
+        log.info("Applying transaction sequence {} to wallet {}, with amount {}", sequence, walletId, amount);
         // hash
         final var previousHash = ledgerDao.findPreviousHash(walletId);
         final var hash = HashUtils.calculateHash(previousHash, walletId, amount, ledgerType, sequence, operationId, now);
 
         // ledger insert
         ledgerDao.insertLedger(walletId, amount, ledgerType, operationId, sequence, hash, now, previousHash);
-        log.info("Transaction applied!");
+        log.info("Transaction applied!, ledger entry created with wallet id: {}, sequence: {}, operationId: {}", walletId, sequence, operationId);
     }
 
 }

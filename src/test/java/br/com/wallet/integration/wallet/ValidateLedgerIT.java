@@ -3,6 +3,8 @@ package br.com.wallet.integration.wallet;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.application.usecase.ValidateLedgerUseCase;
+import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
@@ -73,11 +75,11 @@ class ValidateLedgerIT {
     @MethodSource("transferScenarios")
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
 
-        UUID from = createWalletUseCase.execute(scenario.initialFrom(), UUID.randomUUID());
+        UUID from = createWalletUseCase.execute(new Wallet(scenario.initialFrom(), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
         // simulate transactions
-        transferFundsUseCase.execute(from, to, scenario.transferAmount(), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
 
 
         var fromResult = validateLedgerUseCase.execute(from);
@@ -96,12 +98,18 @@ class ValidateLedgerIT {
     @Test
     void shouldValidateLedgerAfterMultipleTransfers() {
 
-        UUID from = createWalletUseCase.execute(new BigDecimal("300"), UUID.randomUUID());
+        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("300"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(from, to, new BigDecimal("50"), UUID.randomUUID());
-        transferFundsUseCase.execute(from, to, new BigDecimal("100"), UUID.randomUUID());
-        transferFundsUseCase.execute(from, to, new BigDecimal("50"), UUID.randomUUID());
+        var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
+        var transfer100 = new Transfer(from, to, new BigDecimal("100"), UUID.randomUUID());
+
+        transferFundsUseCase.execute(transfer50);
+        transferFundsUseCase.execute(transfer100);
+        //NOTE: reload uuid, so this is not a repeated transfer
+        transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
+
+        transferFundsUseCase.execute(transfer50);
 
         var fromResult = validateLedgerUseCase.execute(from);
         var toResult = validateLedgerUseCase.execute(to);
@@ -116,10 +124,10 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectTamperedLedger() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(wallet, createWalletUseCase.execute(),
-                new BigDecimal("50"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, createWalletUseCase.execute(),
+                new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 fraud
         testDataHelper.tamperFirstLedgerEntry(wallet, new BigDecimal("999"));
@@ -133,11 +141,11 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectBrokenSequence() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("50"), UUID.randomUUID());
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 broke sequence
         testDataHelper.tamperSequence(wallet, 1L, 99L);
@@ -159,16 +167,16 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectBrokenHashChain() {
 
-        UUID fromWallet = createWalletUseCase.execute(new BigDecimal("200"), UUID.randomUUID());
+        UUID fromWallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID toWallet = createWalletUseCase.execute();
 
         var opId1 = UUID.randomUUID();
-        transferFundsUseCase.execute(fromWallet, toWallet,
-                new BigDecimal("50"), opId1);
+        transferFundsUseCase.execute(new Transfer(fromWallet, toWallet,
+                new BigDecimal("50"), opId1));
 
         var opId2 = UUID.randomUUID();
-        transferFundsUseCase.execute(fromWallet, toWallet,
-                new BigDecimal("50"), opId2);
+        transferFundsUseCase.execute(new Transfer(fromWallet, toWallet,
+                new BigDecimal("50"), opId2));
 
         // 💥 broke chaining (second entry) -- on the credit operation for opId1
         testDataHelper.tamperPreviousHash(fromWallet, 2L, "fake_hash", opId1);
@@ -185,11 +193,11 @@ class ValidateLedgerIT {
     @Test
     void shouldDetectTamperedAmount() {
 
-        UUID wallet = createWalletUseCase.execute(new BigDecimal("100"), UUID.randomUUID());
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.execute(wallet, to,
-                new BigDecimal("50"), opId);
+        transferFundsUseCase.execute(new Transfer(wallet, to,
+                new BigDecimal("50"), opId));
 
         testDataHelper.tamperAmount(wallet, 2L, new BigDecimal("999"), opId);
 

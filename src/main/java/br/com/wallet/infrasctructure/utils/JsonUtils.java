@@ -1,12 +1,15 @@
 package br.com.wallet.infrasctructure.utils;
 
 import br.com.wallet.domain.event.DomainEventType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
 @Component
 public final class JsonUtils {
 
+    private static final Logger log = LoggerFactory.getLogger(JsonUtils.class);
     private final ObjectMapper mapper;
 
     public JsonUtils(final ObjectMapper mapper) {
@@ -32,7 +35,8 @@ public final class JsonUtils {
         }
 
         try {
-            mapper.readValue(payload, eventType.getClazz());
+            var domainEvent = mapper.readValue(payload, eventType.getClazz());
+            log.info("Domain Event parsed! type={}, parsed={}", eventType, domainEvent.toString());
         } catch (Exception e) {
             throw new RuntimeException("Invalid payload for eventType=" + eventType, e);
         }

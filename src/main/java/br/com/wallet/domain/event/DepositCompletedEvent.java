@@ -1,6 +1,7 @@
 package br.com.wallet.domain.event;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -15,4 +16,14 @@ public record DepositCompletedEvent(
     public UUID aggregateId() { return operationId; }
     public String aggregateType() { return "WALLET_OPERATION"; }
     public UUID partitionKey() { return walletId; }
+
+    @Override
+    @NonNull
+    public String toString() {
+        return "DepositCompletedEvent{" +
+                "walletId=" + walletId +
+                ", amount=" + amount +
+                ", operationId=" + operationId +
+                '}';
+    }
 }

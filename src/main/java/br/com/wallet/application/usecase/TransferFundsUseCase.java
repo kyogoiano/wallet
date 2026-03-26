@@ -1,7 +1,6 @@
 package br.com.wallet.application.usecase;
 
-import java.math.BigDecimal;
-import java.util.UUID;
+import br.com.wallet.domain.context.Transfer;
 
 /**
  * @author Leandro
@@ -19,5 +18,5 @@ import java.util.UUID;
  * -----------------------------------
  */
 public interface TransferFundsUseCase {
-    void execute(UUID from, UUID to, BigDecimal amount, UUID operationId);
+    void execute(Transfer transfer);
 }

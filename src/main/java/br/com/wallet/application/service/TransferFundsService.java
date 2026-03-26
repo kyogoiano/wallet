@@ -1,6 +1,7 @@
 package br.com.wallet.application.service;
 
 import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -44,53 +45,50 @@ public class TransferFundsService implements TransferFundsUseCase {
     @Traceable("wallet.transfer")
     @Transactional
     @Override
-    public void execute(@NonNull final UUID from,
-                        @NonNull final UUID to,
-                        @NonNull final BigDecimal amount,
-                        @NonNull final UUID operationId) {
+    public void execute(@NonNull final Transfer transfer) {
 
         // validations
-        Validations.validatePositiveAmount(amount);
+        Validations.validatePositiveAmount(transfer.amount());
 
-        if (from.equals(to)) {
-            log.warn("Invalid transfer: same wallet. walletId={}", from);
+        if (transfer.from().equals(transfer.to())) {
+            log.warn("Invalid transfer: same wallet. walletId={}", transfer.from());
             throw new IllegalArgumentException("Cannot transfer to same wallet");
         }
 
-        if (operationsDao.registerOperation(operationId)) {
-            log.info("Idempotent operation ignored. operationId={}", operationId);
+        if (operationsDao.registerOperation(transfer.operationId())) {
+            log.info("Idempotent operation ignored. operationId={}", transfer.operationId());
             return; // idempotent: already processed!
         }
 
         // 🔒 lock ordering (avoid deadlocks)
-        final var ordered = Stream.of(from, to)
+        final var ordered = Stream.of(transfer.from(), transfer.to())
                 .sorted()
                 .toList();
 
         final var balances = accountDao.getBalancesFromWallets(ordered);
 
-        if (!balances.containsKey(from) || !balances.containsKey(to)) {
+        if (!balances.containsKey(transfer.from()) || !balances.containsKey(transfer.to())) {
             log.warn("At least one Wallet not found!");
             throw new IllegalArgumentException("At least one Wallet not found");
         }
 
-        final var fromBalance = balances.get(from);
+        final var fromBalance = balances.get(transfer.from());
 
-        if (fromBalance.compareTo(amount) < 0) {
+        if (fromBalance.compareTo(transfer.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",
-                    from, fromBalance, amount);
+                    transfer.from(), fromBalance, transfer.amount());
             throw new InsufficientFundsException();
         }
 
         final var now = Instant.now();
-        core.applyTransaction(from, amount, LedgerType.DEBIT, operationId, now);
-        core.applyTransaction(to, amount, LedgerType.CREDIT, operationId, now);
+        core.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), now);
+        core.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), now);
 
         // 🧾 ledger entries
         log.info("Transfer completed. from={}, to={}, amount={}, operationId={}",
-                from, to, amount, operationId);
+                transfer.from(), transfer.to(), transfer.amount(), transfer.operationId());
         outboxDao.save(
-                new TransferCompletedEvent(from, to, amount, operationId)
+                new TransferCompletedEvent(transfer.from(), transfer.to(), transfer.amount(), transfer.operationId())
         );
     }
 

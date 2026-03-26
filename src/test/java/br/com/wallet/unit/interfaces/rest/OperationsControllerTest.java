@@ -3,6 +3,8 @@ package br.com.wallet.unit.interfaces.rest;
 import br.com.wallet.application.usecase.DepositFundsUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.application.usecase.WithdrawFundsUseCase;
+import br.com.wallet.domain.context.Deposit;
+import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.exceptions.InsufficientFundsException;
 import br.com.wallet.interfaces.rest.controller.OperationsController;
 import org.junit.jupiter.api.Test;
@@ -53,7 +55,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(transfer).execute(any(), any(), any(), any());
+        verify(transfer).execute(any());
     }
 
     @Test
@@ -115,7 +117,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(deposit).execute(walletId, new BigDecimal("100"), opId);
+        verify(deposit).execute(new Deposit(walletId, new BigDecimal("100"), opId));
     }
 
     @Test
@@ -180,7 +182,10 @@ class OperationsControllerTest {
 
         doThrow(new IllegalStateException("Operation Failed!"))
                 .when(deposit)
-                .execute(eq(walletId), any(), eq(opId));
+                .execute(argThat(cmd ->
+                        walletId.equals(cmd.walletId()) &&
+                                opId.equals(cmd.operationId())
+                ));
 
         var body = """
                     {
@@ -215,7 +220,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(withdraw).execute(walletId, new BigDecimal("50"), opId);
+        verify(withdraw).execute(new Withdraw(walletId, new BigDecimal("50"), opId));
     }
 
     @Test
@@ -226,7 +231,10 @@ class OperationsControllerTest {
 
         doThrow(new InsufficientFundsException())
                 .when(withdraw)
-                .execute(eq(walletId), any(), eq(opId));
+                .execute(argThat(cmd ->
+                        walletId.equals(cmd.walletId()) &&
+                                opId.equals(cmd.operationId())
+                ));
 
         var body = """
                     {

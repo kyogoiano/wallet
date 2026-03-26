@@ -2,6 +2,8 @@ package br.com.wallet.integration.wallet;
 
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.WithdrawFundsUseCase;
+import br.com.wallet.domain.context.Wallet;
+import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
@@ -40,12 +42,12 @@ public class WithdrawFundsIT {
     void shouldWithdrawFundsAndUpdateBalance() {
         // given
         BigDecimal initialBalance = new BigDecimal("100.00");
-        UUID walletId = createWalletUseCase.execute(initialBalance, UUID.randomUUID());
+        UUID walletId = createWalletUseCase.execute(new Wallet(initialBalance, UUID.randomUUID()));
         BigDecimal withdrawAmount = new BigDecimal("30.00");
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.execute(walletId, withdrawAmount, operationId);
+        withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, operationId));
 
         // then
         testDataHelper.assertBalance(walletId, new BigDecimal("70.00"));
@@ -54,25 +56,25 @@ public class WithdrawFundsIT {
     @Test
     void shouldFailWhenInsufficientFunds() {
         // given
-        UUID walletId = createWalletUseCase.execute(BigDecimal.TEN, UUID.randomUUID());
+        UUID walletId = createWalletUseCase.execute(new Wallet(BigDecimal.TEN, UUID.randomUUID()));
         BigDecimal withdrawAmount = new BigDecimal("50.00");
 
         // when / then
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                withdrawFundsUseCase.execute(walletId, withdrawAmount, UUID.randomUUID())
+                withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, UUID.randomUUID()))
         ).isInstanceOf(br.com.wallet.exceptions.InsufficientFundsException.class);
     }
 
     @Test
     void shouldBeIdempotentWhenSameOperationIdIsUsed() {
         // given
-        UUID walletId = createWalletUseCase.execute(new BigDecimal("100.00"), UUID.randomUUID());
+        UUID walletId = createWalletUseCase.execute(new Wallet(new BigDecimal("100.00"), UUID.randomUUID()));
         BigDecimal withdrawAmount = new BigDecimal("40");
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.execute(walletId, withdrawAmount, operationId);
-        withdrawFundsUseCase.execute(walletId, withdrawAmount, operationId); // retry
+        withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, operationId));
+        withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, operationId)); // retry
 
         // then
         // Initial 100 - one withdraw of 40 = 60

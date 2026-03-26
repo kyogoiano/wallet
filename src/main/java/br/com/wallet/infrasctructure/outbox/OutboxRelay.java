@@ -61,7 +61,7 @@ public class OutboxRelay {
                 publisher.publish(event.eventType(), event.payload());
 
                 outboxDao.markAsProcessed(event.id(), now);
-
+                log.info("Outbox event marked as processed! id={}, at={}", event.id(), now);
             } catch (Exception e) {
                 // used for retries
                 outboxDao.markFailed(event.id(), now);

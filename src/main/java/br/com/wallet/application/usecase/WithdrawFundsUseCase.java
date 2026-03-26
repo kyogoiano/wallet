@@ -1,8 +1,7 @@
 package br.com.wallet.application.usecase;
 
-import java.math.BigDecimal;
-import java.util.UUID;
+import br.com.wallet.domain.context.Withdraw;
 
 public interface WithdrawFundsUseCase {
-    void execute(UUID walletId, BigDecimal amount, UUID operationId);
+    void execute(Withdraw withdraw);
 }

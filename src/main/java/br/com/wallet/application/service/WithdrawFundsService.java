@@ -1,6 +1,7 @@
 package br.com.wallet.application.service;
 
 import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -16,9 +17,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.Instant;
-import java.util.UUID;
 
 @Service
 public class WithdrawFundsService implements WithdrawFundsUseCase {
@@ -44,26 +43,26 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
     @Traceable("wallet.withdraw")
     @Transactional
     @Override
-    public void execute(@NonNull UUID walletId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
+    public void execute(@NonNull Withdraw withdraw) {
         // validations
-        Validations.validatePositiveAmount(amount);
+        Validations.validatePositiveAmount(withdraw.amount());
 
-        if (operationsDao.registerOperation(operationId)) {
-            log.info("Idempotent operation ignored. operationId={}", operationId);
+        if (operationsDao.registerOperation(withdraw.operationId())) {
+            log.info("Idempotent operation ignored. operationId={}", withdraw.operationId());
             return; // idempotent: already processed!
         }
-        final var balance = accountDao.findWalletBalanceForUpdate(walletId)
+        final var balance = accountDao.findWalletBalanceForUpdate(withdraw.walletId())
                 .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
-        if (balance.compareTo(amount) < 0) {
+        if (balance.compareTo(withdraw.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",
-                    walletId, balance, amount);
+                    withdraw.walletId(), balance, withdraw.amount());
             throw new InsufficientFundsException();
         }
 
         final var now = Instant.now();
-        core.applyTransaction(walletId, amount, LedgerType.DEBIT, operationId, now);
+        core.applyTransaction(withdraw.walletId(), withdraw.amount(), LedgerType.DEBIT, withdraw.operationId(), now);
         outboxDao.save(
-                new WithdrawCompletedEvent(walletId, amount, operationId)
+                new WithdrawCompletedEvent(withdraw.walletId(), withdraw.amount(), withdraw.operationId())
         );
     }
 }

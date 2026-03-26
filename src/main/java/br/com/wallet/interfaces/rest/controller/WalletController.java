@@ -4,6 +4,7 @@ import br.com.wallet.application.usecase.BalanceUseCase;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.LedgerUseCase;
 import br.com.wallet.application.usecase.ReplayWalletUseCase;
+import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.interfaces.rest.api.WalletApi;
 import br.com.wallet.interfaces.rest.dto.BalanceResponse;
 import br.com.wallet.interfaces.rest.dto.CreateWalletCommand;
@@ -70,7 +71,7 @@ public class WalletController implements WalletApi {
     ) {
         final var initialBalance = resolveInitialBalance(command);
         final var walletId = initialBalance.compareTo(BigDecimal.ZERO) > 0 && operationId != null ?
-            createWalletUseCase.execute(initialBalance, operationId) :
+            createWalletUseCase.execute(new Wallet(initialBalance, operationId)) :
                 createWalletUseCase.execute();
 
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -90,11 +91,6 @@ public class WalletController implements WalletApi {
             @PathVariable UUID walletId,
             @RequestParam(defaultValue = "100") Integer limit
     ) {
-
-        if (limit > 1000) {
-            return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT).build();
-        }
-
         final var entries = ledgerUseCase.getLedger(walletId, limit)
                 .stream()
                 .map(LedgerMapper::toResponse)

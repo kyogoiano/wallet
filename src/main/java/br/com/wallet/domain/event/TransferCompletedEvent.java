@@ -1,6 +1,7 @@
 package br.com.wallet.domain.event;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -42,4 +43,15 @@ public record TransferCompletedEvent(
      */
     @Override
     public UUID partitionKey() { return from; }
+
+    @NonNull
+    @Override
+    public String toString() {
+        return "TransferCompletedEvent{" +
+                "from=" + from +
+                ", to=" + to +
+                ", amount=" + amount +
+                ", operationId=" + operationId +
+                '}';
+    }
 }

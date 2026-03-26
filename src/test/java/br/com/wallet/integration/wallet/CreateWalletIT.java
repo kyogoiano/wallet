@@ -1,6 +1,7 @@
 package br.com.wallet.integration.wallet;
 
 import br.com.wallet.application.usecase.CreateWalletUseCase;
+import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
@@ -83,7 +84,7 @@ class CreateWalletIT {
     @ParameterizedTest
     @MethodSource("initialBalances")
     void shouldCreateWalletWithGivenInitialBalance(BigDecimal initialBalance) {
-        var walletId = createWalletUseCase.execute(initialBalance, UUID.randomUUID());
+        var walletId = createWalletUseCase.execute(new Wallet(initialBalance, UUID.randomUUID()));
 
         testDataHelper.assertBalance(walletId, initialBalance);
     }

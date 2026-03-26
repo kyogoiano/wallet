@@ -23,6 +23,7 @@ management:
     health:
       show-details: always
   tracing:
+    enabled: true
     sampling:
       probability: 1.0
   otlp:
@@ -31,7 +32,17 @@ management:
     metrics:
       export:
         url: http://otel-collector:4318/v1/metrics
-        step: 3m
+        step: 6m
+
+logging:
+  level:
+    root: INFO
+    br.com.wallet: DEBUG
+    org.springframework.web: INFO
+    org.springframework: INFO
+    org.hibernate: INFO
+  pattern:
+    level: "%5p [traceId=%X{traceId} spanId=%X{spanId}]"
 
 otel:
   exporter:

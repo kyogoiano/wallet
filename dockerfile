@@ -16,7 +16,7 @@ COPY src src
 RUN ./gradlew bootJar --no-daemon
 
 # Runtime stage
-FROM bellsoft/liberica-openjdk-alpine-musl:25
+FROM bellsoft/liberica-runtime-container:jdk-25-slim-glibc
 WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 

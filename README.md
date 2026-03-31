@@ -524,5 +524,4 @@ This system prioritizes:
 It is designed to evolve into a fully event-driven architecture while remaining simple and reliable.
 
 ## Know problems:
-* **Some logs are hidden** → TODO: fix it, till the date the cause is unknow 
-* **Aspect spans are also hidden** ->> TODO: fixing logs, this may be fixed too
+* none

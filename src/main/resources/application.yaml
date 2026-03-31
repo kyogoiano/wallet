@@ -23,7 +23,12 @@ management:
     health:
       show-details: always
   tracing:
-    enabled: true
+    baggage:
+      correlation:
+        fields:
+          - operationId
+      remote-fields:
+        - operationId
     sampling:
       probability: 1.0
   otlp:
@@ -31,6 +36,7 @@ management:
       endpoint: http://otel-collector:4318/v1/traces
     metrics:
       export:
+#        enabled: false
         url: http://otel-collector:4318/v1/metrics
         step: 6m
 
@@ -42,7 +48,7 @@ logging:
     org.springframework: INFO
     org.hibernate: INFO
   pattern:
-    level: "%5p [traceId=%X{traceId} spanId=%X{spanId}]"
+    level: "%5p [traceId=%X{traceId} spanId=%X{spanId} operationId=%X{operationId}]"
 
 otel:
   exporter:

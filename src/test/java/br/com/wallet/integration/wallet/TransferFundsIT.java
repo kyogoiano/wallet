@@ -8,6 +8,7 @@ import br.com.wallet.exceptions.InsufficientFundsException;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,7 +28,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class TransferFundsIT {
+class TransferFundsIT extends RegisterNatsProperties {
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -78,7 +79,7 @@ class TransferFundsIT {
         UUID to = createWalletUseCase.execute();
 
         // when
-        transferFundsUseCase.execute(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
 
         // then
         testDataHelper.assertBalance(from, scenario.expectedFrom());
@@ -93,7 +94,7 @@ class TransferFundsIT {
 
         // when / then
         assertThatThrownBy(() ->
-                transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID()))
+                transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID()))
         ).isInstanceOf(InsufficientFundsException.class);
     }
 
@@ -102,7 +103,7 @@ class TransferFundsIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
 
         assertThatThrownBy(() ->
-                transferFundsUseCase.execute(new Transfer(wallet, wallet, BigDecimal.TEN, UUID.randomUUID()))
+                transferFundsUseCase.handle(new Transfer(wallet, wallet, BigDecimal.TEN, UUID.randomUUID()))
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -114,7 +115,7 @@ class TransferFundsIT {
 
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
         var count = testDataHelper.countProcessedOutbox(opId);
 
@@ -129,8 +130,8 @@ class TransferFundsIT {
 
         UUID opId = UUID.randomUUID();
         var transfer = new Transfer(from, to, new BigDecimal("50"), opId);
-        transferFundsUseCase.execute(transfer);
-        transferFundsUseCase.execute(transfer); // retry
+        transferFundsUseCase.handle(transfer);
+        transferFundsUseCase.handle(transfer); // retry
 
         var count = testDataHelper.countProcessedOutbox(opId);
 
@@ -144,9 +145,9 @@ class TransferFundsIT {
         UUID to = createWalletUseCase.execute();
 
         var transfer50 = new Transfer(wallet, to, new BigDecimal("50"), UUID.randomUUID());
-        transferFundsUseCase.execute(transfer50);
+        transferFundsUseCase.handle(transfer50);
         var transfer10 = new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID());
-        transferFundsUseCase.execute(transfer10);
+        transferFundsUseCase.handle(transfer10);
 
         var entries = testDataHelper.getLedgerEntries(wallet);
 

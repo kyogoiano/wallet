@@ -8,6 +8,7 @@ import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-public class DepositFundsIT {
+public class DepositFundsIT extends RegisterNatsProperties {
     @Autowired
     private DepositFundsUseCase depositFundsUseCase;
 
@@ -51,7 +52,7 @@ public class DepositFundsIT {
         UUID operationId =  UUID.randomUUID();
 
         // when
-        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId));
+        depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId));
 
         // then
         testDataHelper.assertBalance(walletId, depositAmount);
@@ -67,8 +68,8 @@ public class DepositFundsIT {
         UUID operationId = UUID.randomUUID();
 
         // when
-        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId));
-        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId)); // retry
+        depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId));
+        depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId)); // retry
 
         // then
         // Initial 10 + one deposit of 50 = 60

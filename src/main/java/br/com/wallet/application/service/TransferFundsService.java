@@ -43,7 +43,17 @@ public class TransferFundsService implements TransferFundsUseCase {
     @Traceable("wallet.transfer")
     @Transactional
     @Override
-    public void execute(@NonNull final Transfer transfer) {
+    public void handle(@NonNull final Transfer transfer) {
+
+        if (!operationsDao.tryRegister(transfer.operationId())) {
+            log.info("Idempotent operation ignored. operationId={}", transfer.operationId());
+            return; // idempotent: already processed!
+        }
+
+        this.execute(transfer);
+    }
+
+    protected void execute(@NonNull final Transfer transfer) {
 
         // validations
         Validations.validatePositiveAmount(transfer.amount());
@@ -51,11 +61,6 @@ public class TransferFundsService implements TransferFundsUseCase {
         if (transfer.from().equals(transfer.to())) {
             log.warn("Invalid transfer: same wallet. walletId={}", transfer.from());
             throw new IllegalArgumentException("Cannot transfer to same wallet");
-        }
-
-        if (operationsDao.registerOperation(transfer.operationId())) {
-            log.info("Idempotent operation ignored. operationId={}", transfer.operationId());
-            return; // idempotent: already processed!
         }
 
         // 🔒 lock ordering (avoid deadlocks)

@@ -3,5 +3,5 @@ package br.com.wallet.application.usecase;
 import br.com.wallet.domain.context.Withdraw;
 
 public interface WithdrawFundsUseCase {
-    void execute(Withdraw withdraw);
+    void handle(Withdraw withdraw);
 }

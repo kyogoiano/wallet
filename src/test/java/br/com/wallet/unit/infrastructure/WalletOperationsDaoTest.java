@@ -33,7 +33,7 @@ class WalletOperationsDaoTest {
         when(jdbc.update(anyString(), Optional.ofNullable(any())))
                 .thenReturn(1);
 
-        var result = dao.registerOperation(UUID.randomUUID());
+        var result = dao.tryRegister(UUID.randomUUID());
 
         assertThat(result).isFalse();
     }
@@ -45,7 +45,7 @@ class WalletOperationsDaoTest {
                 .when(jdbc)
                 .update(anyString(), Optional.ofNullable(any()));
 
-        var result = dao.registerOperation(UUID.randomUUID());
+        var result = dao.tryRegister(UUID.randomUUID());
 
         assertThat(result).isTrue();
     }

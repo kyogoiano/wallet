@@ -55,7 +55,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(transfer).execute(any());
+        verify(transfer).handle(any());
     }
 
     @Test
@@ -117,7 +117,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(deposit).execute(new Deposit(walletId, new BigDecimal("100"), opId));
+        verify(deposit).handle(new Deposit(walletId, new BigDecimal("100"), opId));
     }
 
     @Test
@@ -182,7 +182,7 @@ class OperationsControllerTest {
 
         doThrow(new IllegalStateException("Operation Failed!"))
                 .when(deposit)
-                .execute(argThat(cmd ->
+                .handle(argThat(cmd ->
                         walletId.equals(cmd.walletId()) &&
                                 opId.equals(cmd.operationId())
                 ));
@@ -220,7 +220,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(withdraw).execute(new Withdraw(walletId, new BigDecimal("50"), opId));
+        verify(withdraw).handle(new Withdraw(walletId, new BigDecimal("50"), opId));
     }
 
     @Test
@@ -231,7 +231,7 @@ class OperationsControllerTest {
 
         doThrow(new InsufficientFundsException())
                 .when(withdraw)
-                .execute(argThat(cmd ->
+                .handle(argThat(cmd ->
                         walletId.equals(cmd.walletId()) &&
                                 opId.equals(cmd.operationId())
                 ));

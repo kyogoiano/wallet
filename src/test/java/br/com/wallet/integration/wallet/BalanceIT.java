@@ -9,6 +9,7 @@ import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -26,7 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class BalanceIT {
+class BalanceIT extends RegisterNatsProperties {
 
     @Autowired
     BalanceUseCase balanceUseCase;
@@ -67,7 +68,7 @@ class BalanceIT {
         UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("40"), UUID.randomUUID()));
 
         assertThat(balanceUseCase.getBalance(from))
@@ -85,7 +86,7 @@ class BalanceIT {
 
         Instant before = Instant.now();
 
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("30"), UUID.randomUUID()));
 
         Instant after = before.plusMillis(10);
@@ -105,10 +106,10 @@ class BalanceIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID other = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(wallet, other,
+        transferFundsUseCase.handle(new Transfer(wallet, other,
                 new BigDecimal("50"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(new Transfer(wallet, other,
+        transferFundsUseCase.handle(new Transfer(wallet, other,
                 new BigDecimal("30"), UUID.randomUUID()));
 
         Instant now = Instant.now();
@@ -138,8 +139,8 @@ class BalanceIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID opId = UUID.randomUUID();
 
-        withdrawFundsUseCase.execute(new Withdraw(wallet, new BigDecimal("30"), opId));
-        withdrawFundsUseCase.execute(new Withdraw(wallet, new BigDecimal("30"), opId));
+        withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("30"), opId));
+        withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("30"), opId));
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -159,8 +160,8 @@ class BalanceIT {
             var op1 = UUID.randomUUID();
             var op2 = UUID.randomUUID();
 
-            executor.submit(() -> withdrawFundsUseCase.execute(new Withdraw(wallet, new BigDecimal("80"), op1)));
-            executor.submit(() -> withdrawFundsUseCase.execute(new Withdraw(wallet, new BigDecimal("80"), op2)));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("80"), op1)));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("80"), op2)));
 
             executor.shutdown();
             executor.awaitTermination(3, TimeUnit.SECONDS);

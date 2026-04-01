@@ -4,6 +4,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class CreateWalletIT {
+class CreateWalletIT extends RegisterNatsProperties {
 
     @Autowired
     JdbcTemplate jdbc;

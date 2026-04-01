@@ -55,9 +55,40 @@ public class OutboxDao {
                 """, (rs, rowNum) -> new OutboxEvent(
                 rs.getObject("id", UUID.class),
                 rs.getString("event_type"),
-                rs.getString("payload")
+                rs.getString("payload"),
+                rs.getObject("retry_count", Integer.class)
         ), now.atOffset(ZoneOffset.UTC));
     }
+
+
+    public List<OutboxEvent> claimBatch(@NonNull Instant now, @NonNull Integer limit) {
+        return jdbc.query("""
+           WITH claimed AS (
+              SELECT id
+              FROM outbox
+              WHERE status = 'PENDING'
+                AND (next_retry_at IS NULL OR next_retry_at <= ?)
+              ORDER BY created_at
+              LIMIT ?
+              FOR UPDATE SKIP LOCKED
+          )
+          UPDATE outbox o
+          SET status = 'PROCESSING'
+          FROM claimed
+          WHERE o.id = claimed.id
+          RETURNING o.id, o.event_type, o.payload, o.retry_count
+        """,
+                (rs, rowNum) -> new OutboxEvent(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("event_type"),
+                        rs.getString("payload"),
+                        rs.getObject("retry_count", Integer.class)
+                ),
+                now.atOffset(ZoneOffset.UTC),
+                limit
+        );
+    }
+
 
     /**
      * Mark event as failed, increase number of retries and schedule next retry using exponential backoff
@@ -82,6 +113,17 @@ public class OutboxDao {
         jdbc.update("""
             UPDATE outbox
             SET status = 'PROCESSED', processed_at = ?
+            WHERE id = ?
+        """, now.atOffset(ZoneOffset.UTC), id);
+    }
+
+    /**
+     * Mark event as dead
+     */
+    public void markAsDead(@NonNull final UUID id, @NonNull final Instant now) {
+        jdbc.update("""
+            UPDATE outbox
+            SET status = 'DEAD', processed_at = ?
             WHERE id = ?
         """, now.atOffset(ZoneOffset.UTC), id);
     }

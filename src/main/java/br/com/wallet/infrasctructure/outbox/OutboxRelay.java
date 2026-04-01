@@ -2,7 +2,7 @@ package br.com.wallet.infrasctructure.outbox;
 
 import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.domain.event.*;
-import br.com.wallet.infrasctructure.messaging.EventPublisher;
+import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.utils.JsonUtils;
 import org.jspecify.annotations.NonNull;
@@ -13,6 +13,8 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -51,22 +53,35 @@ public class OutboxRelay {
     @Transactional
     public void process() {
         final var now = clock.instant();
-        final var events = outboxDao.getOutboxEvents(now);
+
+        final var events = outboxDao.claimBatch(now, 100);
 
         for (final var event : events) {
-            try {
-                final var domainEventType = this.resolveDomainEventType(event.eventType());
-                jsonUtils.parseDomainEventPayload(domainEventType, event.payload());
+            processSingleEvent(event, now);
+        }
+    }
 
-                publisher.publish(event.eventType(), event.payload());
+    private void processSingleEvent(@NonNull OutboxEvent event, @NonNull Instant now) {
+        try {
+            final var domainEventType = this.resolveDomainEventType(event.eventType());
+            jsonUtils.parseDomainEventPayload(domainEventType, event.payload());
 
-                outboxDao.markAsProcessed(event.id(), now);
-                log.info("Outbox event marked as processed! id={}, at={}", event.id(), now);
-            } catch (Exception e) {
+            publisher.publish(event.eventType(), event.payload());
+
+            outboxDao.markAsProcessed(event.id(), now);
+            log.info("Outbox event marked as processed! id={}, at={}", event.id(), now);
+        } catch (Exception e) {
+
+            int retryCount = event.retryCount() + 1;
+            if (retryCount > 10) {
+                outboxDao.markAsDead(event.id(), now);
+                log.error("Outbox event moved to DLQ! Publish event id={}", event.id(), e);
+            } else {
+
+                final var backoff = Duration.ofSeconds((long) Math.pow(2, retryCount));
                 // used for retries
-                outboxDao.markFailed(event.id(), now);
-
-                log.warn("Failed to publish event id={}", event.id(), e);
+                outboxDao.markFailed(event.id(), now.plus(backoff));
+                log.warn("Outbox retry scheduled id={}, retryCount={}", event.id(), retryCount, e);
             }
         }
     }

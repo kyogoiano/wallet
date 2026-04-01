@@ -8,6 +8,7 @@ import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +26,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class ValidateLedgerIT {
+class ValidateLedgerIT extends RegisterNatsProperties {
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -79,7 +80,7 @@ class ValidateLedgerIT {
         UUID to = createWalletUseCase.execute();
 
         // simulate transactions
-        transferFundsUseCase.execute(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
 
 
         var fromResult = validateLedgerUseCase.execute(from);
@@ -104,12 +105,12 @@ class ValidateLedgerIT {
         var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
         var transfer100 = new Transfer(from, to, new BigDecimal("100"), UUID.randomUUID());
 
-        transferFundsUseCase.execute(transfer50);
-        transferFundsUseCase.execute(transfer100);
+        transferFundsUseCase.handle(transfer50);
+        transferFundsUseCase.handle(transfer100);
         //NOTE: reload uuid, so this is not a repeated transfer
         transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
 
-        transferFundsUseCase.execute(transfer50);
+        transferFundsUseCase.handle(transfer50);
 
         var fromResult = validateLedgerUseCase.execute(from);
         var toResult = validateLedgerUseCase.execute(to);
@@ -126,7 +127,7 @@ class ValidateLedgerIT {
 
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(new Transfer(wallet, createWalletUseCase.execute(),
+        transferFundsUseCase.handle(new Transfer(wallet, createWalletUseCase.execute(),
                 new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 fraud
@@ -144,7 +145,7 @@ class ValidateLedgerIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 broke sequence
@@ -171,11 +172,11 @@ class ValidateLedgerIT {
         UUID toWallet = createWalletUseCase.execute();
 
         var opId1 = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(fromWallet, toWallet,
+        transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
                 new BigDecimal("50"), opId1));
 
         var opId2 = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(fromWallet, toWallet,
+        transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
                 new BigDecimal("50"), opId2));
 
         // 💥 broke chaining (second entry) -- on the credit operation for opId1
@@ -196,7 +197,7 @@ class ValidateLedgerIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("50"), opId));
 
         testDataHelper.tamperAmount(wallet, 2L, new BigDecimal("999"), opId);

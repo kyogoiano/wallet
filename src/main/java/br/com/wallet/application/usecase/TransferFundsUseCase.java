@@ -18,5 +18,6 @@ import br.com.wallet.domain.context.Transfer;
  * -----------------------------------
  */
 public interface TransferFundsUseCase {
-    void execute(Transfer transfer);
+
+    void handle(Transfer transfer);
 }

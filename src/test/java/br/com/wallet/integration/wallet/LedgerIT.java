@@ -9,6 +9,7 @@ import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -23,7 +24,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-public class LedgerIT {
+public class LedgerIT extends RegisterNatsProperties {
 
     @Autowired
     LedgerUseCase ledgerUseCase;
@@ -61,7 +62,7 @@ public class LedgerIT {
         UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("40"), UUID.randomUUID()));
 
         var result = ledgerUseCase.getLedger(from, 100);
@@ -83,10 +84,10 @@ public class LedgerIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("30"), UUID.randomUUID()));
 
         var result = ledgerUseCase.getLedger(wallet, 3);
@@ -104,13 +105,13 @@ public class LedgerIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("10"), UUID.randomUUID()));
 
         var result = ledgerUseCase.getLedger(wallet, 2);
@@ -126,10 +127,10 @@ public class LedgerIT {
 
         UUID other = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(wallet1, other,
+        transferFundsUseCase.handle(new Transfer(wallet1, other,
                 new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.execute(new Transfer(wallet2, other,
+        transferFundsUseCase.handle(new Transfer(wallet2, other,
                 new BigDecimal("20"), UUID.randomUUID()));
 
         var ledger1 = ledgerUseCase.getLedger(wallet1, 100);
@@ -150,7 +151,7 @@ public class LedgerIT {
         UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("25"), UUID.randomUUID()));
 
         var fromLedger = ledgerUseCase.getLedger(from, 100);
@@ -170,7 +171,7 @@ public class LedgerIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("40"), UUID.randomUUID()));
 
         var ledger = ledgerUseCase.getLedger(wallet, 100);

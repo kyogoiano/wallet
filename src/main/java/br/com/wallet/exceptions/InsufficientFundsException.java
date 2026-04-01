@@ -1,6 +1,6 @@
 package br.com.wallet.exceptions;
 
-public class InsufficientFundsException extends RuntimeException {
+public class InsufficientFundsException extends BusinessException {
     public InsufficientFundsException() {
         super("Insufficient funds");
     }

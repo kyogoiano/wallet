@@ -43,14 +43,20 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
     @Traceable("wallet.withdraw")
     @Transactional
     @Override
-    public void execute(@NonNull Withdraw withdraw) {
-        // validations
-        Validations.validatePositiveAmount(withdraw.amount());
+    public void handle(@NonNull final Withdraw withdraw) {
 
-        if (operationsDao.registerOperation(withdraw.operationId())) {
+        if (!operationsDao.tryRegister(withdraw.operationId())) {
             log.info("Idempotent operation ignored. operationId={}", withdraw.operationId());
             return; // idempotent: already processed!
         }
+
+        this.execute(withdraw);
+    }
+
+    protected void execute(@NonNull Withdraw withdraw) {
+        // validations
+        Validations.validatePositiveAmount(withdraw.amount());
+
         final var balance = accountDao.findWalletBalanceForUpdate(withdraw.walletId())
                 .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
         if (balance.compareTo(withdraw.amount()) < 0) {

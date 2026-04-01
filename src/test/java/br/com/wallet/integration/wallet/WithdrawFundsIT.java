@@ -6,6 +6,7 @@ import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,7 +21,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-public class WithdrawFundsIT {
+public class WithdrawFundsIT extends RegisterNatsProperties {
     @Autowired
     private WithdrawFundsUseCase withdrawFundsUseCase;
 
@@ -47,7 +48,7 @@ public class WithdrawFundsIT {
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, operationId));
+        withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, operationId));
 
         // then
         testDataHelper.assertBalance(walletId, new BigDecimal("70.00"));
@@ -61,7 +62,7 @@ public class WithdrawFundsIT {
 
         // when / then
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, UUID.randomUUID()))
+                withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, UUID.randomUUID()))
         ).isInstanceOf(br.com.wallet.exceptions.InsufficientFundsException.class);
     }
 
@@ -73,8 +74,8 @@ public class WithdrawFundsIT {
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, operationId));
-        withdrawFundsUseCase.execute(new Withdraw(walletId, withdrawAmount, operationId)); // retry
+        withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, operationId));
+        withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, operationId)); // retry
 
         // then
         // Initial 100 - one withdraw of 40 = 60

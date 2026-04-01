@@ -9,6 +9,7 @@ import br.com.wallet.infrasctructure.outbox.OutboxStatus;
 import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +35,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class OutboxIT {
+class OutboxIT extends RegisterNatsProperties {
 
     @Autowired
     TestDataHelper testDataHelper;
@@ -67,7 +68,7 @@ class OutboxIT {
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
         outboxRelay.process();
@@ -87,7 +88,7 @@ class OutboxIT {
         UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
         failingEventPublisher.failNext(1);
@@ -109,7 +110,7 @@ class OutboxIT {
 
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
         // first try fails
@@ -139,7 +140,7 @@ class OutboxIT {
         UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
         UUID eventId = testDataHelper.getOutboxIdByOperation(opId);
@@ -158,7 +159,7 @@ class OutboxIT {
         UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(from, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
         outboxRelay.process();
@@ -175,7 +176,7 @@ class OutboxIT {
         UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
         failingEventPublisher.failNext(5);
 
@@ -197,7 +198,7 @@ class OutboxIT {
         UUID to = createWalletUseCase.execute();
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
         failingEventPublisher.failNext(2);
         outboxRelay.process();
@@ -219,8 +220,8 @@ class OutboxIT {
 
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), opId));
-        transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
         var events = testDataHelper.getOutboxEventsByOperation(opId);
 

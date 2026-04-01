@@ -53,7 +53,7 @@ public class OperationsController implements OperationsApi {
         log.info("Transfer requested: from={}, to={}, amount={}",
                 command.from(), command.to(), command.amount());
         var transfer = new Transfer(command.from(), command.to(), command.amount(), operationId);
-        transferUseCase.execute(
+        transferUseCase.handle(
                 transfer
         );
     }
@@ -65,7 +65,7 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final DepositCommand command) {
         var deposit = new Deposit(command.walletId(), command.amount(), operationId);
-        depositUseCase.execute(deposit);
+        depositUseCase.handle(deposit);
     }
 
     @PostMapping("/withdraw")
@@ -75,6 +75,6 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final WithdrawCommand command) {
         var withdraw = new Withdraw(command.walletId(), command.amount(), operationId);
-        withdrawUseCase.execute(withdraw);
+        withdrawUseCase.handle(withdraw);
     }
 }

@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS outbox (
     processed_at TIMESTAMPTZ NULL,
     next_retry_at TIMESTAMPTZ NULL,
     CONSTRAINT outbox_status_chk
-        CHECK (status IN ('PENDING', 'FAILED', 'PROCESSED')),
+        CHECK (status IN ('PENDING', 'FAILED', 'PROCESSING', 'PROCESSED', 'DEAD')),
     CONSTRAINT outbox_event_type_chk -- might be removed for flexibility
         CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED'))
 );
@@ -81,4 +81,5 @@ CREATE INDEX IF NOT EXISTS idx_outbox_ready
 CREATE TABLE IF NOT EXISTS wallet_operations (
     operation_id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    --status: PROCESSING | COMPLETED
 );

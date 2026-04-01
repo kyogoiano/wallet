@@ -8,6 +8,7 @@ import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-public class ReplayWalletIT {
+public class ReplayWalletIT extends RegisterNatsProperties {
 
     @Autowired
     TransferFundsUseCase transferFundsUseCase;
@@ -52,10 +53,10 @@ public class ReplayWalletIT {
 
         var transfer50 = new Transfer(wallet, to,
                 new BigDecimal("50"), UUID.randomUUID());
-        transferFundsUseCase.execute(transfer50);
+        transferFundsUseCase.handle(transfer50);
         var transfer30 = new Transfer(wallet, to,
                 new BigDecimal("30"), UUID.randomUUID());
-        transferFundsUseCase.execute(transfer30);
+        transferFundsUseCase.handle(transfer30);
 
         var replayed = replayWalletUseCase.execute(wallet);
 
@@ -68,7 +69,7 @@ public class ReplayWalletIT {
         UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("150"), UUID.randomUUID()));
         UUID to = createWalletUseCase.execute();
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("40"), UUID.randomUUID()));
 
         var replayed = replayWalletUseCase.execute(wallet);
@@ -83,7 +84,7 @@ public class ReplayWalletIT {
 
         var opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("50"), opId));
 
         // 💥 tamper

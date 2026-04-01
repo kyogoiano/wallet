@@ -1,6 +1,6 @@
 package br.com.wallet.unit.infrastructure.outbox;
 
-import br.com.wallet.infrasctructure.messaging.EventPublisher;
+import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
 import br.com.wallet.infrasctructure.outbox.OutboxEvent;
 import br.com.wallet.infrasctructure.outbox.OutboxRelay;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
@@ -47,7 +47,8 @@ class OutboxRelayTest {
         var event = new OutboxEvent(
                 UUID.randomUUID(),
                 "TRANSFER_COMPLETED",
-                "{\"foo\":\"bar\"}"
+                "{\"foo\":\"bar\"}",
+                0
         );
 
         when(outboxDao.getOutboxEvents(now))
@@ -69,7 +70,8 @@ class OutboxRelayTest {
         var event = new OutboxEvent(
                 UUID.randomUUID(),
                 "TRANSFER_COMPLETED",
-                "{}"
+                "{}",
+                0
         );
 
         when(outboxDao.getOutboxEvents(now))
@@ -94,13 +96,15 @@ class OutboxRelayTest {
         var event1 = new OutboxEvent(
                 UUID.randomUUID(),
                 "TRANSFER_COMPLETED",
-                validTransferPayload()
+                validTransferPayload(),
+                0
         );
 
         var event2 = new OutboxEvent(
                 UUID.randomUUID(),
                 "DEPOSIT_COMPLETED",
-                validDepositPayload()
+                validDepositPayload(),
+                0
         );
 
         when(outboxDao.getOutboxEvents(now))

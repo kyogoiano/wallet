@@ -4,19 +4,20 @@ import io.nats.client.*;
 import io.nats.client.api.AckPolicy;
 import io.nats.client.api.ConsumerConfiguration;
 import io.nats.client.api.DeliverPolicy;
-import jakarta.annotation.PreDestroy;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.SmartLifecycle;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public abstract class AbstractNatsConsumer {
+public abstract class AbstractNatsConsumer implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(AbstractNatsConsumer.class);
     private static final String streamName = "commands";
 
@@ -50,8 +51,6 @@ public abstract class AbstractNatsConsumer {
         subscription = jetStream.subscribe(subject, pullOptions);
         log.info("Subscribed to NATS JetStream subject '{}' with durable consumer '{}'.", subject, consumerName);
 
-        // Start polling for messages in a separate thread (or virtual thread)
-        executorService.submit(this::pollForMessages);
     }
 
     private void pollForMessages() {
@@ -66,7 +65,7 @@ public abstract class AbstractNatsConsumer {
                     continue;
                 }
 
-                final Duration timeout = Duration.ofSeconds(5);
+                final Duration timeout = Duration.ofMillis(500);
 
                 final var messages = subscription.fetch(batchSize, timeout);
 
@@ -98,16 +97,49 @@ public abstract class AbstractNatsConsumer {
         }
     }
 
+    public abstract void init() throws Exception;
+
     abstract void processMessage(Message message);
 
-    @PreDestroy
-    public void cleanup() {
-        running.set(false); // 1. tell loop to stop
+
+
+    @Override
+    public void start() {
+        if (running.compareAndSet(false, true)) {
+            try {
+                init(); // 🔥 ensure subscription exists before polling
+            } catch (Exception e) {
+                throw new RuntimeException("Failed to initialize consumer", e);
+            }
+            executorService.submit(this::pollForMessages);
+        }
+    }
+
+    @Override
+    public void stop() {
+        running.set(false);
+
         if (subscription != null) {
             subscription.unsubscribe();
             log.info("Unsubscribed from NATS JetStream.");
         }
-        executorService.shutdownNow(); // immediate stop due to virtual threads
+
+        executorService.shutdown(); // immediate stop due to virtual threads
         log.info("NATS message consumer executor service shut down.");
+        try {
+            executorService.awaitTermination(5, TimeUnit.SECONDS);
+        } catch (InterruptedException ignored) {
+        }
     }
+
+    @Override
+    public boolean isRunning() {
+        return running.get();
+    }
+
+    @Override
+    public int getPhase() {
+        return Integer.MAX_VALUE; // start late, stop early
+    }
+
 }

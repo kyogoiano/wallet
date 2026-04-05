@@ -66,7 +66,7 @@ public class OutboxDao {
            WITH claimed AS (
               SELECT id
               FROM outbox
-              WHERE status = 'PENDING'
+              WHERE status IN ('PENDING', 'FAILED')
                 AND (next_retry_at IS NULL OR next_retry_at <= ?)
               ORDER BY created_at
               LIMIT ?

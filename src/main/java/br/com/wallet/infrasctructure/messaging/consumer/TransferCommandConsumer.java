@@ -8,13 +8,11 @@ import br.com.wallet.exceptions.TransientException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.*;
-import jakarta.annotation.PostConstruct;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.time.Duration;
 import java.util.UUID;
 
@@ -23,7 +21,7 @@ import java.util.UUID;
  */
 //@DependsOn("jetStreamInitializer") // it enforces stream creation before this consumer is initialized
 @Component
-public class TransferCommandConsumer extends AbstractNatsConsumer {
+public class TransferCommandConsumer extends AbstractNatsConsumer  {
     private static final String subject = "commands.transfer"; // Subject for transfer commands
     private static final String durableConsumerName = "transfer-consumer"; // Durable consumer name for JetStream
     private static final Logger log = LoggerFactory.getLogger(TransferCommandConsumer.class);
@@ -42,8 +40,9 @@ public class TransferCommandConsumer extends AbstractNatsConsumer {
         this.idempotencyService = idempotencyService;
     }
 
-    @PostConstruct
-    public void setupSubscription() throws IOException, JetStreamApiException {
+    @Override
+    public void init() throws Exception {
+        // Start polling for messages in a separate thread (or virtual thread)
         setupGeneralSubscription(subject, durableConsumerName, natsConnection);
     }
 

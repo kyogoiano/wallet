@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -51,7 +52,7 @@ class OutboxRelayTest {
                 0
         );
 
-        when(outboxDao.getOutboxEvents(now))
+        when(outboxDao.claimBatch(now, 100))
                 .thenReturn(List.of(event));
 
         relay.process();
@@ -74,7 +75,7 @@ class OutboxRelayTest {
                 0
         );
 
-        when(outboxDao.getOutboxEvents(now))
+        when(outboxDao.claimBatch(now, 100))
                 .thenReturn(List.of(event));
 
         doThrow(new RuntimeException("boom"))
@@ -83,7 +84,7 @@ class OutboxRelayTest {
 
         relay.process();
 
-        verify(outboxDao).markFailed(event.id(), now);
+        verify(outboxDao).markFailed(any(), any());
         verify(outboxDao, never()).markAsProcessed(any(), any());
     }
 
@@ -107,7 +108,7 @@ class OutboxRelayTest {
                 0
         );
 
-        when(outboxDao.getOutboxEvents(now))
+        when(outboxDao.claimBatch(now, 100))
                 .thenReturn(List.of(event1, event2));
 
         doThrow(new RuntimeException())
@@ -117,8 +118,9 @@ class OutboxRelayTest {
         relay.process();
 
         var inOrder = inOrder(outboxDao);
-
-        inOrder.verify(outboxDao).markFailed(event1.id(), now);
+        var backoff = Duration.ofSeconds((long) Math.pow(2, 1));
+        var realRetryTime = now.plus(backoff);
+        inOrder.verify(outboxDao).markFailed(event1.id(), realRetryTime);
         inOrder.verify(outboxDao).markAsProcessed(event2.id(), now);
     }
 

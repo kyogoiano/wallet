@@ -28,25 +28,25 @@ class WalletOperationsDaoTest {
     WalletOperationsDao dao;
 
     @Test
-    void shouldReturnFalseWhenInsertSucceeds() {
+    void shouldReturnTrueWhenInsertSucceeds() {
 
         when(jdbc.update(anyString(), Optional.ofNullable(any())))
                 .thenReturn(1);
 
         var result = dao.tryRegister(UUID.randomUUID());
 
-        assertThat(result).isFalse();
+        assertThat(result).isTrue();
     }
 
     @Test
-    void shouldReturnTrueWhenDuplicateKeyOccurs() {
+    void shouldReturnFalseWhenDuplicateKeyOccurs() {
 
-        doThrow(new DataIntegrityViolationException("duplicate"))
+        doThrow(new DataIntegrityViolationException("wallet_operations_pkey"))
                 .when(jdbc)
                 .update(anyString(), Optional.ofNullable(any()));
 
         var result = dao.tryRegister(UUID.randomUUID());
 
-        assertThat(result).isTrue();
+        assertThat(result).isFalse();
     }
 }

@@ -81,7 +81,7 @@ public class OutboxRelay {
                 final var backoff = Duration.ofSeconds((long) Math.pow(2, retryCount));
                 // used for retries
                 outboxDao.markFailed(event.id(), now.plus(backoff));
-                log.warn("Outbox retry scheduled id={}, retryCount={}", event.id(), retryCount, e);
+                log.warn("Outbox retry scheduled id={}, retryCount={}, backoff={}", event.id(), retryCount, backoff, e);
             }
         }
     }

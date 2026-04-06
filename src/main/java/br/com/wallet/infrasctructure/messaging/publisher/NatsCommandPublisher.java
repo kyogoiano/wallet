@@ -1,12 +1,14 @@
 package br.com.wallet.infrasctructure.messaging.publisher;
 
 import br.com.wallet.domain.envelope.CommandEnvelope;
+import br.com.wallet.exceptions.PermanentException;
+import br.com.wallet.exceptions.TransientException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
-import io.nats.client.api.PublishAck;
+import io.nats.client.PublishOptions;
 import io.nats.client.api.RetentionPolicy;
 import io.nats.client.api.StorageType;
 import io.nats.client.api.StreamConfiguration;
@@ -21,6 +23,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 
+/**
+ * Nats Command → Async processing → Event
+ */
 @Service
 public class NatsCommandPublisher {
 
@@ -72,38 +77,46 @@ public class NatsCommandPublisher {
                             final T command) {
 
         try {
-            var envelope = new CommandEnvelope<>(
+            final var envelope = new CommandEnvelope<>(
                     operationId,
                     command.getClass().getSimpleName(),
                     Instant.now(),
                     command
             );
 
-            byte[] payload = objectMapper.writeValueAsBytes(envelope);
+            final var payload = objectMapper.writeValueAsBytes(envelope);
 
-            var headers = new Headers();
+            final var headers = new Headers();
             headers.add("operation_id", operationId.toString());
             headers.add("type", envelope.type());
             headers.add("timestamp", envelope.timestamp().toString());
 
-            var message = NatsMessage.builder()
+            final var message = NatsMessage.builder()
                     .subject(subject)
                     .headers(headers)
                     .data(payload)
                     .build();
 
-            PublishAck ack = jetStream.publish(message);
+            final var publishOptions = PublishOptions.builder()
+                    .expectedStream("commands") // safety check
+                    .build();
+
+            final var ack = jetStream.publish(message, publishOptions);
+
+            if (ack == null || ack.getSeqno() <= 0) {
+                throw new IllegalStateException("Invalid JetStream ACK");
+            }
 
             log.debug("Published command [{}] to subject [{}], seqNo={}",
                     envelope.type(), subject, ack.getSeqno());
 
         } catch (JsonProcessingException e) {
             // serialization bug → DO NOT retry
-            throw new IllegalArgumentException("Invalid command payload", e);
+            throw new PermanentException("Invalid command payload", e);
 
-        } catch (Exception e) {
+        } catch (IOException | JetStreamApiException e) {
             // infra failure → let caller decide
-            throw new RuntimeException("Failed to publish command", e);
+            throw new TransientException("Failed to publish command", e);
         }
     }
 }

@@ -25,7 +25,7 @@ public class NatsConfig {
         log.info("Connecting to NATS server at: {}", natsUrl);
         Options options = new Options.Builder()
                 .server(natsUrl)
-                .connectionTimeout(Duration.ofSeconds(5))
+                .connectionTimeout(Duration.ofSeconds(2))
                 .maxReconnects(10)
                 .reconnectWait(Duration.ofSeconds(1))
                 .build();

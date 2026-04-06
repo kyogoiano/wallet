@@ -101,6 +101,7 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
 
     abstract void processMessage(Message message);
 
+    abstract void handlePoisonMessage(Message message, Object envelope);
 
 
     @Override
@@ -142,4 +143,12 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
         return Integer.MAX_VALUE; // start late, stop early
     }
 
+    Duration retryDelay(long deliveries) {
+        return switch ((int) deliveries) {
+            case 1 -> Duration.ofSeconds(1);
+            case 2 -> Duration.ofSeconds(5);
+            case 3 -> Duration.ofSeconds(10);
+            default -> Duration.ofSeconds(30);
+        };
+    }
 }

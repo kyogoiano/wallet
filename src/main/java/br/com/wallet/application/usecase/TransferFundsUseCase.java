@@ -1,6 +1,7 @@
 package br.com.wallet.application.usecase;
 
 import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.exceptions.BusinessException;
 
 /**
  * @author Leandro
@@ -19,5 +20,5 @@ import br.com.wallet.domain.context.Transfer;
  */
 public interface TransferFundsUseCase {
 
-    void handle(Transfer transfer);
+    void handle(Transfer transfer) throws BusinessException;
 }

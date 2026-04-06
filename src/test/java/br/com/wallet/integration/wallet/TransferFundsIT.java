@@ -4,6 +4,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
+import br.com.wallet.exceptions.CommandException;
 import br.com.wallet.exceptions.InsufficientFundsException;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
@@ -131,7 +132,9 @@ class TransferFundsIT extends RegisterNatsProperties {
         UUID opId = UUID.randomUUID();
         var transfer = new Transfer(from, to, new BigDecimal("50"), opId);
         transferFundsUseCase.handle(transfer);
-        transferFundsUseCase.handle(transfer); // retry
+
+        assertThatThrownBy(() -> transferFundsUseCase.handle(transfer))
+                .isInstanceOf(CommandException.class).hasMessage("idempotent: already processed!");
 
         var count = testDataHelper.countProcessedOutbox(opId);
 

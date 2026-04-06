@@ -9,35 +9,32 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.*;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
-import java.time.Duration;
-import java.util.UUID;
-
 /**
- * One consumer for each use case. Or we should create a generica consumer ?
+ * Consumer bounded to the context of transfer.
+ * commands.<bounded-context>.<optionalSubAction>
+ * Optional sub Actions make sense when we have more than one action inside the context ( that may represent an action )
  */
-//@DependsOn("jetStreamInitializer") // it enforces stream creation before this consumer is initialized
 @Component
 public class TransferCommandConsumer extends AbstractNatsConsumer  {
     private static final String subject = "commands.transfer"; // Subject for transfer commands
     private static final String durableConsumerName = "transfer-consumer"; // Durable consumer name for JetStream
     private static final Logger log = LoggerFactory.getLogger(TransferCommandConsumer.class);
+    private static final long maxDeliver = 5; // should match consumer config
     private final Connection natsConnection;
     private final ObjectMapper objectMapper;
-    private final TransferFundsUseCase transferUseCase; // Your business logic
-    private final IdempotencyService idempotencyService;
+    private final TransferFundsUseCase transferUseCase;
 
     public TransferCommandConsumer(final Connection natsConnection,
                                    final ObjectMapper objectMapper,
-                                   final TransferFundsUseCase transferUseCase,
-                                   final IdempotencyService idempotencyService) {
+                                   final TransferFundsUseCase transferUseCase) {
         this.natsConnection = natsConnection;
         this.objectMapper = objectMapper;
         this.transferUseCase = transferUseCase;
-        this.idempotencyService = idempotencyService;
     }
 
     @Override
@@ -48,25 +45,27 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
 
     @Override
     void processMessage(@NonNull final Message message) {
+        final CommandEnvelope<Transfer> envelope;
         try {
-            var envelope = objectMapper.readValue(
+            envelope = objectMapper.readValue(
                     message.getData(),
                     new TypeReference<CommandEnvelope<Transfer>>() {}
             );
+        } catch (Exception e) {
+            log.error("Invalid payload → DLQ");
+            handlePoisonMessage(message, null);
+            message.ack();
+            return;
+        }
 
-            UUID operationId = envelope.operationId();
+        final long deliveries = message.metaData().deliveredCount();
+        final var operationId = envelope.operationId();
 
-            // 🧠 Idempotency check
-            if (idempotencyService.isProcessed(operationId)) {
-                log.info("Skipping already processed operationId={}", operationId);
-                message.ack();
-                return;
-            }
+        try {
 
-            final long deliveries = message.metaData().deliveredCount();
-            log.warn("Processing attempt {} for operationId={}", deliveries, operationId);
+            log.info("Processing attempt {} for operationId={}", deliveries, operationId);
 
-            // 💼 Execute business logic (transactional) -> TODO: also the use case will responsible to include idempotency wallet operation repo through an annotation that will trigger this inclusion
+            // 💼 Transactional business logic
             transferUseCase.handle(envelope.payload());
             message.ack();
 
@@ -78,19 +77,34 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
             message.ack();
 
         } catch (TransientException e) {
+            if (deliveries >= maxDeliver) {
+                log.error("Max delivery reached for operationId={}, sending to DLQ", operationId);
+
+                handlePoisonMessage(message, envelope); // DLQ op
+                message.ack(); // 🔥 VERY IMPORTANT: stop redelivery
+                return;
+            }
             // 🔁 retry via JetStream
             log.warn("Transient failure, will retry: {}", e.getMessage());
-            message.nakWithDelay(Duration.ofSeconds(1));
+            message.nakWithDelay(retryDelay(deliveries));
 
         } catch (Exception e) {
             // 💥 unknown = retry (safe fallback)
-            final var headers = message.getHeaders();
-            final var opId = headers != null ? headers.getFirst("operation_id") : "unknown";
-            log.error("Failed message, operationId={}, subject={}",
-                    opId,
-                    message.getSubject()
-            );
-            message.nakWithDelay(Duration.ofSeconds(1));
+            if (deliveries >= maxDeliver) {
+                log.error("Unknown failure → DLQ, operationId={}", operationId);
+                handlePoisonMessage(message, envelope);
+                message.ack();
+                return;
+            }
+
+            log.error("Unexpected failure, retrying operationId={}, subject={}",
+                    operationId, message.getSubject(), e);
+            message.nakWithDelay(retryDelay(deliveries));
         }
+    }
+
+    @Override
+    void handlePoisonMessage(@NonNull Message message, @Nullable Object envelope) {
+        log.error("Poison message detected: subject={}", message.getSubject());
     }
 }

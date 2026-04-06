@@ -9,7 +9,6 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.*;
 import org.jspecify.annotations.NonNull;
-import org.jspecify.annotations.Nullable;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -22,6 +21,7 @@ import org.springframework.stereotype.Component;
 @Component
 public class TransferCommandConsumer extends AbstractNatsConsumer  {
     private static final String subject = "commands.transfer"; // Subject for transfer commands
+    private static final String dlqSubject = "commands.dlq.transfer"; // Subject for dlq transfer commands
     private static final String durableConsumerName = "transfer-consumer"; // Durable consumer name for JetStream
     private static final Logger log = LoggerFactory.getLogger(TransferCommandConsumer.class);
     private static final long maxDeliver = 5; // should match consumer config
@@ -53,7 +53,7 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
             );
         } catch (Exception e) {
             log.error("Invalid payload → DLQ");
-            handlePoisonMessage(message, null);
+            handleDlqMessage(dlqSubject, natsConnection, message, e);
             message.ack();
             return;
         }
@@ -80,7 +80,7 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
             if (deliveries >= maxDeliver) {
                 log.error("Max delivery reached for operationId={}, sending to DLQ", operationId);
 
-                handlePoisonMessage(message, envelope); // DLQ op
+                handleDlqMessage(dlqSubject, natsConnection, message, e); // DLQ op
                 message.ack(); // 🔥 VERY IMPORTANT: stop redelivery
                 return;
             }
@@ -92,7 +92,7 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
             // 💥 unknown = retry (safe fallback)
             if (deliveries >= maxDeliver) {
                 log.error("Unknown failure → DLQ, operationId={}", operationId);
-                handlePoisonMessage(message, envelope);
+                handleDlqMessage(dlqSubject, natsConnection, message, e);
                 message.ack();
                 return;
             }
@@ -103,8 +103,5 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
         }
     }
 
-    @Override
-    void handlePoisonMessage(@NonNull Message message, @Nullable Object envelope) {
-        log.error("Poison message detected: subject={}", message.getSubject());
-    }
+
 }

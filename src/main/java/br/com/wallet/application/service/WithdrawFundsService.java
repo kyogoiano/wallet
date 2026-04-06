@@ -45,7 +45,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
     @Override
     public void handle(@NonNull final Withdraw withdraw) {
 
-        if (!operationsDao.tryRegister(withdraw.operationId())) {
+        if (!operationsDao.startOperation(withdraw.operationId())) {
             log.info("Idempotent operation ignored. operationId={}", withdraw.operationId());
             return; // idempotent: already processed!
         }

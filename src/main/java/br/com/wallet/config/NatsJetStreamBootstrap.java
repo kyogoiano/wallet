@@ -27,6 +27,7 @@ public class NatsJetStreamBootstrap implements InitializingBean {
         var jsm = connection.jetStreamManagement();
         log.info(">>>> Inicializando Streams NATS...");
         createStream(jsm, "commands", List.of("commands.*"));
+        createStream(jsm, "commands_dlq", List.of("commands.dlq.*"));
         createStream(jsm, "events", List.of("events.*"));
     }
 
@@ -37,7 +38,7 @@ public class NatsJetStreamBootstrap implements InitializingBean {
             jsm.getStreamInfo(name);
             log.info("Stream '{}' already exists!.", name);
         } catch (JetStreamApiException e) {
-            if (e.getApiErrorCode() == 10059 || e.getErrorCode() == 404) { // 10059 é o código NATS para "not found"
+            if (e.getApiErrorCode() == 10059 || e.getErrorCode() == 404) {
                 jsm.addStream(StreamConfiguration.builder()
                         .name(name)
                         .subjects(subjects)

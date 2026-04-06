@@ -20,6 +20,8 @@ The focus of this version is not only scalability, but **correctness under failu
 
 ## ⚡ Architecture Summary
 
+Exactly-once illusion = At-least-once delivery + Idempotency + Atomic Outbox
+
 ### Flow
 
 Client → API → NATS → Worker → DB → ACK

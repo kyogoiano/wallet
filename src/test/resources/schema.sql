@@ -80,6 +80,8 @@ CREATE INDEX IF NOT EXISTS idx_outbox_ready
 
 CREATE TABLE IF NOT EXISTS wallet_operations (
     operation_id UUID PRIMARY KEY,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    --status: PROCESSING | COMPLETED
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING',
+    CONSTRAINT wallet_operations_status_chk
+    CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
 );

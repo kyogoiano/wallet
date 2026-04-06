@@ -21,6 +21,6 @@ public class IdempotenceServiceImpl implements IdempotencyService {
 
     @Override
     public boolean markProcessed(UUID operationId) {
-        return walletOperationsDao.tryRegister(operationId);
+        return walletOperationsDao.startOperation(operationId);
     }
 }

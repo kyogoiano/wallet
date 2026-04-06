@@ -5,15 +5,13 @@ import br.com.wallet.exceptions.PermanentException;
 import br.com.wallet.exceptions.TransientException;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import io.nats.client.Connection;
-import io.nats.client.JetStream;
-import io.nats.client.JetStreamApiException;
-import io.nats.client.PublishOptions;
+import io.nats.client.*;
 import io.nats.client.api.RetentionPolicy;
 import io.nats.client.api.StorageType;
 import io.nats.client.api.StreamConfiguration;
 import io.nats.client.impl.Headers;
 import io.nats.client.impl.NatsMessage;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -41,14 +39,17 @@ public class NatsCommandPublisher {
         this.objectMapper = objectMapper;
         this.jetStream = connection.jetStream();
 
-        ensureStream(connection);
+        final var jsm = connection.jetStreamManagement();
+
+        ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
+        ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
     }
 
-    private void ensureStream(final Connection connection)
+    private void ensureStream(@NonNull final JetStreamManagement jsm,
+                              @NonNull final String streamName,
+                              @NonNull final String subjects,
+                              @NonNull final Duration retention)
             throws IOException, JetStreamApiException {
-
-        final var jsm = connection.jetStreamManagement();
-        String streamName = "commands";
 
         try {
             jsm.getStreamInfo(streamName);
@@ -57,9 +58,9 @@ public class NatsCommandPublisher {
 
                 final var config = StreamConfiguration.builder()
                         .name(streamName)
-                        .subjects("commands.*")
+                        .subjects(subjects)
                         .retentionPolicy(RetentionPolicy.Limits)
-                        .maxAge(Duration.ofHours(24))
+                        .maxAge(retention)
                         .storageType(StorageType.File)
                         .build();
 
@@ -90,6 +91,7 @@ public class NatsCommandPublisher {
             headers.add("operation_id", operationId.toString());
             headers.add("type", envelope.type());
             headers.add("timestamp", envelope.timestamp().toString());
+            headers.add("Nats-Msg-Id", operationId.toString()); // nats dedup header
 
             final var message = NatsMessage.builder()
                     .subject(subject)

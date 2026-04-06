@@ -38,7 +38,7 @@ class DepositFundsService implements DepositFundsUseCase {
     @Override
     public void handle(@NonNull final Deposit deposit) {
 
-        if (!operationsDao.tryRegister(deposit.operationId())) {
+        if (!operationsDao.startOperation(deposit.operationId())) {
             log.info("Idempotent operation ignored. operationId={}", deposit.operationId());
             return; // idempotent: already processed!
         }

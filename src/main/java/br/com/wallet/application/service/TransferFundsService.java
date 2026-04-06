@@ -3,7 +3,7 @@ package br.com.wallet.application.service;
 import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.exceptions.BusinessException;
-import br.com.wallet.exceptions.CommandException;
+import br.com.wallet.infrasctructure.operation.OperationStatus;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -47,12 +47,25 @@ public class TransferFundsService implements TransferFundsUseCase {
     @Override
     public void handle(@NonNull final Transfer transfer) throws BusinessException {
 
-        if (!operationsDao.tryRegister(transfer.operationId())) {
-            log.info("Idempotent operation ignored. operationId={}", transfer.operationId());
-            throw new CommandException("idempotent: already processed!");
+        final boolean started = operationsDao.startOperation(transfer.operationId());
+
+        if (!started) {
+            final var status = operationsDao.getStatus(transfer.operationId());
+
+            if (status == OperationStatus.COMPLETED) {
+                log.info("Idempotent skip {}", transfer.operationId());
+                return;
+            }
+
+            log.warn("Recovering operation {}", transfer.operationId());
         }
 
         this.execute(transfer);
+        outboxDao.save(
+                new TransferCompletedEvent(transfer.from(), transfer.to(), transfer.amount(), transfer.operationId())
+        );
+
+        operationsDao.completeOperation(transfer.operationId());
     }
 
     protected void execute(@NonNull final Transfer transfer) {
@@ -92,9 +105,6 @@ public class TransferFundsService implements TransferFundsUseCase {
         // 🧾 ledger entries
         log.info("Transfer completed. from={}, to={}, amount={}, operationId={}",
                 transfer.from(), transfer.to(), transfer.amount(), transfer.operationId());
-        outboxDao.save(
-                new TransferCompletedEvent(transfer.from(), transfer.to(), transfer.amount(), transfer.operationId())
-        );
     }
 
 }

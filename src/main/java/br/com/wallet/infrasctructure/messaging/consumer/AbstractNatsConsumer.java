@@ -1,15 +1,17 @@
 package br.com.wallet.infrasctructure.messaging.consumer;
 
+import br.com.wallet.exceptions.ExceptionType;
 import io.nats.client.*;
-import io.nats.client.api.AckPolicy;
-import io.nats.client.api.ConsumerConfiguration;
-import io.nats.client.api.DeliverPolicy;
+import io.nats.client.api.*;
+import io.nats.client.impl.Headers;
+import io.nats.client.impl.NatsMessage;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -24,6 +26,8 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
     private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final Semaphore semaphore = new Semaphore(50);
     private final AtomicBoolean running = new AtomicBoolean(true);
+    private final Clock clock = Clock.systemUTC();
+
     private JetStreamSubscription subscription;
 
 
@@ -31,8 +35,7 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
                                   @NonNull final String consumerName,
                                   @NonNull final Connection natsConnection) throws IOException, JetStreamApiException {
         final var jetStream = natsConnection.jetStream();
-
-        // Configure consumer for at-least-once delivery
+        // Configure consumer for at-least-once delivery, backoff follows current retry strategy
         final var consumerConfig = ConsumerConfiguration.builder()
                 .durable(consumerName)
                 .ackPolicy(AckPolicy.Explicit)
@@ -41,14 +44,14 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
                 .deliverPolicy(DeliverPolicy.New) // 🔥 important in prod
                 .build();
 
-        final var pullOptions = PullSubscribeOptions.builder()
+        final var pullSubscribeOptions = PullSubscribeOptions.builder()
                 .stream(streamName)
                 .durable(consumerName)
                 .configuration(consumerConfig)
                 .build();
 
         // Subscribe to the subject
-        subscription = jetStream.subscribe(subject, pullOptions);
+        subscription = jetStream.subscribe(subject, pullSubscribeOptions);
         log.info("Subscribed to NATS JetStream subject '{}' with durable consumer '{}'.", subject, consumerName);
 
     }
@@ -101,7 +104,59 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
 
     abstract void processMessage(Message message);
 
-    abstract void handlePoisonMessage(Message message, Object envelope);
+    void handleDlqMessage(@NonNull String subject, @NonNull Connection connection, @NonNull Message message, @NonNull Exception error) {
+        log.error("Poison message detected: subject={}", message.getSubject());
+        final var now = clock.instant();
+        final var newHeaders = new Headers();
+
+        newHeaders.add("original_subject", message.getSubject());
+        newHeaders.add("operation_id", message.getHeaders().getFirst("operation_id"));
+        newHeaders.add("type", message.getHeaders().getFirst("type"));
+        newHeaders.add("failed_at", now.toString());
+        newHeaders.add("error", error.getClass().getSimpleName());
+        newHeaders.add("error_message", error.getMessage());
+        newHeaders.add("delivery_count", String.valueOf(message.metaData().deliveredCount()));
+        newHeaders.add("failure_type", ExceptionType.parseException(error).name());
+        newHeaders.add("Nats-Msg-Id", message.getHeaders().getFirst("Nats-Msg-Id"));
+        // replay metadata
+        newHeaders.add("replayed", "true");
+        newHeaders.add("replay_at", now.toString());
+
+        final var dlqMessage = NatsMessage.builder()
+                .subject(subject)
+                .headers(newHeaders)
+                .data(message.getData())
+                .build();
+
+        try {
+            final JetStream jetStream = connection.jetStream();
+            jetStream.publish(dlqMessage);
+        } catch (Exception ex) {
+            log.error("Failed to publish to DLQ", ex);
+        }
+
+    }
+
+    void replay(@NonNull final Message dlqMessage, @NonNull final Connection connection) {
+
+        final long deliveries = dlqMessage.metaData().deliveredCount();
+
+        final var originalSubject = dlqMessage.getHeaders().getFirst("original_subject");
+
+        final var replayMessage = NatsMessage.builder()
+                .subject(originalSubject)
+                .headers(dlqMessage.getHeaders())
+                .data(dlqMessage.getData())
+                .build();
+
+        try {
+            final JetStream jetStream = connection.jetStream();
+            jetStream.publish(replayMessage);
+        } catch (Exception ex) {
+            log.error("Failed to publish to DLQ", ex);
+            dlqMessage.nakWithDelay(retryDelay(deliveries));
+        }
+    }
 
 
     @Override

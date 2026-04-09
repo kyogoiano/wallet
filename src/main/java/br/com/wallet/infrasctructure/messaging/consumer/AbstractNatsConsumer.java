@@ -21,7 +21,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 public abstract class AbstractNatsConsumer implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(AbstractNatsConsumer.class);
-    private static final String streamName = "commands";
+    static final long maxDeliver = 5; // should match consumer config
 
     private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final Semaphore semaphore = new Semaphore(50);
@@ -31,7 +31,8 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
     private JetStreamSubscription subscription;
 
 
-    void setupGeneralSubscription(@NonNull final String subject,
+    void setupGeneralSubscription(@NonNull final String streamName,
+                                  @NonNull final String subject,
                                   @NonNull final String consumerName,
                                   @NonNull final Connection natsConnection) throws IOException, JetStreamApiException {
         final var jetStream = natsConnection.jetStream();
@@ -118,9 +119,6 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
         newHeaders.add("delivery_count", String.valueOf(message.metaData().deliveredCount()));
         newHeaders.add("failure_type", ExceptionType.parseException(error).name());
         newHeaders.add("Nats-Msg-Id", message.getHeaders().getFirst("Nats-Msg-Id"));
-        // replay metadata
-        newHeaders.add("replayed", "true");
-        newHeaders.add("replay_at", now.toString());
 
         final var dlqMessage = NatsMessage.builder()
                 .subject(subject)
@@ -139,6 +137,8 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
 
     void replay(@NonNull final Message dlqMessage, @NonNull final Connection connection) {
 
+        dlqMessage.getHeaders().add("replayed", "true");
+        dlqMessage.getHeaders().add("replay_at", clock.instant().toString());
         final long deliveries = dlqMessage.metaData().deliveredCount();
 
         final var originalSubject = dlqMessage.getHeaders().getFirst("original_subject");

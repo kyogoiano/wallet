@@ -20,11 +20,11 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class TransferCommandConsumer extends AbstractNatsConsumer  {
+    private static final String streamName = "commands";
     private static final String subject = "commands.transfer"; // Subject for transfer commands
     private static final String dlqSubject = "commands.dlq.transfer"; // Subject for dlq transfer commands
     private static final String durableConsumerName = "transfer-consumer"; // Durable consumer name for JetStream
     private static final Logger log = LoggerFactory.getLogger(TransferCommandConsumer.class);
-    private static final long maxDeliver = 5; // should match consumer config
     private final Connection natsConnection;
     private final ObjectMapper objectMapper;
     private final TransferFundsUseCase transferUseCase;
@@ -40,7 +40,7 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
     @Override
     public void init() throws Exception {
         // Start polling for messages in a separate thread (or virtual thread)
-        setupGeneralSubscription(subject, durableConsumerName, natsConnection);
+        setupGeneralSubscription(streamName, subject, durableConsumerName, natsConnection);
     }
 
     @Override
@@ -69,7 +69,8 @@ public class TransferCommandConsumer extends AbstractNatsConsumer  {
             transferUseCase.handle(envelope.payload());
             message.ack();
 
-            log.info("Processed operationId={}", operationId);
+            log.info("event=processed operationId={} subject={} deliveries={}",
+                    operationId, subject, deliveries);
 
         } catch (BusinessException e) {
             // ❗ DO NOT retry

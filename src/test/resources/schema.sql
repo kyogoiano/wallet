@@ -85,3 +85,42 @@ CREATE TABLE IF NOT EXISTS wallet_operations (
     CONSTRAINT wallet_operations_status_chk
     CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
 );
+
+
+CREATE TABLE dlq_operations (
+    id UUID PRIMARY KEY,
+    operation_id UUID NOT NULL,
+    subject VARCHAR(20) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+    error TEXT,
+    payload JSONB NOT NULL,
+    retry_count INT NOT NULL DEFAULT 0,
+    next_retry_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processed_at TIMESTAMPTZ,
+    failure_type TEXT NOT NULL
+        CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
+    PARTITION BY RANGE (created_at);
+    CONSTRAINT dlq_status_chk
+          CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED'))
+);
+
+CREATE INDEX idx_dlq_retry
+    ON dlq_operations (next_retry_at)
+    WHERE status IN ('PENDING', 'FAILED');
+
+CREATE INDEX idx_dlq_processing
+    ON dlq_operations (status, created_at)
+    WHERE status = 'PROCESSING';
+
+
+CREATE INDEX idx_dlq_pending
+    ON dlq_operations (id, status)
+    WHERE status IN ('PENDING');
+
+CREATE INDEX idx_dlq_failed
+    ON dlq_operations (failure_type, created_at)
+    WHERE status = 'FAILED';
+
+CREATE INDEX idx_dlq_operation
+    ON dlq_operations (operation_id);

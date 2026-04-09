@@ -8,6 +8,26 @@ The goal of this evolution is to support high concurrency, scalability, and resi
 
 ---
 
+## NATS Clean Architecture
+
+Client
+↓
+Command (operation_id)
+↓
+NATS (dedup hint)
+↓
+Consumer
+↓
+Idempotent Use Case (DB)
+↓
+Outbox (atomic)
+↓
+Relay
+↓
+NATS (dedup again)
+↓
+Downstream (same pattern)
+
 ## 🧱 C4 Model — V2
 
 ### Level 1 — System Context
@@ -164,9 +184,10 @@ Costs:
 
 ## 🔮 Future Improvements
 
-- Dead-letter queues (DLQ)
-- Saga orchestration
-- gRPC / QUIC ingestion
+- Dead-letter queues (DLQ) improvements: 
+  - improve table partitioning with automatic service pgpartman 
+  - fairness implementation on db level
+- gRPC / QUIC ingestion (also GRPC on opentelemetry)
 - Multi-region support
 
 ---

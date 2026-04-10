@@ -2,6 +2,6 @@ package br.com.wallet.domain;
 
 public record LedgerValidationResult(
         boolean valid,
-        long validatedEntriesSize,
+        long corruptedDataSize,
         String error
 ) {}

@@ -16,12 +16,14 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.math.BigDecimal;
 import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
@@ -86,13 +88,13 @@ class ValidateLedgerIT {
 
         assertThat(fromResult.valid()).isTrue();
 
-        assertThat(fromResult.validatedEntriesSize()).isEqualTo(2);
+        assertThat(fromResult.corruptedDataSize()).isEqualTo(0);
 
         var toResult = validateLedgerUseCase.execute(to);
 
         assertThat(toResult.valid()).isTrue();
 
-        assertThat(toResult.validatedEntriesSize()).isEqualTo(1);
+        assertThat(toResult.corruptedDataSize()).isEqualTo(0);
     }
 
     @Test
@@ -115,10 +117,10 @@ class ValidateLedgerIT {
         var toResult = validateLedgerUseCase.execute(to);
 
         assertThat(fromResult.valid()).isTrue();
-        assertThat(fromResult.validatedEntriesSize()).isEqualTo(4);
+        assertThat(fromResult.corruptedDataSize()).isEqualTo(0);
 
         assertThat(toResult.valid()).isTrue();
-        assertThat(toResult.validatedEntriesSize()).isEqualTo(3);
+        assertThat(toResult.corruptedDataSize()).isEqualTo(0);
     }
 
     @Test
@@ -135,9 +137,14 @@ class ValidateLedgerIT {
         var result = validateLedgerUseCase.execute(wallet);
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.error()).contains("Invalid hash");
+        assertThat(result.corruptedDataSize()).isEqualTo(1);
+        assertThat(result.error()).contains("Hash mismatch at sequences");
     }
 
+    /**
+     * This one tests the broken sequence scenario
+     * Validates the current schema constraints setup that guarantee this scene is avoided!
+     */
     @Test
     void shouldDetectBrokenSequence() {
 
@@ -147,13 +154,9 @@ class ValidateLedgerIT {
         transferFundsUseCase.execute(new Transfer(wallet, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
-        // 💥 broke sequence
-        testDataHelper.tamperSequence(wallet, 1L, 99L);
-
-        var result = validateLedgerUseCase.execute(wallet);
-
-        assertThat(result.valid()).isFalse();
-        assertThat(result.error()).contains("Invalid sequence");
+        // 💥 trying to break sequence
+        assertThatThrownBy(()-> testDataHelper.tamperSequence(wallet, 1L, 99L))
+                .isInstanceOf(DataIntegrityViolationException.class);
     }
 
     /**
@@ -184,7 +187,8 @@ class ValidateLedgerIT {
         var result = validateLedgerUseCase.execute(fromWallet);
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.error()).contains("Broken chain");
+        assertThat(result.corruptedDataSize()).isEqualTo(1);
+        assertThat(result.error()).contains("Hash mismatch at sequences");
     }
 
     /**
@@ -204,6 +208,46 @@ class ValidateLedgerIT {
         var result = validateLedgerUseCase.execute(wallet);
 
         assertThat(result.valid()).isFalse();
-        assertThat(result.error()).contains("Invalid hash");
+        assertThat(result.corruptedDataSize()).isEqualTo(1);
+        assertThat(result.error()).contains("Hash mismatch at sequences");
+    }
+
+    /**
+     * This test specifically targets the "Chain link broken" validation.
+     * It breaks the link between entry N and N+1 WITHOUT corrupting the individual hash of N+1.
+     * This happens if previous_hash of N+1 does not match the hash of N,
+     * but the hash of N+1 is still a valid hash of its own content (including that wrong previous_hash).
+     */
+    @Test
+    void shouldDetectChainLinkBroken() {
+        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
+        UUID to = createWalletUseCase.execute();
+
+        // Entry 1: Genesis (Sequence 1)
+        // Entry 2: Transfer (Sequence 2)
+        transferFundsUseCase.execute(new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID()));
+
+        // We need to manipulate the DB such that:
+        // 1. findCorruptedEntries returns empty (all individual hashes are valid)
+        // 2. checkChainBroken returns true (hash of N != previous_hash of N+1)
+
+        // To do this, we'll update both the hash and previous_hash of entry 2 to be "consistent" with a lie.
+        // Or more simply: tamper the hash of entry 1, so entry 2's previous_hash no longer matches it.
+        // But if we tamper entry 1's hash, findCorruptedEntries will catch it first.
+
+        // Actually, the checkChainBroken query in LedgerDao uses:
+        // lead(previous_hash) OVER (ORDER BY sequence) as next_entry_prev_hash ... WHERE hash <> next_entry_prev_hash
+
+        // So if we update previous_hash of sequence 2 to something else, AND update sequence 2's hash
+        // to be valid for that new previous_hash, then findCorruptedEntries stays empty, but checkChainBroken triggers.
+
+        // Let's use a specialized tamper method for this "consistent lie".
+        testDataHelper.tamperConsistentChainBreak(wallet, 2L);
+
+        var result = validateLedgerUseCase.execute(wallet);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.corruptedDataSize()).isEqualTo(0);
+        assertThat(result.error()).contains("Chain link broken: previous_hash mismatch");
     }
 }

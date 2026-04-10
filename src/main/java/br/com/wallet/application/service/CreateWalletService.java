@@ -10,6 +10,7 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.util.UUID;
@@ -46,6 +47,7 @@ public class CreateWalletService implements CreateWalletUseCase {
      * @return return wallet id
      */
     @Traceable("wallet.createWithInitialBalance")
+    @Transactional
     @Override
     public UUID execute(@NonNull final Wallet wallet) {
         final UUID walletId = UUID.randomUUID();

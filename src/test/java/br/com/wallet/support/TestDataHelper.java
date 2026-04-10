@@ -68,6 +68,32 @@ public class TestDataHelper {
         """, fakeHash, walletId, sequence, opId);
     }
 
+    /**
+     * This method breaks the chain link between N and N+1.
+     * It updates entry N+1's previous_hash and recalculates its hash so it is still "consistent",
+     * but no longer matches entry N's hash.
+     */
+    public void tamperConsistentChainBreak(UUID walletId, long sequence) {
+        // First get the entry to re-hash it correctly with a fake previous hash
+        jdbc.update("""
+            UPDATE ledger
+            SET previous_hash = 'broken_link_consistent_lie',
+                hash = encode(digest(
+                    concat_ws('|',
+                        'broken_link_consistent_lie',
+                        wallet_id::text,
+                        trim(to_char(amount, '99999999999999990.00')),
+                        type,
+                        sequence::text,
+                        operation_id::text,
+                        (extract(epoch from created_at) * 1000)::bigint::text
+                    ),
+                    'sha512'
+                ), 'hex')
+            WHERE wallet_id = ? AND sequence = ?
+        """, walletId, sequence);
+    }
+
     public Integer countProcessedOutbox(UUID operationId) {
         return jdbc.queryForObject("""
             SELECT COUNT(*) FROM outbox

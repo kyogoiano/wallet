@@ -50,6 +50,10 @@ public class AccountDao {
         }, walletId);
     }
 
+    @Deprecated
+    /*
+     * this method can break sequence on race conditions
+     */
     public Long nextAccountSequence(@NonNull UUID walletId) {
         return jdbc.queryForObject("""
                     UPDATE accounts
@@ -59,14 +63,21 @@ public class AccountDao {
                 """, Long.class, walletId);
     }
 
-    public void updateBalance(@NonNull UUID accountId, @NonNull BigDecimal amount) {
-        jdbc.update("""
+    public Long updateBalance(@NonNull UUID accountId, @NonNull BigDecimal amount) {
+        return jdbc.queryForObject("""
             UPDATE accounts
-            SET balance = balance + ?, version = version + 1
+            SET balance = balance + ?, version = version + 1, last_sequence = last_sequence + 1
             WHERE id = ?
-        """, amount, accountId);
+            RETURNING last_sequence
+        """, Long.class, amount, accountId);
     }
 
+    /**
+     * this locks the balance in both wallets (account)
+     * WARN: DB respects that order during locking.
+     * @param ordered list of wallets ids
+     * @return id and balance map
+     */
     public Map<UUID, BigDecimal> getBalancesFromWallets(List<@NonNull UUID> ordered) {
         return jdbc.query("""
             SELECT id, balance

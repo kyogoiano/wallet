@@ -1,5 +1,6 @@
 package br.com.wallet.application.aspects.tracing;
 
+import br.com.wallet.exceptions.IdempotencyException;
 import io.micrometer.tracing.BaggageInScope;
 import io.micrometer.tracing.ScopedSpan;
 import io.micrometer.tracing.Tracer;
@@ -25,13 +26,11 @@ public class TracingAspect {
 
     @Around("@annotation(traceable)")
     public Object trace(final ProceedingJoinPoint pjp, final Traceable traceable) throws Throwable {
+        log.debug("Aspect triggered for: {}", traceable.value());
 
         final ScopedSpan span = tracer.startScopedSpan(traceable.value());
-        log.info("Span started, context: {}", span.context());
-
+        
         String operationId = null;
-
-        // Extract operationId from arguments
         for (final Object arg : pjp.getArgs()) {
             if (arg instanceof TraceContext ctx) {
                 ctx.traceTags().forEach(span::tag);
@@ -39,37 +38,38 @@ public class TracingAspect {
                     operationId = ctx.operationId().toString();
                 }
             }
-
-            // fallback (caso venha UUID direto)
             if (arg instanceof UUID uuid && operationId == null) {
                 operationId = uuid.toString();
             }
         }
 
-
-        // The baggage will automatically propagate this to MDC if configured in application.yaml
         try (final BaggageInScope baggage = tracer.createBaggageInScope("operationId", operationId)) {
-                // standard tags!
-                span.tag("class", pjp.getTarget().getClass().getSimpleName());
-                span.tag("method", pjp.getSignature().getName());
-                if(operationId != null) {
-                    span.tag("operationId", operationId);
-                }
+            span.tag("class", pjp.getTarget().getClass().getSimpleName());
+            span.tag("method", pjp.getSignature().getName());
+            if (operationId != null) {
+                span.tag("operationId", operationId);
+            }
 
-                final Object result = pjp.proceed();
+            return pjp.proceed();
 
-                span.tag("status", "SUCCESS");
-
-                return result;
-
-        } catch (Throwable ex) {
+        } catch (IdempotencyException ex) {
+            log.warn("IdempotencyException caught in aspect: {}", ex.getMessage());
+            span.tag("status", "IDEMPOTENT_IGNORE");
+            // Still re-throw so the Controller/Handler can catch it
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.error("RuntimeException caught in aspect: {}", ex.getMessage());
             span.error(ex);
             span.tag("status", "FAILED");
             throw ex;
-
+        } catch (Throwable ex) {
+            log.error("Throwable caught in aspect: {}", ex.getMessage());
+            span.error(ex);
+            span.tag("status", "FAILED");
+            throw ex;
         } finally {
             span.end();
-            log.info("Span ended, context: {}", span.context());
+            log.debug("Aspect finished for: {}", traceable.value());
         }
     }
 }

@@ -2,6 +2,7 @@ package br.com.wallet.application.service;
 
 import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.exceptions.IdempotencyException;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -80,7 +81,7 @@ public class TransferFundsService implements TransferFundsUseCase {
 
         if (operationsDao.registerOperation(transfer.operationId())) {
             log.info("Idempotent operation ignored. operationId={}", transfer.operationId());
-            return; // idempotent: already processed!
+            throw new IdempotencyException("Operation already processed: " + transfer.operationId());
         }
 
         // 🔒 lock ordering (avoid deadlocks: no circular wait)

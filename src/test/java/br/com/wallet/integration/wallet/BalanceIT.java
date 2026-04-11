@@ -7,6 +7,7 @@ import br.com.wallet.application.usecase.WithdrawFundsUseCase;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.domain.context.Withdraw;
+import br.com.wallet.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.TestDataHelper;
@@ -23,6 +24,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
@@ -139,7 +141,7 @@ class BalanceIT {
         UUID opId = UUID.randomUUID();
 
         withdrawFundsUseCase.execute(new Withdraw(wallet, new BigDecimal("30"), opId));
-        withdrawFundsUseCase.execute(new Withdraw(wallet, new BigDecimal("30"), opId));
+        assertThatThrownBy(() -> withdrawFundsUseCase.execute(new Withdraw(wallet, new BigDecimal("30"), opId))).isInstanceOf(IdempotencyException.class);
 
         var balance = balanceUseCase.getBalance(wallet);
 

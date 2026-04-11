@@ -3,7 +3,6 @@ package br.com.wallet.application.core;
 import br.com.wallet.domain.LedgerType;
 import br.com.wallet.infrasctructure.persistence.AccountDao;
 import br.com.wallet.infrasctructure.persistence.LedgerDao;
-import br.com.wallet.util.HashUtils;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;

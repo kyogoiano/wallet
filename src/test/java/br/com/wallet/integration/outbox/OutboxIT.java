@@ -4,6 +4,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
+import br.com.wallet.exceptions.IdempotencyException;
 import br.com.wallet.infrasctructure.outbox.OutboxRelay;
 import br.com.wallet.infrasctructure.outbox.OutboxStatus;
 import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
@@ -21,6 +22,7 @@ import java.math.BigDecimal;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 /**
@@ -223,7 +225,7 @@ class OutboxIT extends RegisterNatsProperties {
         Transfer transfer = new Transfer(from, to, new BigDecimal("50"), opId);
         transferFundsUseCase.handle(transfer);
 
-        transferFundsUseCase.handle(transfer);
+        assertThatThrownBy(() -> transferFundsUseCase.handle(transfer)).isInstanceOf(IdempotencyException.class);
 
         var events = testDataHelper.getOutboxEventsByOperation(opId);
 

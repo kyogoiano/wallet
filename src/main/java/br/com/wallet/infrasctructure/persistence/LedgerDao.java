@@ -5,6 +5,8 @@ import br.com.wallet.domain.LedgerType;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
 import java.math.BigDecimal;
@@ -17,9 +19,12 @@ import java.util.UUID;
 public class LedgerDao {
 
     private final JdbcTemplate jdbc;
+    private final NamedParameterJdbcTemplate namedParameterJdbcTemplate;
 
-    public LedgerDao(final JdbcTemplate jdbc) {
+    public LedgerDao(final JdbcTemplate jdbc,
+                     final NamedParameterJdbcTemplate namedParameterJdbcTemplate) {
         this.jdbc = jdbc;
+        this.namedParameterJdbcTemplate = namedParameterJdbcTemplate;
     }
 
     /**
@@ -42,53 +47,79 @@ public class LedgerDao {
 
     /**
      * Find previous hash from a wallet
+     * This might run into GHOST reads during racing conditions
      * @param walletId wallet id
      * @return previous hash
      */
-    public String findPreviousHash(@NonNull final UUID walletId) {
+    @Deprecated
+    public String findPreviousHash(@NonNull final UUID walletId, @NonNull final  Long sequence) {
         return jdbc.query("""
                     SELECT hash
                     FROM ledger
-                    WHERE wallet_id = ?
-                    ORDER BY sequence DESC
+                    WHERE wallet_id = ? AND sequence = ?
                     LIMIT 1
                 """, rs -> rs.next() ? rs.getString("hash") : null, walletId);
     }
 
     /**
-     * Insert ledger record
+     * Insert ledger record using db hash calculation, this impl let db cal
+     * The inner select that pick the previous hash prevents ghost reads on racing conditions
+     * Racing Scene: T1 execute updateBalance -> receive sequence = 10.
+     *               T2 execute updateBalance -> receive sequence = 11.
+     *               T2 try to findPreviousHash(walletI, 10)
+     * Also to adhere to the hash consistency we will calculate hash inside PostgreSQL pgcrypto extension
+     * Hash calculations using SHA512 with critical fields
      * @param walletId wallet id
      * @param amount money amount
      * @param ledgerType ledger operation type
      * @param operationId operation id
      * @param nextSequence next sequence
-     * @param hash hash input ( used to calculate hash on db)
      * @param now operation instant
-     * @param prevHash previous hash
      */
     public void insertLedger(@NonNull final UUID walletId,
                               @NonNull final BigDecimal amount,
                               @NonNull final LedgerType ledgerType,
                               @NonNull final UUID operationId,
                               @NonNull final Long nextSequence,
-                              @NonNull final String hash,
-                              @NonNull final Instant now,
-                              @Nullable final String prevHash) {
-        jdbc.update("""
+                              @NonNull final Instant now) {
+        final var params = new MapSqlParameterSource()
+                .addValue("id", UUID.randomUUID())
+                .addValue("walletId", walletId)
+                .addValue("amount", amount)
+                .addValue("type", ledgerType.name())
+                .addValue("operationId", operationId)
+                .addValue("now", now.atOffset(ZoneOffset.UTC))
+                .addValue("sequence", nextSequence);
+        namedParameterJdbcTemplate.update("""
                             INSERT INTO ledger (
-                                id, wallet_id, amount, type, operation_id, created_at, sequence, hash, previous_hash
+                                id, wallet_id, amount, type, operation_id, created_at, sequence, previous_hash, hash
                             )
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        """,
-                UUID.randomUUID(),
-                walletId,
-                amount,
-                ledgerType.name(),
-                operationId,
-                now.atOffset(ZoneOffset.UTC),
-                nextSequence,
-                hash,
-                prevHash
+                            WITH prev_data AS (
+                                SELECT hash FROM ledger
+                                WHERE wallet_id = :walletId AND sequence = (:sequence - 1)
+                            )
+                            SELECT
+                                :id,
+                                :walletId,
+                                :amount,
+                                :type,
+                                :operationId,
+                                :now,
+                                :sequence,
+                                (SELECT hash FROM prev_data),
+                                encode(digest(
+                                    concat_ws('|',
+                                                coalesce((SELECT hash FROM prev_data), 'GENESIS'),
+                                                :walletId::text,
+                                                to_char(:amount, 'FM99999999999999999.00'),
+                                                :type,
+                                                :sequence::text,
+                                                :operationId::text,
+                                                (extract(epoch from :now) * 1000)::bigint::text
+                                    ),
+                                    'sha512'
+                                ), 'hex')
+                        """,params
         );
     }
 
@@ -152,5 +183,52 @@ public class LedgerDao {
               FROM ledger
               WHERE wallet_id = ?;
         """, Long.class, walletId);
+    }
+
+    /**
+     * Fast hash chain and sequence verification
+     * @param walletId wallet id
+     * @return corrupted sequences
+     */
+    public List<Long> findCorruptedEntries(@NonNull final UUID walletId) {
+        return jdbc.query("""
+            SELECT sequence
+            FROM ledger
+            WHERE wallet_id = ?
+            AND hash <> encode(digest(
+                    concat_ws('|',
+                        coalesce(previous_hash, 'GENESIS'),
+                        wallet_id::text,
+                        trim(to_char(amount, '99999999999999990.00')),
+                        type,
+                        sequence::text,
+                        operation_id::text,
+                        (extract(epoch from created_at) * 1000)::bigint::text
+                    ),
+                    'sha512'
+                ), 'hex')
+            ORDER BY sequence ASC
+       """, (rs, rowNum) -> rs.getLong("sequence"), walletId);
+    }
+
+    /**
+     *  Verify "Broken Chain" (if N-1 line hash is equals to previous_hash on line N)
+     *  * Fast Windows function (lead over)
+     * @param walletId wallet id
+     * @return true if chain is broken
+     */
+    public Boolean checkChainBroken(@NonNull final UUID walletId) {
+        return jdbc.queryForObject("""
+            SELECT EXISTS (
+                SELECT 1 FROM (
+                    SELECT hash,
+                           lead(previous_hash) OVER (ORDER BY sequence) as next_entry_prev_hash,
+                           sequence
+                    FROM ledger
+                    WHERE wallet_id = ?
+                ) t
+                WHERE next_entry_prev_hash IS NOT NULL AND hash <> next_entry_prev_hash
+            )
+        """, Boolean.class, walletId);
     }
 }

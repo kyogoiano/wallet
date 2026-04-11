@@ -478,13 +478,14 @@ Each operation includes an `operation_id`:
 * Ledger Historic Balance Snapshot 
   - instead of O(n), we reduce to O(k), where k is last snapshot size (we can take periodic snapshots)
 * Ledger Incremental Validation, validate only new entries since last validation (O(1) amortized)
+* Merkle Tree partial or Checkpoints on the ledger Validation Service (this will driver to O(log n)).
 * Pagination for ledger
 * Kafka integration (Outbox → Kafka relay)
 * Fraud detection consumers
 * Multi-currency support
 * Ledger hash chaining (tamper-proof audit)
 * Rate limiting / compliance rules
-* Build tuning (gradle configuration caching) 
+* Build tuning (Gradle configuration caching) 
 * Fine graining exceptions (also improving exception handling)
 * Improve stripe style (tracked replies)
 * Include security

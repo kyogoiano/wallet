@@ -6,6 +6,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.DepositFundsUseCase;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.domain.context.Wallet;
+import br.com.wallet.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.RegisterNatsProperties;
@@ -19,6 +20,7 @@ import org.springframework.context.annotation.Import;
 import java.math.BigDecimal;
 import java.util.UUID;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
@@ -69,7 +71,7 @@ public class DepositFundsIT extends RegisterNatsProperties {
 
         // when
         depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId));
-        depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId)); // retry
+        assertThatThrownBy(() -> depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId))).isInstanceOf(IdempotencyException.class); // retry
 
         // then
         // Initial 10 + one deposit of 50 = 60

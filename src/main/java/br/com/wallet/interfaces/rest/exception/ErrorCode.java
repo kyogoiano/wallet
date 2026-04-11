@@ -6,7 +6,8 @@ public enum ErrorCode {
     INSUFFICIENT_FUNDS("wallet.insufficient_funds"),
     INVALID_AMOUNT("wallet.invalid_amount"),
     MISSING_HEADER("wallet.missing_header"),
-    VALIDATION_ERROR("wallet.validation_error");
+    VALIDATION_ERROR("wallet.validation_error"),
+    DUPLICATE_OPERATION("wallet.duplicate_operation");
 
     private final String error;
 

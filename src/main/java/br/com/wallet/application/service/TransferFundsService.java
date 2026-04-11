@@ -2,6 +2,7 @@ package br.com.wallet.application.service;
 
 import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.exceptions.IdempotencyException;
 import br.com.wallet.exceptions.BusinessException;
 import br.com.wallet.infrasctructure.operation.OperationStatus;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
@@ -42,6 +43,31 @@ public class TransferFundsService implements TransferFundsUseCase {
         this.accountDao = accountDao;
     }
 
+
+    /**
+     * Transfer funds using deterministic lock ordering
+     * Desired flow:
+     * -------------------------------------------
+     * Step	Pod 1	                Pod 2
+     * 1	locks A	                waits on A
+     * 2	locks B	                still waiting
+     * 3	executes transfer A→B	still waiting
+     * 4	commits (releases A, B)	locks A
+     * 5	—	                    locks B
+     * 6	—	                    executes transfer B→A
+     * -------------------------------------------
+     * Deadlock flow:
+     * -------------------------------------------
+     * Step	Pod 1	                Pod 2
+     * 1	locks A	                locks B
+     * 2	waits on B	            waits on A
+     * -------------------------------------------
+     * Now both are waiting forever → 💥 deadlock
+     * ------------------------------------------
+     * * The database detects this and kills one transaction!
+     *
+     * @param transfer transfer object
+     */
     @Traceable("wallet.transfer")
     @Transactional
     @Override
@@ -54,7 +80,7 @@ public class TransferFundsService implements TransferFundsUseCase {
 
             if (status == OperationStatus.COMPLETED) {
                 log.info("Idempotent skip {}", transfer.operationId());
-                return;
+                throw new IdempotencyException("Operation already processed: " + transfer.operationId());
             }
 
             log.warn("Recovering operation {}", transfer.operationId());
@@ -78,7 +104,7 @@ public class TransferFundsService implements TransferFundsUseCase {
             throw new IllegalArgumentException("Cannot transfer to same wallet");
         }
 
-        // 🔒 lock ordering (avoid deadlocks)
+        // 🔒 lock ordering (avoid deadlocks: no circular wait)
         final var ordered = Stream.of(transfer.from(), transfer.to())
                 .sorted()
                 .toList();
@@ -99,6 +125,7 @@ public class TransferFundsService implements TransferFundsUseCase {
         }
 
         final var now = Instant.now();
+        // each child transaction unlock one wallet , first from wallet and then to wallet
         core.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), now);
         core.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), now);
 

@@ -36,7 +36,13 @@ CREATE TABLE ledger (
         UNIQUE (operation_id, wallet_id),
 
     CONSTRAINT ledger_sequence_unique
-        UNIQUE (wallet_id, sequence)
+        UNIQUE (wallet_id, sequence),
+
+    CONSTRAINT ledger_integrity_chk
+        CHECK (
+            (sequence = 1 AND previous_hash IS NULL) OR
+            (sequence > 1 AND previous_hash IS NOT NULL)
+            )
 );
 
 -- Indexes for performance

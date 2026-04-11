@@ -2,6 +2,7 @@ package br.com.wallet.infrasctructure.messaging.dlq;
 
 import br.com.wallet.exceptions.TransientException;
 import br.com.wallet.infrasctructure.persistence.DlqOperationsDao;
+import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.impl.Headers;
@@ -22,12 +23,12 @@ public class DlqReplayEngine {
     private static final Logger log = LoggerFactory.getLogger(DlqReplayEngine.class);
     private final Clock clock;
     private final DlqOperationsDao dlqDao;
-    private final JetStream jetStream;
+    private final Connection connection;
 
-    public DlqReplayEngine(Clock clock, DlqOperationsDao dlqDao, JetStream jetStream) {
+    public DlqReplayEngine(Clock clock, DlqOperationsDao dlqDao, Connection connection) {
         this.clock = clock;
         this.dlqDao = dlqDao;
-        this.jetStream = jetStream;
+        this.connection = connection;
     }
 
     @Scheduled(fixedDelay = 10000)
@@ -71,6 +72,7 @@ public class DlqReplayEngine {
                 .data(event.payload().getBytes())
                 .build();
 
+        final JetStream jetStream = connection.jetStream();
         jetStream.publish(message);
     }
 }

@@ -94,8 +94,9 @@ CREATE TABLE wallet_operations (
     -- For high-write event workloads, increase max_wal_size and wal_buffers to reduce checkpoint frequency and improve throughput.
 );
 
-CREATE TABLE dlq_operations (
-  id UUID PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS dlq_operations (
+  id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   operation_id UUID NOT NULL,
   subject VARCHAR(20) NOT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
@@ -103,32 +104,36 @@ CREATE TABLE dlq_operations (
   payload JSONB NOT NULL,
   retry_count INT NOT NULL DEFAULT 0,
   next_retry_at TIMESTAMPTZ,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   processed_at TIMESTAMPTZ,
   failure_type TEXT NOT NULL
       CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
   CONSTRAINT dlq_status_chk
-      CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED'))
+      CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED')),
+  CONSTRAINT dlq_operations_pkey PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
-CREATE INDEX idx_dlq_retry
+CREATE INDEX IF NOT EXISTS idx_dlq_retry
     ON dlq_operations (next_retry_at)
     WHERE status IN ('PENDING', 'FAILED');
 
-CREATE INDEX idx_dlq_processing
+CREATE INDEX IF NOT EXISTS idx_dlq_processing
     ON dlq_operations (status, created_at)
     WHERE status = 'PROCESSING';
 
 
-CREATE INDEX idx_dlq_pending
+CREATE INDEX IF NOT EXISTS idx_dlq_pending
     ON dlq_operations (id, status)
     WHERE status IN ('PENDING');
 
-CREATE INDEX idx_dlq_operation
+CREATE INDEX IF NOT EXISTS idx_dlq_operation
     ON dlq_operations (operation_id);
 
-CREATE INDEX idx_dlq_pending_retry
+CREATE INDEX IF NOT EXISTS idx_dlq_pending_retry
     ON dlq_operations (status, next_retry_at)
     WHERE status = 'PENDING';
+
+CREATE INDEX IF NOT EXISTS idx_dlq_failed
+    ON dlq_operations (failure_type, created_at)
+    WHERE status = 'FAILED';
 
 --TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

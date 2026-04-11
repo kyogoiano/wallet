@@ -226,7 +226,7 @@ class ValidateLedgerIT extends RegisterNatsProperties {
 
         // Entry 1: Genesis (Sequence 1)
         // Entry 2: Transfer (Sequence 2)
-        transferFundsUseCase.execute(new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID()));
 
         // We need to manipulate the DB such that:
         // 1. findCorruptedEntries returns empty (all individual hashes are valid)

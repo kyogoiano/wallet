@@ -41,6 +41,7 @@ public class DlqReplayEngine {
 
         for (final var event : batch) {
             try {
+                if (event.status() == DlqStatus.COMPLETED) continue;
                 replay(event);
                 dlqDao.markAsCompleted(event.id(), now);
 

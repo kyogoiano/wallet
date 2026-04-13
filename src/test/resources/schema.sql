@@ -134,3 +134,6 @@ CREATE INDEX IF NOT EXISTS idx_dlq_pending_retry
 CREATE INDEX IF NOT EXISTS idx_dlq_failed
     ON dlq_operations (failure_type, created_at)
     WHERE status = 'FAILED';
+
+CREATE TABLE dlq_operations_default
+    PARTITION OF dlq_operations DEFAULT;

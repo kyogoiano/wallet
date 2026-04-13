@@ -24,6 +24,12 @@ public class DlqOperationsDao {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Claim Batch with fairness on next retry at and created at
+     * @param now current instant
+     * @param limit batch size
+     * @return list of dlq events
+     */
     public List<DlqEvent> claimBatch(@NonNull Instant now, @NonNull Integer limit) {
         return jdbc.query("""
             WITH claimed AS (
@@ -31,7 +37,7 @@ public class DlqOperationsDao {
                       FROM dlq_operations
                       WHERE status IN ('PENDING', 'FAILED')
                         AND (next_retry_at IS NULL OR next_retry_at <= ?)
-                      ORDER BY created_at
+                      ORDER BY next_retry_at, created_at
                       LIMIT ?
                       FOR UPDATE SKIP LOCKED
                     )

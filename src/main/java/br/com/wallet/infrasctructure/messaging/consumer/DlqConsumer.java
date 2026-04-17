@@ -1,17 +1,16 @@
 package br.com.wallet.infrasctructure.messaging.consumer;
 
-import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqEvent;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqFailureType;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqStatus;
 import br.com.wallet.infrasctructure.persistence.DlqOperationsDao;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Connection;
 import io.nats.client.Message;
 import io.nats.client.impl.Headers;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -27,18 +26,17 @@ public class DlqConsumer extends AbstractNatsConsumer {
     private static final String durableConsumerName = "dlq-consumer"; // Durable consumer name for JetStream
     private static final Logger log = LoggerFactory.getLogger(DlqConsumer.class);
 
-    private final Connection natsConnection;
     private final DlqOperationsDao dlqOperationsDao;
 
-    public DlqConsumer(final Connection natsConnection,
+    public DlqConsumer(@Autowired final Connection natsConnection,
                        final DlqOperationsDao dlqOperationsDao) {
-        this.natsConnection = natsConnection;
+        super(subject, null, natsConnection, null, null);
         this.dlqOperationsDao = dlqOperationsDao;
     }
 
     @Override
     public void init() throws Exception {
-        setupGeneralSubscription(streamName, subject, durableConsumerName, natsConnection);
+        setupGeneralSubscription(streamName, durableConsumerName);
     }
 
     @Override

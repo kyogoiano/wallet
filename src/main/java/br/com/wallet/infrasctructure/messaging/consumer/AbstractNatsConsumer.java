@@ -1,6 +1,10 @@
 package br.com.wallet.infrasctructure.messaging.consumer;
 
+import br.com.wallet.application.aspects.tracing.TraceContext;
+import br.com.wallet.application.usecase.UseCase;
+import br.com.wallet.domain.envelope.CommandEnvelope;
 import br.com.wallet.exceptions.ExceptionType;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.*;
 import io.nats.client.api.*;
 import io.nats.client.impl.Headers;
@@ -19,7 +23,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public abstract class AbstractNatsConsumer implements SmartLifecycle {
+public abstract class AbstractNatsConsumer<T extends TraceContext> implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(AbstractNatsConsumer.class);
     static final long maxDeliver = 5; // should match consumer config
 
@@ -29,19 +33,29 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
     private final Clock clock = Clock.systemUTC();
 
     private JetStreamSubscription subscription;
+    private final String subject;
+    private final String dlqSubject;
+    private final Connection natsConnection;
+    private final ObjectMapper objectMapper;
+    private final UseCase<T> useCase;
 
+    public AbstractNatsConsumer(String subject, String dlqSubject, Connection natsConnection, ObjectMapper objectMapper, final UseCase<T> useCase) {
+        this.subject = subject;
+        this.dlqSubject = dlqSubject;
+        this.natsConnection = natsConnection;
+        this.objectMapper = objectMapper;
+        this.useCase = useCase;
+    }
 
     void setupGeneralSubscription(@NonNull final String streamName,
-                                  @NonNull final String subject,
-                                  @NonNull final String consumerName,
-                                  @NonNull final Connection natsConnection) throws IOException, JetStreamApiException {
+                                  @NonNull final String consumerName ) throws IOException, JetStreamApiException {
         final var jetStream = natsConnection.jetStream();
         // Configure consumer for at-least-once delivery, backoff follows current retry strategy
         final var consumerConfig = ConsumerConfiguration.builder()
                 .durable(consumerName)
                 .ackPolicy(AckPolicy.Explicit)
-                .ackWait(Duration.ofSeconds(30))
-                .maxDeliver(5)
+                .maxDeliver(maxDeliver)
+                .backoff(backoffSequence)
                 .deliverPolicy(DeliverPolicy.New) // 🔥 important in prod
                 .build();
 
@@ -103,7 +117,53 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
 
     public abstract void init() throws Exception;
 
-    abstract void processMessage(Message message);
+    protected void beforeHandle(CommandEnvelope<T> envelope, Message message) {}
+
+    protected void afterHandle(CommandEnvelope<T> envelope, Message message) {}
+
+    protected void onFailure(Exception e, CommandEnvelope<T> envelope, Message message) {}
+
+    void processMessage(@NonNull final Message message) {
+        final CommandEnvelope<T> envelope;
+        try {
+            envelope = objectMapper.readValue(
+                    message.getData(),
+                    objectMapper.getTypeFactory()
+                            .constructParametricType(CommandEnvelope.class, Class.forName(message.getHeaders().getFirst("type")))
+            );
+        } catch (Exception e) {
+            log.error("Invalid payload → DLQ");
+            handleDlqMessage(dlqSubject, natsConnection, message, e);
+            message.ack();
+            return;
+        }
+
+        final long deliveries = message.metaData().deliveredCount();
+        final var operationId = envelope.operationId();
+
+        try {
+            log.info("Processing attempt {} for operationId={}", deliveries, operationId);
+
+            // 💼 Transactional business logic
+            useCase.handle(envelope.payload());
+            message.ack();
+
+            log.info("event=processed operationId={} subject={} deliveries={}",
+                    operationId, subject, deliveries);
+
+        } catch (Exception e) {
+            if(RetryPolicy.decide(deliveries, e).equals(RetryDecision.DLQ)) {
+                log.error("Max delivery reached for operationId={}, sending to DLQ", operationId);
+                handleDlqMessage(dlqSubject, natsConnection, message, e);
+                message.ack();
+                return;
+            }
+            // 🔁 retry via JetStream
+            log.warn("Transient failure, will retry: {}", e.getMessage());
+            message.nakWithDelay(retryDelay(deliveries));
+
+        }
+    }
 
     void handleDlqMessage(@NonNull String subject, @NonNull Connection connection, @NonNull Message message, @NonNull Exception error) {
         log.error("Poison message detected: subject={}", message.getSubject());
@@ -198,7 +258,7 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
         return Integer.MAX_VALUE; // start late, stop early
     }
 
-    Duration retryDelay(long deliveries) {
+    private Duration retryDelay(long deliveries) {
         return switch ((int) deliveries) {
             case 1 -> Duration.ofSeconds(1);
             case 2 -> Duration.ofSeconds(5);
@@ -206,4 +266,11 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
             default -> Duration.ofSeconds(30);
         };
     }
+
+    private static final Duration[] backoffSequence = new Duration[] {
+            Duration.ofSeconds(1),
+            Duration.ofSeconds(5),
+            Duration.ofSeconds(10),
+            Duration.ofSeconds(30)
+    };
 }

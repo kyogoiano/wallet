@@ -18,7 +18,7 @@ import br.com.wallet.exceptions.BusinessException;
  * 8- commit
  * -----------------------------------
  */
-public interface TransferFundsUseCase {
-
+public interface TransferFundsUseCase extends UseCase<Transfer> {
+    @Override
     void handle(Transfer transfer) throws BusinessException;
 }

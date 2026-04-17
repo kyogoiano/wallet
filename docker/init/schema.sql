@@ -136,7 +136,7 @@ CREATE INDEX IF NOT EXISTS idx_dlq_failed
     ON dlq_operations (failure_type, created_at)
     WHERE status = 'FAILED';
 
-CREATE TABLE dlq_operations_default
+CREATE TABLE IF NOT EXISTS dlq_operations_default
     PARTITION OF dlq_operations DEFAULT;
 
 --TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

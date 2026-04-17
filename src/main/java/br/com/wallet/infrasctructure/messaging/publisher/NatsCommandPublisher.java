@@ -45,6 +45,15 @@ public class NatsCommandPublisher {
         ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
     }
 
+    /**
+     * Publish stream configuration to JetStream, also it uses a duplicat window to avoid processing duplicate commands
+     * @param jsm jet stream management client
+     * @param streamName stream name
+     * @param subjects subjects
+     * @param retention retention policy duration
+     * @throws IOException io exception
+     * @throws JetStreamApiException jet stream api exception
+     */
     private void ensureStream(@NonNull final JetStreamManagement jsm,
                               @NonNull final String streamName,
                               @NonNull final String subjects,
@@ -62,6 +71,7 @@ public class NatsCommandPublisher {
                         .retentionPolicy(RetentionPolicy.Limits)
                         .maxAge(retention)
                         .storageType(StorageType.File)
+                        .duplicateWindow(Duration.ofMinutes(5))
                         .build();
 
                 jsm.addStream(config);

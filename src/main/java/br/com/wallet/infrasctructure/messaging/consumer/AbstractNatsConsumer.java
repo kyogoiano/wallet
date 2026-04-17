@@ -23,6 +23,12 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Generalized nats consumer, this will handle nats consumer setup, polling and message processing.
+ * Note: Spring will manage all child beans lifecycle.
+ * * By default all messages carry on a Trace context, so this will improve traceability and ease generic behaviors
+ * @param <T> trace context of the message
+ */
 public abstract class AbstractNatsConsumer<T extends TraceContext> implements SmartLifecycle {
     private static final Logger log = LoggerFactory.getLogger(AbstractNatsConsumer.class);
     static final long maxDeliver = 5; // should match consumer config

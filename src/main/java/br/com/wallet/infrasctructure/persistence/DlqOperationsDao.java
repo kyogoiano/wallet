@@ -1,5 +1,6 @@
 package br.com.wallet.infrasctructure.persistence;
 
+import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqEvent;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqFailureType;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqStatus;
@@ -157,14 +158,15 @@ public class DlqOperationsDao {
                 """.formatted(partitionName, fromDate, toDate));
     }
 
+    @Traceable("dlq.insert")
     public void insert(@NonNull DlqEvent dlqEvent) {
         jdbc.update("""
-    INSERT INTO dlq_operations (
-        id, operation_id, subject, status, error, payload,
-        retry_count, next_retry_at, created_at, processed_at, failure_type
-    )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-""",
+                    INSERT INTO dlq_operations (
+                        id, operation_id, subject, status, error, payload,
+                        retry_count, next_retry_at, created_at, processed_at, failure_type
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
                 dlqEvent.id(),
                 dlqEvent.operationId(),
                 dlqEvent.subject(),

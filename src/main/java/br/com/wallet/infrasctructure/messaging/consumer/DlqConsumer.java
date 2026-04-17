@@ -19,7 +19,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Component
-public class DlqConsumer extends AbstractNatsConsumer {
+public class DlqConsumer extends AbstractNatsConsumer<DlqEvent> {
 
     private static final String streamName = "commands_dlq";
     private static final String subject = "commands.dlq.*"; // Subject for transfer commands
@@ -39,8 +39,12 @@ public class DlqConsumer extends AbstractNatsConsumer {
         setupGeneralSubscription(streamName, durableConsumerName);
     }
 
+    /**
+     * This overrides default message processing for one exclusive to dlq support
+     * @param message dlq message
+     */
     @Override
-    void processMessage(@NonNull Message message) {
+    void processMessage(@NonNull final Message message) {
         try {
             var headers = message.getHeaders();
 

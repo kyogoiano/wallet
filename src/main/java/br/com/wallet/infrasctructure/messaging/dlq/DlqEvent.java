@@ -1,6 +1,9 @@
 package br.com.wallet.infrasctructure.messaging.dlq;
 
+import br.com.wallet.application.aspects.tracing.TraceContext;
+
 import java.time.Instant;
+import java.util.Map;
 import java.util.UUID;
 
 public record DlqEvent(UUID id,
@@ -13,5 +16,23 @@ public record DlqEvent(UUID id,
                        Instant nextRetryAt,
                        Instant createdAt,
                        Instant processedAt,
-                       DlqFailureType failureType) {
+                       DlqFailureType failureType) implements TraceContext {
+    @Override
+    public UUID operationId() {
+        return this.operationId;
+    }
+
+    @Override
+    public Map<String, String> traceTags() {
+        return Map.of(
+                "dlq.id", id.toString(),
+                "dlq.subject", subject,
+                "dlq.status", status.name(),
+                "dlq.error",  error,
+                "dlq.retryCount", retryCount.toString(),
+                "dlq.failureType", failureType.name()
+        );
+    }
+
+
 }

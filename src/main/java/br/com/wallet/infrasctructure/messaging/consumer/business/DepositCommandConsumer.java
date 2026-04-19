@@ -1,9 +1,7 @@
 package br.com.wallet.infrasctructure.messaging.consumer.business;
 
 import br.com.wallet.application.usecase.DepositFundsUseCase;
-import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.domain.context.Deposit;
-import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.infrasctructure.messaging.consumer.AbstractNatsConsumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Connection;

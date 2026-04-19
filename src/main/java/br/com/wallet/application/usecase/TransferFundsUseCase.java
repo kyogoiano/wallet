@@ -1,7 +1,6 @@
 package br.com.wallet.application.usecase;
 
 import br.com.wallet.domain.context.Transfer;
-import br.com.wallet.exceptions.BusinessException;
 
 /**
  * @author Leandro

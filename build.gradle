@@ -20,7 +20,7 @@ repositories {
 
 ext {
 	springVersion = "7.0.6"
-	openApiVersion = "3.0.2"
+	openApiVersion = "3.0.3"
 	jnatsVersion = "2.25.2"
 }
 

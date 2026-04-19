@@ -1,11 +1,9 @@
 package br.com.wallet.unit.interfaces.rest;
 
-import br.com.wallet.application.usecase.DepositFundsUseCase;
-import br.com.wallet.application.usecase.TransferFundsUseCase;
-import br.com.wallet.application.usecase.WithdrawFundsUseCase;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.exceptions.InsufficientFundsException;
+import br.com.wallet.infrasctructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.interfaces.rest.controller.OperationsController;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,13 +28,7 @@ class OperationsControllerTest {
     MockMvc mockMvc;
 
     @MockitoBean
-    TransferFundsUseCase transfer;
-
-    @MockitoBean
-    DepositFundsUseCase deposit;
-
-    @MockitoBean
-    WithdrawFundsUseCase withdraw;
+    NatsCommandPublisher natsCommandPublisher;
 
     @Test
     void shouldTransferSuccessfully() throws Exception {
@@ -55,7 +47,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(transfer).handle(any());
+        verify(natsCommandPublisher).publish(anyString(), any());
     }
 
     @Test
@@ -75,7 +67,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isBadRequest());
 
-        verifyNoInteractions(transfer);
+        verifyNoInteractions(natsCommandPublisher);
     }
 
     @Test
@@ -117,7 +109,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(deposit).handle(new Deposit(walletId, new BigDecimal("100"), opId));
+        verify(natsCommandPublisher).publish("commands.deposit", new Deposit(walletId, new BigDecimal("100"), opId));
     }
 
     @Test
@@ -181,10 +173,8 @@ class OperationsControllerTest {
         UUID opId = UUID.randomUUID();
 
         doThrow(new IllegalStateException("Operation Failed!"))
-                .when(deposit)
-                .handle(argThat(cmd ->
-                        walletId.equals(cmd.walletId()) &&
-                                opId.equals(cmd.operationId())
+                .when(natsCommandPublisher)
+                .publish(argThat(subject -> subject.equals("commands.deposit")), argThat(cmd -> opId.equals(cmd.operationId())
                 ));
 
         var body = """
@@ -220,7 +210,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isNoContent());
 
-        verify(withdraw).handle(new Withdraw(walletId, new BigDecimal("50"), opId));
+        verify(natsCommandPublisher).publish("commands.withdraw", new Withdraw(walletId, new BigDecimal("50"), opId));
     }
 
     @Test
@@ -230,11 +220,10 @@ class OperationsControllerTest {
         UUID opId = UUID.randomUUID();
 
         doThrow(new InsufficientFundsException())
-                .when(withdraw)
-                .handle(argThat(cmd ->
-                        walletId.equals(cmd.walletId()) &&
-                                opId.equals(cmd.operationId())
-                ));
+                .when(natsCommandPublisher)
+                .publish(argThat(arg -> arg.equals("commands.withdraw")),
+                        argThat(cmd -> opId.equals(cmd.operationId()))
+                );
 
         var body = """
                     {

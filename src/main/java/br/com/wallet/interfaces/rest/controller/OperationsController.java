@@ -1,11 +1,9 @@
 package br.com.wallet.interfaces.rest.controller;
 
-import br.com.wallet.application.usecase.DepositFundsUseCase;
-import br.com.wallet.application.usecase.TransferFundsUseCase;
-import br.com.wallet.application.usecase.WithdrawFundsUseCase;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Withdraw;
+import br.com.wallet.infrasctructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.interfaces.rest.api.OperationsApi;
 import br.com.wallet.interfaces.rest.dto.DepositCommand;
 import br.com.wallet.interfaces.rest.dto.TransferCommand;
@@ -24,18 +22,12 @@ public class OperationsController implements OperationsApi {
 
 
     private static final Logger log = LoggerFactory.getLogger(OperationsController.class);
-    private final TransferFundsUseCase transferUseCase;
-    private final DepositFundsUseCase depositUseCase;
-    private final WithdrawFundsUseCase withdrawUseCase;
+    private final NatsCommandPublisher natsCommandPublisher;
 
     public OperationsController(
-            final TransferFundsUseCase transferUseCase,
-            final DepositFundsUseCase depositUseCase,
-            final WithdrawFundsUseCase withdrawUseCase
+            final NatsCommandPublisher natsCommandPublisher
     ) {
-        this.transferUseCase = transferUseCase;
-        this.depositUseCase = depositUseCase;
-        this.withdrawUseCase = withdrawUseCase;
+        this.natsCommandPublisher = natsCommandPublisher;
     }
 
     /**
@@ -53,9 +45,7 @@ public class OperationsController implements OperationsApi {
         log.info("Transfer requested: from={}, to={}, amount={}",
                 command.from(), command.to(), command.amount());
         var transfer = new Transfer(command.from(), command.to(), command.amount(), operationId);
-        transferUseCase.handle(
-                transfer
-        );
+        natsCommandPublisher.publish("commands.transfer", transfer);
     }
 
     @PostMapping("/deposit")
@@ -65,7 +55,7 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final DepositCommand command) {
         var deposit = new Deposit(command.walletId(), command.amount(), operationId);
-        depositUseCase.handle(deposit);
+        natsCommandPublisher.publish("commands.deposit", deposit);
     }
 
     @PostMapping("/withdraw")
@@ -75,6 +65,6 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final WithdrawCommand command) {
         var withdraw = new Withdraw(command.walletId(), command.amount(), operationId);
-        withdrawUseCase.handle(withdraw);
+        natsCommandPublisher.publish("commands.withdraw", withdraw);
     }
 }

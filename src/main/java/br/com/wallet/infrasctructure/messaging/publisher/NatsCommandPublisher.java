@@ -1,5 +1,6 @@
 package br.com.wallet.infrasctructure.messaging.publisher;
 
+import br.com.wallet.application.aspects.tracing.TraceContext;
 import br.com.wallet.domain.envelope.CommandEnvelope;
 import br.com.wallet.exceptions.PermanentException;
 import br.com.wallet.exceptions.TransientException;
@@ -29,18 +30,16 @@ public class NatsCommandPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(NatsCommandPublisher.class);
 
-    private final JetStream jetStream;
+    private final Connection connection;
     private final ObjectMapper objectMapper;
 
     public NatsCommandPublisher(final Connection connection,
                                 final ObjectMapper objectMapper)
             throws IOException, JetStreamApiException {
-
+        this.connection = connection;
         this.objectMapper = objectMapper;
-        this.jetStream = connection.jetStream();
 
-        final var jsm = connection.jetStreamManagement();
-
+        final var jsm = this.connection.jetStreamManagement();
         ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
         ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
     }
@@ -83,11 +82,11 @@ public class NatsCommandPublisher {
         }
     }
 
-    public <T> void publish(final String subject,
-                            final UUID operationId,
-                            final T command) {
+    public <T extends TraceContext> void publish(final String subject,
+                                                 final T command) {
 
         try {
+            var operationId = command.operationId();
             final var envelope = new CommandEnvelope<>(
                     operationId,
                     command.getClass().getSimpleName(),
@@ -112,7 +111,7 @@ public class NatsCommandPublisher {
             final var publishOptions = PublishOptions.builder()
                     .expectedStream("commands") // safety check
                     .build();
-
+            final var jetStream = connection.jetStream();
             final var ack = jetStream.publish(message, publishOptions);
 
             if (ack == null || ack.getSeqno() <= 0) {

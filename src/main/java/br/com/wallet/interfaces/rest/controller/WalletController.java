@@ -5,6 +5,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.LedgerUseCase;
 import br.com.wallet.application.usecase.ReplayWalletUseCase;
 import br.com.wallet.domain.context.Wallet;
+import br.com.wallet.infrasctructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.interfaces.rest.api.WalletApi;
 import br.com.wallet.interfaces.rest.dto.BalanceResponse;
 import br.com.wallet.interfaces.rest.dto.CreateWalletCommand;
@@ -27,13 +28,18 @@ import java.util.UUID;
 @RequestMapping("/wallets")
 public class WalletController implements WalletApi {
 
+    private final NatsCommandPublisher natsCommandPublisher;
     private final BalanceUseCase balanceUseCase;
     private final CreateWalletUseCase createWalletUseCase;
     private final LedgerUseCase ledgerUseCase;
     private final ReplayWalletUseCase replayWalletUseCase;
 
-    public WalletController(final BalanceUseCase balanceUseCase,
-                            final CreateWalletUseCase createWalletUseCase, LedgerUseCase ledgerUseCase, ReplayWalletUseCase replayWalletUseCase) {
+    public WalletController(final NatsCommandPublisher natsCommandPublisher,
+                            final BalanceUseCase balanceUseCase,
+                            final CreateWalletUseCase createWalletUseCase,
+                            final LedgerUseCase ledgerUseCase,
+                            final ReplayWalletUseCase replayWalletUseCase) {
+        this.natsCommandPublisher = natsCommandPublisher;
         this.balanceUseCase = balanceUseCase;
         this.createWalletUseCase = createWalletUseCase;
         this.ledgerUseCase = ledgerUseCase;
@@ -73,7 +79,8 @@ public class WalletController implements WalletApi {
 
         final UUID walletId = UUID.randomUUID();
         if (initialBalance.compareTo(BigDecimal.ZERO) > 0 && operationId != null) {
-            createWalletUseCase.handle(new Wallet(walletId, initialBalance, operationId));
+            final var wallet = new Wallet(walletId, initialBalance, operationId);
+            natsCommandPublisher.publish("commands.wallet", wallet);
         } else {
             createWalletUseCase.handle(walletId);
         }

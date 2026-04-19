@@ -6,6 +6,7 @@ import br.com.wallet.application.usecase.LedgerUseCase;
 import br.com.wallet.application.usecase.ReplayWalletUseCase;
 import br.com.wallet.domain.LedgerEntry;
 import br.com.wallet.domain.LedgerType;
+import br.com.wallet.infrasctructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.interfaces.rest.controller.WalletController;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -29,6 +30,9 @@ class WalletControllerTest {
 
     @Autowired
     MockMvc mockMvc;
+
+    @MockitoBean
+    NatsCommandPublisher natsCommandPublisher;
 
     @MockitoBean
     BalanceUseCase balanceUseCase;

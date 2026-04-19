@@ -13,7 +13,8 @@ import br.com.wallet.interfaces.rest.dto.CreateWalletResponse;
 import br.com.wallet.interfaces.rest.dto.LedgerEntryResponse;
 import br.com.wallet.interfaces.rest.mapper.LedgerMapper;
 import jakarta.validation.Valid;
-import org.jspecify.annotations.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,11 +24,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/wallets")
 public class WalletController implements WalletApi {
 
+    private static final Logger log = LoggerFactory.getLogger(WalletController.class);
     private final NatsCommandPublisher natsCommandPublisher;
     private final BalanceUseCase balanceUseCase;
     private final CreateWalletUseCase createWalletUseCase;
@@ -56,46 +59,53 @@ public class WalletController implements WalletApi {
 
     @GetMapping("/{walletId}/balance/historical")
     @Override
-    public BalanceResponse getHistorical(@PathVariable final UUID walletId, @RequestParam final Instant at
-    ) {
+    public BalanceResponse getHistorical(@PathVariable final UUID walletId, @RequestParam final Instant at) {
         return new BalanceResponse(
                 balanceUseCase.getHistoricalBalance(walletId, at)
         );
     }
 
     /**
-     * Create Wallet operation
-     * @param operationId Idempotency key: is only useful for money operations, if initial balance is null or zero it is ignored
-     * @param command Create Wallet Command
-     * @return Wallet Response (wallet ID)
+     * Simple wallet creation (Synchronous)
      */
     @PostMapping
     @Override
-    public ResponseEntity<CreateWalletResponse> createWallet(
-            @RequestHeader(value = "Idempotency-Key", required = false) UUID operationId,
-            @Valid @RequestBody(required = false) CreateWalletCommand command
-    ) {
-        final var initialBalance = resolveInitialBalance(command);
-
+    public ResponseEntity<CreateWalletResponse> create() {
         final UUID walletId = UUID.randomUUID();
-        if (initialBalance.compareTo(BigDecimal.ZERO) > 0 && operationId != null) {
-            final var wallet = new Wallet(walletId, initialBalance, operationId);
-            natsCommandPublisher.publish("commands.wallet", wallet);
-        } else {
-            createWalletUseCase.handle(walletId);
-        }
-
+        log.info("Sync wallet creation requested (zero balance). walletId={}", walletId);
+        createWalletUseCase.handle(walletId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new CreateWalletResponse(walletId));
     }
 
     /**
-     * As this is an O(n) endpoint as ledger grows, the response time, and resource consumption will rise, we have a limitation optional input
-     *
-     * @param walletId wallet id
-     * @param limit    optional limit input ( default to 100 )
-     * @return ledger entries
+     * Wallet creation with initial deposit (Asynchronous)
      */
+    @PostMapping("/deposit")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @Override
+    public CompletableFuture<ResponseEntity<CreateWalletResponse>> createWithDeposit(
+            @RequestHeader(value = "Idempotency-Key") UUID operationId,
+            @Valid @RequestBody CreateWalletCommand command
+    ) {
+        final var initialBalance = command.initialBalance() != null ? command.initialBalance() : BigDecimal.ZERO;
+        final UUID walletId = UUID.randomUUID();
+
+        if (initialBalance.compareTo(BigDecimal.ZERO) <= 0) {
+            throw new IllegalArgumentException("Initial balance must be greater than zero for this endpoint");
+        }
+
+        log.info("Async wallet creation with deposit requested. walletId={}, amount={}", walletId, initialBalance);
+        final var wallet = new Wallet(walletId, initialBalance, operationId);
+
+        return natsCommandPublisher.publishAsync("commands.wallet", wallet)
+                .thenApply(ack -> {
+                    log.debug("Create wallet command ACKed by NATS: seq={}", ack.getSeqno());
+                    return ResponseEntity.status(HttpStatus.ACCEPTED)
+                            .body(new CreateWalletResponse(walletId));
+                });
+    }
+
     @GetMapping("/{walletId}/ledger")
     @Override
     public ResponseEntity<List<LedgerEntryResponse>> getLedger(
@@ -106,7 +116,6 @@ public class WalletController implements WalletApi {
                 .stream()
                 .map(LedgerMapper::toResponse)
                 .toList();
-
         return ResponseEntity.of(Optional.of(entries));
     }
 
@@ -114,16 +123,5 @@ public class WalletController implements WalletApi {
     @Override
     public BalanceResponse replay(@PathVariable UUID walletId) {
         return new BalanceResponse(replayWalletUseCase.execute(walletId));
-    }
-
-    /**
-     * Provide save initial balance from command inputs
-     * @param command Create Wallet Command
-     * @return initial balance
-     */
-    private @NonNull BigDecimal resolveInitialBalance(final CreateWalletCommand command) {
-        return command != null && command.initialBalance() != null
-                ? command.initialBalance()
-                : BigDecimal.ZERO;
     }
 }

@@ -15,56 +15,58 @@ import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/operations")
 public class OperationsController implements OperationsApi {
 
-
     private static final Logger log = LoggerFactory.getLogger(OperationsController.class);
     private final NatsCommandPublisher natsCommandPublisher;
 
-    public OperationsController(
-            final NatsCommandPublisher natsCommandPublisher
-    ) {
+    public OperationsController(final NatsCommandPublisher natsCommandPublisher) {
         this.natsCommandPublisher = natsCommandPublisher;
     }
 
-    /**
-     * Stripe style transfer request
-     *
-     * @param operationId Idempotency key
-     * @param command     Transfer business command
-     */
     @PostMapping("/transfer")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @Override
-    public void transfer(
+    public CompletableFuture<Void> transfer(
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final TransferCommand command) {
+        
         log.info("Transfer requested: from={}, to={}, amount={}",
                 command.from(), command.to(), command.amount());
+        
         var transfer = new Transfer(command.from(), command.to(), command.amount(), operationId);
-        natsCommandPublisher.publish("commands.transfer", transfer);
+        
+        return natsCommandPublisher.publishAsync("commands.transfer", transfer)
+                .thenAccept(ack -> log.debug("Transfer command ACKed by NATS: seq={}", ack.getSeqno()));
     }
 
     @PostMapping("/deposit")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @Override
-    public void deposit(
+    public CompletableFuture<Void> deposit(
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final DepositCommand command) {
+
         var deposit = new Deposit(command.walletId(), command.amount(), operationId);
-        natsCommandPublisher.publish("commands.deposit", deposit);
+        
+        return natsCommandPublisher.publishAsync("commands.deposit", deposit)
+                .thenAccept(ack -> log.debug("Deposit command ACKed by NATS: seq={}", ack.getSeqno()));
     }
 
     @PostMapping("/withdraw")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @ResponseStatus(HttpStatus.ACCEPTED)
     @Override
-    public void withdraw(
+    public CompletableFuture<Void> withdraw(
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final WithdrawCommand command) {
+
         var withdraw = new Withdraw(command.walletId(), command.amount(), operationId);
-        natsCommandPublisher.publish("commands.withdraw", withdraw);
+        
+        return natsCommandPublisher.publishAsync("commands.withdraw", withdraw)
+                .thenAccept(ack -> log.debug("Withdraw command ACKed by NATS: seq={}", ack.getSeqno()));
     }
 }

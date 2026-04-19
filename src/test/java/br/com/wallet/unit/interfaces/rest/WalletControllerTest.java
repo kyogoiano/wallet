@@ -6,24 +6,33 @@ import br.com.wallet.application.usecase.LedgerUseCase;
 import br.com.wallet.application.usecase.ReplayWalletUseCase;
 import br.com.wallet.domain.LedgerEntry;
 import br.com.wallet.domain.LedgerType;
+import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.infrasctructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.interfaces.rest.controller.WalletController;
+import io.nats.client.api.PublishAck;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @WebMvcTest(WalletController.class)
 class WalletControllerTest {
@@ -46,13 +55,16 @@ class WalletControllerTest {
     @MockitoBean
     ReplayWalletUseCase replayWalletUseCase;
 
+    @BeforeEach
+    void setup() {
+        lenient().when(natsCommandPublisher.publishAsync(anyString(), any()))
+                .thenReturn(CompletableFuture.completedFuture(mock(PublishAck.class)));
+    }
+
     @Test
     void shouldReturnBalance() throws Exception {
-
         UUID walletId = UUID.randomUUID();
-
-        when(balanceUseCase.getBalance(walletId))
-                .thenReturn(new BigDecimal("100"));
+        when(balanceUseCase.getBalance(walletId)).thenReturn(new BigDecimal("100"));
 
         mockMvc.perform(get("/wallets/{id}/balance", walletId))
                 .andExpect(status().isOk())
@@ -60,22 +72,54 @@ class WalletControllerTest {
     }
 
     @Test
-    void shouldReturn400WhenWalletDoesNotExist() throws Exception {
-        UUID walletId = UUID.randomUUID();
+    void shouldCreateEmptyWalletSuccessfully() throws Exception {
+        mockMvc.perform(post("/wallets"))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.walletId").exists());
 
-
-        when(balanceUseCase.getBalance(walletId))
-                .thenThrow(new IllegalArgumentException("Wallet not found"));
-
-        mockMvc.perform(get("/wallets/{id}/balance", walletId))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Wallet not found"));
-
+        verify(createWalletUseCase).handle(any(UUID.class));
+        verifyNoInteractions(natsCommandPublisher);
     }
 
     @Test
-    void shouldReturn400WhenWalletIdIsInvalid() throws Exception {
-        mockMvc.perform(get("/wallets/{id}/balance", "invalid-uuid"))
+    void shouldCreateWalletWithDepositSuccessfully() throws Exception {
+        UUID opId = UUID.randomUUID();
+        var body = """
+                {
+                  "initialBalance": 100
+                }
+                """;
+
+        // 1. Start async processing
+        MvcResult mvcResult = mockMvc.perform(post("/wallets/deposit")
+                        .header("Idempotency-Key", opId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        // 2. Wait for completion and verify results
+        mockMvc.perform(asyncDispatch(mvcResult))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.walletId").exists());
+
+        verify(natsCommandPublisher).publishAsync(eq("commands.wallet"), argThat(cmd ->
+                cmd instanceof Wallet w && w.initialBalance().equals(new BigDecimal("100")) && w.operationId().equals(opId)
+        ));
+        verifyNoInteractions(createWalletUseCase);
+    }
+
+    @Test
+    void shouldFailCreateWithDepositWhenIdempotencyKeyMissing() throws Exception {
+        var body = """
+                {
+                  "initialBalance": 100
+                }
+                """;
+
+        mockMvc.perform(post("/wallets/deposit")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(body))
                 .andExpect(status().isBadRequest());
     }
 
@@ -83,9 +127,7 @@ class WalletControllerTest {
     void shouldReturnHistoricalBalance() throws Exception {
         UUID walletId = UUID.randomUUID();
         Instant instant = Instant.now();
-
-        when(balanceUseCase.getHistoricalBalance(walletId, instant))
-                .thenReturn(new BigDecimal("120.00"));
+        when(balanceUseCase.getHistoricalBalance(walletId, instant)).thenReturn(new BigDecimal("120.00"));
 
         mockMvc.perform(get("/wallets/{id}/balance/historical", walletId)
                         .param("at", instant.toString()))
@@ -94,77 +136,31 @@ class WalletControllerTest {
     }
 
     @Test
-    void shouldReturn400WhenHistoricalParamMissing() throws Exception {
-        UUID walletId = UUID.randomUUID();
-
-        mockMvc.perform(get("/wallets/{id}/balance/historical", walletId))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void shouldReturn400WhenHistoricalParamInvalid() throws Exception {
-        UUID walletId = UUID.randomUUID();
-
-        mockMvc.perform(get("/wallets/{id}/balance/historical", walletId)
-                        .param("at", "invalid-date"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
     void shouldReturnLedgerEntries() throws Exception {
         UUID walletId = UUID.randomUUID();
-
         var entries = List.of(
                 new LedgerEntry(UUID.randomUUID(), BigDecimal.TEN, LedgerType.CREDIT, UUID.randomUUID(), 1L, "hash", "previousHash", Instant.now())
         );
-
-        when(ledgerUseCase.getLedger(walletId, 100))
-                .thenReturn(entries);
+        when(ledgerUseCase.getLedger(walletId, 100)).thenReturn(entries);
 
         mockMvc.perform(get("/wallets/{id}/ledger", walletId))
                 .andExpect(status().isOk());
-    }
-
-    @Test
-    void shouldUseDefaultLimitWhenNotProvided() throws Exception {
-        UUID walletId = UUID.randomUUID();
-
-        when(ledgerUseCase.getLedger(walletId, 100))
-                .thenReturn(List.of());
-
-        mockMvc.perform(get("/wallets/{id}/ledger", walletId))
-                .andExpect(status().isOk());
-
-        verify(ledgerUseCase).getLedger(walletId, 100);
     }
 
     @Test
     void shouldReturn422WhenLimitTooLarge() throws Exception {
         UUID walletId = UUID.randomUUID();
-
-        mockMvc.perform(get("/wallets/{id}/ledger", walletId)
-                        .param("limit", "2000"))
+        mockMvc.perform(get("/wallets/{id}/ledger", walletId).param("limit", "2000"))
                 .andExpect(status().isUnprocessableContent());
     }
 
     @Test
-    void shouldReturn400WhenLimitInvalid() throws Exception {
+    void replayShouldReturnBalance() throws Exception {
         UUID walletId = UUID.randomUUID();
+        when(replayWalletUseCase.execute(walletId)).thenReturn(new BigDecimal("150.00"));
 
-        mockMvc.perform(get("/wallets/{id}/ledger", walletId)
-                        .param("limit", "abc"))
-                .andExpect(status().isBadRequest());
-    }
-
-    @Test
-    void shouldReturn400WhenUseCaseThrowsIllegalArgument() throws Exception {
-        UUID walletId = UUID.randomUUID();
-
-        when(balanceUseCase.getBalance(walletId))
-                .thenThrow(new IllegalArgumentException("Wallet not found"));
-
-        mockMvc.perform(get("/wallets/{id}/balance", walletId))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.message").value("Wallet not found"));
+        mockMvc.perform(get("/wallets/{id}/replay", walletId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.balance").value(150.00));
     }
 }

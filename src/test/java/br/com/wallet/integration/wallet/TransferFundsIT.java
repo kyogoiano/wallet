@@ -76,8 +76,10 @@ class TransferFundsIT extends RegisterNatsProperties {
     void shouldTransferFundsAndUpdateBothBalances(
             TransferScenario scenario) {
         // given
-        UUID from = createWalletUseCase.execute(new Wallet(scenario.initialFrom(), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // when
         transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
@@ -90,8 +92,10 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldFailWhenInsufficientBalance() {
         // given
-        UUID from = createWalletUseCase.execute(new Wallet(BigDecimal.TEN, UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // when / then
         assertThatThrownBy(() ->
@@ -101,18 +105,20 @@ class TransferFundsIT extends RegisterNatsProperties {
 
     @Test
     void shouldNotAllowTransferToSameWallet() {
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
 
         assertThatThrownBy(() ->
-                transferFundsUseCase.handle(new Transfer(wallet, wallet, BigDecimal.TEN, UUID.randomUUID()))
+                transferFundsUseCase.handle(new Transfer(from, from, BigDecimal.TEN, UUID.randomUUID()))
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void shouldInsertOutboxEventOnTransfer() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         UUID opId = UUID.randomUUID();
 
@@ -125,9 +131,10 @@ class TransferFundsIT extends RegisterNatsProperties {
 
     @Test
     void shouldNotDuplicateOutboxEventOnRetry() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute(new Wallet(BigDecimal.ONE, UUID.randomUUID()));
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, UUID.randomUUID()));
 
         UUID opId = UUID.randomUUID();
         var transfer = new Transfer(from, to, new BigDecimal("50"), opId);
@@ -141,16 +148,17 @@ class TransferFundsIT extends RegisterNatsProperties {
 
     @Test
     void shouldHaveStrictlyIncreasingSequence() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
-
-        var transfer50 = new Transfer(wallet, to, new BigDecimal("50"), UUID.randomUUID());
+        var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
         transferFundsUseCase.handle(transfer50);
-        var transfer10 = new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID());
+        var transfer10 = new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID());
         transferFundsUseCase.handle(transfer10);
 
-        var entries = testDataHelper.getLedgerEntries(wallet);
+        var entries = testDataHelper.getLedgerEntries(from);
 
         assertThat(entries.get(0).sequence()).isEqualTo(1);
         assertThat(entries.get(1).sequence()).isEqualTo(2);

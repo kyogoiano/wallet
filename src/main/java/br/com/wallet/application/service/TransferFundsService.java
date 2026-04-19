@@ -3,7 +3,6 @@ package br.com.wallet.application.service;
 import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.exceptions.IdempotencyException;
-import br.com.wallet.exceptions.BusinessException;
 import br.com.wallet.infrasctructure.operation.OperationStatus;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
@@ -71,7 +70,7 @@ public class TransferFundsService implements TransferFundsUseCase {
     @Traceable("wallet.transfer")
     @Transactional
     @Override
-    public void handle(@NonNull final Transfer transfer) throws BusinessException {
+    public void handle(@NonNull final Transfer transfer) {
 
         final boolean started = operationsDao.startOperation(transfer.operationId());
 

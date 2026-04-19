@@ -65,9 +65,10 @@ class OutboxIT extends RegisterNatsProperties {
 
     @Test
     void shouldProcessOutboxEvents() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
 
         transferFundsUseCase.handle(new Transfer(from, to,
@@ -86,14 +87,15 @@ class OutboxIT extends RegisterNatsProperties {
      */
     @Test
     void shouldNotMarkEventAsProcessedOnFailure() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
-        failingEventPublisher.failNext(1);
+        failingEventPublisher.failNext(2); // the wallet creation with initial balance is also an event (that deposits)
 
         assertThatCode(() -> outboxRelay.process())
                 .doesNotThrowAnyException();
@@ -106,17 +108,18 @@ class OutboxIT extends RegisterNatsProperties {
 
     @Test
     void shouldRetryProcessingLater() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         UUID opId = UUID.randomUUID();
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
-        // first try fails
-        failingEventPublisher.failNext(1);
+        // first try fails ( after wallet creation with balance)
+        failingEventPublisher.failNext(2);
         outboxRelay.process();
 
 
@@ -138,9 +141,10 @@ class OutboxIT extends RegisterNatsProperties {
 
     @Test
     void shouldHandleInvalidPayloadGracefully() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
@@ -157,9 +161,10 @@ class OutboxIT extends RegisterNatsProperties {
 
     @Test
     void shouldNotReprocessAlreadyProcessedEvent() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
@@ -175,8 +180,10 @@ class OutboxIT extends RegisterNatsProperties {
     @Test
     void shouldStopRetryingAfterMaxAttempts() {
 
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
@@ -190,14 +197,15 @@ class OutboxIT extends RegisterNatsProperties {
 
         var eventId = testDataHelper.getOutboxIdByOperation(opId);
 
-        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(5);
+        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(4);
     }
 
     @Test
     void shouldNotProcessBeforeRetryTime() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
 
         transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
@@ -216,9 +224,10 @@ class OutboxIT extends RegisterNatsProperties {
 
     @Test
     void shouldNotDuplicateOutboxEventsForSameOperation() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         UUID opId = UUID.randomUUID();
 

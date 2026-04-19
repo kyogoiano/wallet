@@ -49,7 +49,8 @@ public class DepositFundsIT extends RegisterNatsProperties {
     @Test
     void shouldDepositFundsAndUpdateBalance() {
         // given
-        UUID walletId = createWalletUseCase.execute();
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(walletId);
         BigDecimal depositAmount = new  BigDecimal("100.00");
         UUID operationId =  UUID.randomUUID();
 
@@ -65,7 +66,8 @@ public class DepositFundsIT extends RegisterNatsProperties {
     @Test
     void shouldBeIdempotentWhenSameOperationIdIsUsed() {
         // given
-        UUID walletId = createWalletUseCase.execute(new Wallet(BigDecimal.TEN, UUID.randomUUID()));
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(walletId, BigDecimal.TEN, UUID.randomUUID()));
         BigDecimal depositAmount = new BigDecimal("50.00");
         UUID operationId = UUID.randomUUID();
 

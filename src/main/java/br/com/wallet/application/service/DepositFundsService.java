@@ -56,6 +56,8 @@ class DepositFundsService implements DepositFundsUseCase {
         outboxDao.save(
                 new DepositCompletedEvent(deposit.walletId(), deposit.amount(), deposit.operationId())
         );
+
+        operationsDao.completeOperation(deposit.operationId());
     }
 
 

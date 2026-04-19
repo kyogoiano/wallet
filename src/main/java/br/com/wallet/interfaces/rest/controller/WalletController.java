@@ -70,9 +70,13 @@ public class WalletController implements WalletApi {
             @Valid @RequestBody(required = false) CreateWalletCommand command
     ) {
         final var initialBalance = resolveInitialBalance(command);
-        final var walletId = initialBalance.compareTo(BigDecimal.ZERO) > 0 && operationId != null ?
-            createWalletUseCase.execute(new Wallet(initialBalance, operationId)) :
-                createWalletUseCase.execute();
+
+        final UUID walletId = UUID.randomUUID();
+        if (initialBalance.compareTo(BigDecimal.ZERO) > 0 && operationId != null) {
+            createWalletUseCase.handle(new Wallet(walletId, initialBalance, operationId));
+        } else {
+            createWalletUseCase.handle(walletId);
+        }
 
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new CreateWalletResponse(walletId));

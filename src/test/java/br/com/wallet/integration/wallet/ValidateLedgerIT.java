@@ -77,9 +77,10 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @ParameterizedTest
     @MethodSource("transferScenarios")
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
-
-        UUID from = createWalletUseCase.execute(new Wallet(scenario.initialFrom(), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // simulate transactions
         transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
@@ -100,9 +101,10 @@ class ValidateLedgerIT extends RegisterNatsProperties {
 
     @Test
     void shouldValidateLedgerAfterMultipleTransfers() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("300"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("300"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
         var transfer100 = new Transfer(from, to, new BigDecimal("100"), UUID.randomUUID());
@@ -126,16 +128,18 @@ class ValidateLedgerIT extends RegisterNatsProperties {
 
     @Test
     void shouldDetectTamperedLedger() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-
-        transferFundsUseCase.handle(new Transfer(wallet, createWalletUseCase.execute(),
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 fraud
-        testDataHelper.tamperFirstLedgerEntry(wallet, new BigDecimal("999"));
+        testDataHelper.tamperFirstLedgerEntry(from, new BigDecimal("999"));
 
-        var result = validateLedgerUseCase.execute(wallet);
+        var result = validateLedgerUseCase.execute(from);
 
         assertThat(result.valid()).isFalse();
         assertThat(result.corruptedDataSize()).isEqualTo(1);
@@ -148,15 +152,16 @@ class ValidateLedgerIT extends RegisterNatsProperties {
      */
     @Test
     void shouldDetectBrokenSequence() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
-
-        transferFundsUseCase.handle(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 trying to break sequence
-        assertThatThrownBy(()-> testDataHelper.tamperSequence(wallet, 1L, 99L))
+        assertThatThrownBy(()-> testDataHelper.tamperSequence(from, 1L, 99L))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -170,9 +175,10 @@ class ValidateLedgerIT extends RegisterNatsProperties {
      */
     @Test
     void shouldDetectBrokenHashChain() {
-
-        UUID fromWallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
-        UUID toWallet = createWalletUseCase.execute();
+        var fromWallet = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(fromWallet, new BigDecimal("200"), UUID.randomUUID()));
+        var toWallet = UUID.randomUUID();
+        createWalletUseCase.handle(toWallet);
 
         var opId1 = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
@@ -197,9 +203,10 @@ class ValidateLedgerIT extends RegisterNatsProperties {
      */
     @Test
     void shouldDetectTamperedAmount() {
-
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var wallet = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("50"), opId));
@@ -221,12 +228,14 @@ class ValidateLedgerIT extends RegisterNatsProperties {
      */
     @Test
     void shouldDetectChainLinkBroken() {
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // Entry 1: Genesis (Sequence 1)
         // Entry 2: Transfer (Sequence 2)
-        transferFundsUseCase.handle(new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID()));
 
         // We need to manipulate the DB such that:
         // 1. findCorruptedEntries returns empty (all individual hashes are valid)
@@ -243,9 +252,9 @@ class ValidateLedgerIT extends RegisterNatsProperties {
         // to be valid for that new previous_hash, then findCorruptedEntries stays empty, but checkChainBroken triggers.
 
         // Let's use a specialized tamper method for this "consistent lie".
-        testDataHelper.tamperConsistentChainBreak(wallet, 2L);
+        testDataHelper.tamperConsistentChainBreak(from, 2L);
 
-        var result = validateLedgerUseCase.execute(wallet);
+        var result = validateLedgerUseCase.execute(from);
 
         assertThat(result.valid()).isFalse();
         assertThat(result.corruptedDataSize()).isEqualTo(0);

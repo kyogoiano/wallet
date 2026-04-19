@@ -44,8 +44,9 @@ public class WithdrawFundsIT extends RegisterNatsProperties {
     @Test
     void shouldWithdrawFundsAndUpdateBalance() {
         // given
+        var walletId = UUID.randomUUID();
         BigDecimal initialBalance = new BigDecimal("100.00");
-        UUID walletId = createWalletUseCase.execute(new Wallet(initialBalance, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(walletId, initialBalance, UUID.randomUUID()));
         BigDecimal withdrawAmount = new BigDecimal("30.00");
         UUID operationId = UUID.randomUUID();
 
@@ -59,7 +60,8 @@ public class WithdrawFundsIT extends RegisterNatsProperties {
     @Test
     void shouldFailWhenInsufficientFunds() {
         // given
-        UUID walletId = createWalletUseCase.execute(new Wallet(BigDecimal.TEN, UUID.randomUUID()));
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(walletId, BigDecimal.TEN, UUID.randomUUID()));
         BigDecimal withdrawAmount = new BigDecimal("50.00");
 
         // when / then
@@ -71,7 +73,8 @@ public class WithdrawFundsIT extends RegisterNatsProperties {
     @Test
     void shouldBeIdempotentWhenSameOperationIdIsUsed() {
         // given
-        UUID walletId = createWalletUseCase.execute(new Wallet(new BigDecimal("100.00"), UUID.randomUUID()));
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(walletId, new BigDecimal("100.00"), UUID.randomUUID()));
         BigDecimal withdrawAmount = new BigDecimal("40");
         UUID operationId = UUID.randomUUID();
 

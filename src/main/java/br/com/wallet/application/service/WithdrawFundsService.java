@@ -71,5 +71,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
         outboxDao.save(
                 new WithdrawCompletedEvent(withdraw.walletId(), withdraw.amount(), withdraw.operationId())
         );
+
+        operationsDao.completeOperation(withdraw.operationId());
     }
 }

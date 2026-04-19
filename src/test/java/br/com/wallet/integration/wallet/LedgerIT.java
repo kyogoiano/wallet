@@ -48,19 +48,20 @@ public class LedgerIT extends RegisterNatsProperties {
 
     @Test
     void shouldReturnEmptyLedgerWhenNoTransactions() {
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(walletId);
 
-        UUID wallet = createWalletUseCase.execute();
-
-        var result = ledgerUseCase.getLedger(wallet, 100);
+        var result = ledgerUseCase.getLedger(walletId, 100);
 
         assertThat(result.isEmpty()).isTrue();
     }
 
     @Test
     void shouldReturnLedgerEntriesAfterTransfer() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("40"), UUID.randomUUID()));
@@ -80,17 +81,18 @@ public class LedgerIT extends RegisterNatsProperties {
 
     @Test
     void shouldReturnEntriesOrderedBySequence() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
-
-        transferFundsUseCase.handle(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
-        transferFundsUseCase.handle(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("30"), UUID.randomUUID()));
 
-        var result = ledgerUseCase.getLedger(wallet, 3);
+        var result = ledgerUseCase.getLedger(from, 3);
 
         assertThat(result.size()).isEqualTo(3);
 
@@ -101,31 +103,34 @@ public class LedgerIT extends RegisterNatsProperties {
 
     @Test
     void shouldRespectLimit() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
-
-        transferFundsUseCase.handle(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.handle(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("10"), UUID.randomUUID()));
 
-        transferFundsUseCase.handle(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("10"), UUID.randomUUID()));
 
-        var result = ledgerUseCase.getLedger(wallet, 2);
+        var result = ledgerUseCase.getLedger(from, 2);
 
         assertThat(result.size()).isEqualTo(2);
     }
 
     @Test
     void shouldNotMixLedgerBetweenWallets() {
+        var wallet1 = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet1, new BigDecimal("100"), UUID.randomUUID()));
+        var wallet2 = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet2, new BigDecimal("100"), UUID.randomUUID()));
 
-        UUID wallet1 = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID wallet2 = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-
-        UUID other = createWalletUseCase.execute();
+        var other = UUID.randomUUID();
+        createWalletUseCase.handle(other);
 
         transferFundsUseCase.handle(new Transfer(wallet1, other,
                 new BigDecimal("10"), UUID.randomUUID()));
@@ -147,9 +152,10 @@ public class LedgerIT extends RegisterNatsProperties {
 
     @Test
     void shouldReturnCorrectTypesForDebitAndCredit() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("25"), UUID.randomUUID()));
@@ -167,14 +173,15 @@ public class LedgerIT extends RegisterNatsProperties {
      */
     @Test
     void ledgerSumShouldMatchCurrentBalance() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
-
-        transferFundsUseCase.handle(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("40"), UUID.randomUUID()));
 
-        var ledger = ledgerUseCase.getLedger(wallet, 100);
+        var ledger = ledgerUseCase.getLedger(from, 100);
 
         var computed = ledger.stream()
                 .map(entry -> entry.type() == LedgerType.CREDIT
@@ -182,7 +189,7 @@ public class LedgerIT extends RegisterNatsProperties {
                         : entry.amount().negate())
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        testDataHelper.assertBalance(wallet, computed);
+        testDataHelper.assertBalance(from, computed);
 
     }
 }

@@ -72,8 +72,9 @@ class CreateWalletIT extends RegisterNatsProperties {
 
     @Test
     void shouldCreateWalletWithZeroBalance() {
+        var walletId = UUID.randomUUID();
         // when
-        var walletId = createWalletUseCase.execute();
+         createWalletUseCase.handle(walletId);
 
         // then
         testDataHelper.assertWalletExists(walletId);
@@ -85,7 +86,8 @@ class CreateWalletIT extends RegisterNatsProperties {
     @ParameterizedTest
     @MethodSource("initialBalances")
     void shouldCreateWalletWithGivenInitialBalance(BigDecimal initialBalance) {
-        var walletId = createWalletUseCase.execute(new Wallet(initialBalance, UUID.randomUUID()));
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(walletId, initialBalance, UUID.randomUUID()));
 
         testDataHelper.assertBalance(walletId, initialBalance);
     }

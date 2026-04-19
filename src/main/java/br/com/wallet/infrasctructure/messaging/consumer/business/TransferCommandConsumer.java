@@ -1,7 +1,8 @@
-package br.com.wallet.infrasctructure.messaging.consumer;
+package br.com.wallet.infrasctructure.messaging.consumer.business;
 
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.domain.context.Transfer;
+import br.com.wallet.infrasctructure.messaging.consumer.AbstractNatsConsumer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.*;
 import org.slf4j.Logger;
@@ -15,7 +16,7 @@ import org.springframework.stereotype.Component;
  * Optional sub Actions make sense when we have more than one action inside the context ( that may represent an action )
  */
 @Component
-public class TransferCommandConsumer extends AbstractNatsConsumer<Transfer>  {
+public class TransferCommandConsumer extends AbstractNatsConsumer<Transfer> {
     private static final String streamName = "commands";
     private static final String subject = "commands.transfer"; // Subject for transfer commands
     private static final String dlqSubject = "commands.dlq.transfer"; // Subject for dlq transfer commands

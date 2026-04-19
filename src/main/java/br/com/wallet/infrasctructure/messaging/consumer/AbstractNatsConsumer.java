@@ -53,7 +53,7 @@ public abstract class AbstractNatsConsumer<T extends TraceContext> implements Sm
         this.useCase = useCase;
     }
 
-    void setupGeneralSubscription(@NonNull final String streamName,
+    protected void setupGeneralSubscription(@NonNull final String streamName,
                                   @NonNull final String consumerName ) throws IOException, JetStreamApiException {
         final var jetStream = natsConnection.jetStream();
         // Configure consumer for at-least-once delivery, backoff follows current retry strategy

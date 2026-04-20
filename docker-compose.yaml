@@ -2,6 +2,32 @@ version: "3.9"
 
 services:
 
+  nats:
+    image: nats:2.12.7-alpine
+    container_name: nats_main
+    restart: always
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./nats-data:/data/jetstream
+      - ./docker/nats.conf:/etc/nats.conf
+    command: [ "-c", "/etc/nats.conf" ]
+    networks:
+      - wallet-net
+
+  nats-client:
+    image: natsio/nats-box
+    container_name: nats_client
+    restart: always
+    depends_on:
+      - nats
+    entrypoint: /bin/sh
+    tty: true
+    environment:
+      - NATS_URL=nats://nats:4222
+      - NATS_TOKEN=dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+
   postgres:
     image: postgres:18.3-alpine
     container_name: wallet-postgres

@@ -1,6 +1,6 @@
 package br.com.wallet.support;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
@@ -8,6 +8,7 @@ import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import tools.jackson.databind.ObjectMapper;
 
 
 @TestConfiguration(proxyBeanMethods = false)
@@ -16,7 +17,7 @@ public class IntegrationTestBase {
 
     @Bean
     public ObjectMapper objectMapper() {
-        return new ObjectMapper().findAndRegisterModules();
+        return new ObjectMapper();
     }
 
     @Bean

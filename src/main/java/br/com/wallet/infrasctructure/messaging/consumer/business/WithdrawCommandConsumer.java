@@ -3,12 +3,12 @@ package br.com.wallet.infrasctructure.messaging.consumer.business;
 import br.com.wallet.application.usecase.WithdrawFundsUseCase;
 import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.infrasctructure.messaging.consumer.AbstractNatsConsumer;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.Connection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Consumer bounded to the context of withdraw.

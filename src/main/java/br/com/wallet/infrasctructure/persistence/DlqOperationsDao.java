@@ -4,6 +4,7 @@ import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqEvent;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqFailureType;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqStatus;
+import br.com.wallet.infrasctructure.utils.JsonUtils;
 import org.jspecify.annotations.NonNull;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -20,9 +21,11 @@ import java.util.regex.Pattern;
 public class DlqOperationsDao {
 
     private final JdbcTemplate jdbc;
+    private final JsonUtils jsonUtils;
 
-    public DlqOperationsDao(final JdbcTemplate jdbc) {
+    public DlqOperationsDao(final JdbcTemplate jdbc, JsonUtils jsonUtils) {
         this.jdbc = jdbc;
+        this.jsonUtils = jsonUtils;
     }
 
     /**
@@ -165,16 +168,16 @@ public class DlqOperationsDao {
                         id, operation_id, subject, status, error, payload,
                         retry_count, next_retry_at, created_at, processed_at, failure_type
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
                 """,
                 dlqEvent.id(),
                 dlqEvent.operationId(),
                 dlqEvent.subject(),
                 dlqEvent.status().name(),
                 dlqEvent.error(),
-                dlqEvent.payload(),
+                jsonUtils.toJson(dlqEvent.payload()),
                 dlqEvent.retryCount(),
-                dlqEvent.nextRetryAt().atOffset(ZoneOffset.UTC),
+                dlqEvent.nextRetryAt() != null ? dlqEvent.nextRetryAt().atOffset(ZoneOffset.UTC) : null,
                 dlqEvent.createdAt().atOffset(ZoneOffset.UTC),
                 dlqEvent.processedAt() != null ? dlqEvent.processedAt().atOffset(ZoneOffset.UTC) : null,
                 dlqEvent.failureType().name()

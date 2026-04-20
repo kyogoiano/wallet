@@ -4,7 +4,6 @@ import br.com.wallet.application.aspects.tracing.TraceContext;
 import br.com.wallet.application.usecase.UseCase;
 import br.com.wallet.domain.envelope.CommandEnvelope;
 import br.com.wallet.exceptions.ExceptionType;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import io.nats.client.*;
 import io.nats.client.api.*;
 import io.nats.client.impl.Headers;
@@ -13,6 +12,7 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.SmartLifecycle;
+import tools.jackson.databind.ObjectMapper;
 
 import java.io.IOException;
 import java.time.Clock;
@@ -30,12 +30,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * @param <T> trace context of the message
  */
 public abstract class AbstractNatsConsumer<T extends TraceContext> implements SmartLifecycle {
-    private static final Logger log = LoggerFactory.getLogger(AbstractNatsConsumer.class);
+    private final Logger log = LoggerFactory.getLogger(this.getClass());
     static final long maxDeliver = 5; // should match consumer config
 
     private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
     private final Semaphore semaphore = new Semaphore(50);
-    private final AtomicBoolean running = new AtomicBoolean(true);
+    private final AtomicBoolean running = new AtomicBoolean(false);
     private final Clock clock = Clock.systemUTC();
 
     private JetStreamSubscription subscription;
@@ -132,13 +132,15 @@ public abstract class AbstractNatsConsumer<T extends TraceContext> implements Sm
     void processMessage(@NonNull final Message message) {
         final CommandEnvelope<T> envelope;
         try {
+            log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders().toString());
             envelope = objectMapper.readValue(
                     message.getData(),
                     objectMapper.getTypeFactory()
-                            .constructParametricType(CommandEnvelope.class, Class.forName(message.getHeaders().getFirst("type")))
+                            .constructParametricType(CommandEnvelope.class,
+                                    Class.forName("br.com.wallet.domain.context." + message.getHeaders().getFirst("type")))
             );
         } catch (Exception e) {
-            log.error("Invalid payload → DLQ");
+            log.error("Invalid payload → DLQ", e);
             handleDlqMessage(dlqSubject, natsConnection, message, e);
             message.ack();
             return;
@@ -158,12 +160,21 @@ public abstract class AbstractNatsConsumer<T extends TraceContext> implements Sm
                     operationId, subject, deliveries);
 
         } catch (Exception e) {
-            if(RetryPolicy.decide(deliveries, e).equals(RetryDecision.DLQ)) {
-                log.error("Max delivery reached for operationId={}, sending to DLQ", operationId);
-                handleDlqMessage(dlqSubject, natsConnection, message, e);
-                message.ack();
-                return;
+            var retryDecision = RetryPolicy.decide(deliveries, e);
+            switch (retryDecision) {
+                case DLQ -> {
+                    log.error("Max delivery reached for operationId={}, sending to DLQ", operationId);
+                    handleDlqMessage(dlqSubject, natsConnection, message, e);
+                    message.ack();
+                    return;
+                }
+                case ACK -> {
+                    log.error("Permanent/Business error for operationId={}, finishing with ACK", operationId);
+                    message.ack();
+                    return;
+                }
             }
+
             // 🔁 retry via JetStream
             log.warn("Transient failure, will retry: {}", e.getMessage());
             message.nakWithDelay(retryDelay(deliveries));

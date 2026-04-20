@@ -4,9 +4,6 @@ import br.com.wallet.application.aspects.tracing.TraceContext;
 import br.com.wallet.domain.envelope.CommandEnvelope;
 import br.com.wallet.exceptions.PermanentException;
 import br.com.wallet.exceptions.TransientException;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.ObjectWriter;
 import io.nats.client.*;
 import io.nats.client.api.PublishAck;
 import io.nats.client.api.RetentionPolicy;
@@ -20,6 +17,9 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.server.ResponseStatusException;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectWriter;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -119,7 +119,7 @@ public class NatsCommandPublisher {
                         throw new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE, "Unable to process request at the moment", ex);
                     });
 
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new PermanentException("Invalid command payload", e);
         } catch (IOException e) {
             throw new TransientException("Failed to initialize NATS publish", e);

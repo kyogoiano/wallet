@@ -17,14 +17,18 @@ public class NatsConfig {
 
     private static final Logger log = LoggerFactory.getLogger(NatsConfig.class);
 
-    @Value("${nats.url:nats://localhost:4222}")
+    @Value("${nats.url:nats://nats:4222}")
     private String natsUrl;
+
+    @Value("${nats.token:dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n}")
+    private String natsToken;
 
     @Bean
     public Connection natsConnection() throws IOException, InterruptedException {
         log.info("Connecting to NATS server at: {}", natsUrl);
         Options options = new Options.Builder()
                 .server(natsUrl)
+                .token(natsToken.toCharArray())
                 .connectionTimeout(Duration.ofSeconds(2))
                 .maxReconnects(10)
                 .reconnectWait(Duration.ofSeconds(1))

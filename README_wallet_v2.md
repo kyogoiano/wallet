@@ -189,6 +189,11 @@ Costs:
   - fairness implementation on db level
 - gRPC / QUIC ingestion (also GRPC on opentelemetry)
 - Multi-region support
+- Move to Nats cluster (with 3 nodes)
+  - ack will improve to quorum persisted
+  - improved durability
+  - improved correctness
+- Improve Nats basic token to better security
 
 ---
 

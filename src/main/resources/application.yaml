@@ -23,6 +23,8 @@ management:
     health:
       show-details: always
   tracing:
+    propagation:
+      type: W3C
     baggage:
       correlation:
         fields:
@@ -31,29 +33,36 @@ management:
         - operationId
     sampling:
       probability: 1.0
-  otlp:
-    tracing:
-      endpoint: http://otel-collector:4318/v1/traces
+  opentelemetry:
     metrics:
       export:
-#        enabled: false
-        url: http://otel-collector:4318/v1/metrics
-        step: 6m
+        otlp:
+          endpoint: http://otel-collector:4318/v1/metrics
+    tracing:
+      sampling:
+        probability: 1.0 # Use 1.0 para testes, depois volte para 0.1
+      export:
+        otlp:
+          endpoint: http://otel-collector:4318/v1/traces
+    # Novo no SB4: suporte nativo para logs via OTLP
+    logging:
+      export:
+        otlp:
+          enabled: true
+          endpoint: http://otel-collector:4318/v1/logs
 
 logging:
+  opentelemetry:
+    enabled: true
   level:
     root: INFO
     br.com.wallet: DEBUG
     org.springframework.web: INFO
     org.springframework: INFO
     org.hibernate: INFO
+    io.opentelemetry: DEBUG
   pattern:
     level: "%5p [traceId=%X{traceId} spanId=%X{spanId} operationId=%X{operationId}]"
-
-otel:
-  exporter:
-    otlp:
-      endpoint: http://otel-collector:4318
 
 nats:
   url: nats://nats:4222

@@ -48,6 +48,19 @@ services:
     networks:
       - wallet-net
 
+  openobserve:
+    image: openobserve/openobserve:latest-amd64-simd
+    container_name: openobserve
+    environment:
+      - ZO_ROOT_USER_EMAIL=leandro.ueg@gmail.com
+      - ZO_ROOT_USER_PASSWORD=admin123
+    ports:
+      - "5080:5080"
+    volumes:
+      - openobserve-data:/data
+    networks:
+      - wallet-net
+
   otel-collector:
     image: otel/opentelemetry-collector:latest
     container_name:  otel-collector
@@ -82,6 +95,8 @@ services:
 
 volumes:
   postgres_data:
+  openobserve-data:
 
 networks:
   wallet-net:
+    driver: bridge

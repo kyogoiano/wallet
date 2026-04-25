@@ -22,11 +22,13 @@ ext {
 	springVersion = "7.0.6"
 	openApiVersion = "3.0.3"
 	jnatsVersion = "2.25.2"
+	otlpAppenderVersion = "2.21.0-alpha"
 }
 
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter'
 	implementation 'org.springframework.boot:spring-boot-starter-opentelemetry'
+	implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:${otlpAppenderVersion}")
 	implementation 'org.springframework.boot:spring-boot-starter-jackson'
 	implementation 'org.springframework.boot:spring-boot-starter-jdbc'
 	implementation 'org.springframework.boot:spring-boot-starter-web'

@@ -28,13 +28,25 @@ NATS (dedup again)
 ↓
 Downstream (same pattern)
 
+---
+
+## 📊 Observability Stack
+
+A arquitetura V2 integra um pipeline completo de observabilidade:
+
+- **OpenTelemetry (OTel)**: Coleta de Traces, Metrics e Logs.
+- **OpenObserve**: Backend de alta performance para análise de dados OTLP.
+- **Correlação**: O `operation_id` é propagado como Baggage, correlacionando logs do API e Workers.
+
+---
+
 ## 🧱 C4 Model — V2
 
 ### Level 1 — System Context
 ```
 [ Client / External Systems ]
             ↓
-     [ Wallet Service ]
+     [ Wallet Service ] ↔ [ OTel Collector ] → [ OpenObserve ]
             ↓
      [ PostgreSQL ]
 
@@ -120,15 +132,15 @@ Worker-->>NATS: ACK
 
 - Publishes commands instead of executing business logic
 - Returns HTTP 202 Accepted
-- Non-blocking
+- Non-blocking (using CompletableFuture + Virtual Threads)
 
 ---
 
 ### Use Case Layer
 
-- Runs as message consumers
+- Runs as message consumers (SmartLifecycle)
 - Owns transaction boundaries
-- Handles retries and failures
+- Handles retries and failures via JetStream ACK policy
 
 ---
 
@@ -137,7 +149,7 @@ Worker-->>NATS: ACK
 - Persistent streams
 - At-least-once delivery
 - Replay capability
-- Backpressure handling
+- Backpressure handling (MaxAckPending)
 
 ---
 
@@ -147,7 +159,7 @@ Idempotency remains critical:
 
 - operation_id (UUID)
 - Prevents double processing
-- Required due to message redelivery
+- Handled at the application service level
 
 ---
 
@@ -157,19 +169,20 @@ Benefits:
 - High scalability
 - Better fault tolerance
 - Replay capability
+- Full visibility (OTel + OpenObserve)
 
 Costs:
 - Increased complexity
 - Eventual consistency
-- Harder debugging
+- Distributed tracing requirement
 
 ---
 
 ## 🧠 When to Use V2
 
 - High throughput systems
-- Distributed deployments ?? also true on v1
-- Need for resilience and replay ?? but on v1 we have this
+- Distributed deployments
+- Need for resilience and replay
 
 ---
 
@@ -190,10 +203,7 @@ Costs:
 - gRPC / QUIC ingestion (also GRPC on opentelemetry)
 - Multi-region support
 - Move to Nats cluster (with 3 nodes)
-  - ack will improve to quorum persisted
-  - improved durability
-  - improved correctness
-- Improve Nats basic token to better security
+- Improve Nats security (TLS + Token rotation)
 
 ---
 

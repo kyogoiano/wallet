@@ -14,7 +14,7 @@ The focus of this version is not only scalability, but **correctness under failu
 - All operations are idempotent
 - Message processing is at-least-once
 - Failures are expected and handled explicitly
-- Retry is delegated to the messaging system
+- Observability is built-in (OpenTelemetry + OpenObserve)
 
 ---
 
@@ -28,6 +28,17 @@ Client → API → NATS → Worker → DB → ACK
 
 ---
 
+## 📊 Observability & Monitoring (OpenObserve)
+
+A arquitetura V2 utiliza a stack **OTel + OpenObserve** para garantir visibilidade total.
+
+### Features
+- **Distributed Tracing**: O `operation_id` é injetado como Baggage e correlacionado em todos os Spans.
+- **Log Aggregation**: Logs estruturados enviados via OTLP para o OpenObserve.
+- **Metrics**: Monitoramento de latência e saúde dos consumers NATS.
+
+---
+
 ## 🔁 Message Processing Model
 
 ### Rules
@@ -37,10 +48,11 @@ Client → API → NATS → Worker → DB → ACK
 - The system MUST tolerate duplicate deliveries
 
 ### Subject convention
-- commands.wallet.transfer
-- commands.wallet.withdraw 
-- commands.wallet.deposit
-** predictable + scalable **
+- `commands.transfer`
+- `commands.withdraw` 
+- `commands.deposit`
+- `commands.wallet`
+
 ---
 
 ## ❗ Explicit Rule: No Retry in Handler
@@ -49,15 +61,14 @@ Client → API → NATS → Worker → DB → ACK
 
 - No retry loops inside consumers
 - No exponential backoff in application code
-- No wrapping handlers with retry frameworks
 
 ### ✅ Correct Behavior
 
 - Process message once
 - If success → ACK
-- If failure → DO NOT ACK
+- If failure → DO NOT ACK (NACK)
 
-JetStream will handle redelivery.
+JetStream will handle redelivery based on the `ack_wait` and `backoff` policy.
 
 ---
 
@@ -77,7 +88,7 @@ sequenceDiagram
     alt Success
         Worker->>NATS: ACK
     else Failure
-        Worker-->>NATS: NO ACK
+        Worker-->>NATS: NO ACK (NACK)
         NATS-->>Worker: Redelivery (after delay)
     end
 ```
@@ -85,8 +96,6 @@ sequenceDiagram
 ---
 
 ## ⚙️ JetStream Consumer Configuration
-
-Example configuration:
 
 ```yaml
 consumer:
@@ -97,59 +106,17 @@ consumer:
   max_ack_pending: 100
 ```
 
-### Explanation
-
-- **ack_policy: explicit** → ensures manual ACK control
-- **ack_wait** → timeout before retry
-- **max_deliver** → retry limit
-- **max_ack_pending** → backpressure control
-
 ---
 
-## ☠️ Poison Message Handling
+## ☠️ Poison Message Handling (DLQ)
 
-A message becomes poison when:
-
-- It fails repeatedly
-- It violates domain invariants
-- It cannot be processed deterministically
-
-### Flow
-
-```mermaid
-sequenceDiagram
-    participant NATS
-    participant Worker
-    participant DLQ
-
-    NATS->>Worker: Deliver message
-
-    loop max_deliver
-        Worker-->>NATS: NO ACK
-        NATS-->>Worker: Redelivery
-    end
-
-    NATS->>DLQ: Move message
-```
-
----
-
-## 📦 Dead Letter Queue (DLQ) Strategy
-
-### Rules
-
-- Messages exceeding `max_deliver` go to DLQ
-- DLQ is a separate stream
-- DLQ messages are NOT retried automatically
+Messages exceeding `max_deliver` are moved to a Dead Letter Queue (DLQ) subject (e.g., `commands.dlq.*`).
 
 ### DLQ Metadata
-
-Each message should include:
-
-- operation_id
-- failure_reason
-- attempt_count
-- timestamp
+- `original_subject`
+- `error_message`
+- `failure_type`
+- `delivery_count`
 
 ---
 
@@ -158,145 +125,41 @@ Each message should include:
 ### Mechanism
 
 - Each command includes `operation_id (UUID)`
-- Stored in DB with unique constraint
+- Validated via `WalletOperationsDao.registerOperation(operationId)`
 
 ### Behavior
 
 | Scenario | Result |
 |---------|--------|
 | First execution | Process normally |
-| Duplicate message | Ignored safely |
+| Duplicate message | Throws IdempotencyException (ACKed) |
 | Retry after failure | Safe re-execution |
-
----
-
-## 🧠 Idempotent Processing Flow
-
-```mermaid
-sequenceDiagram
-    participant Worker
-    participant DB
-
-    Worker->>DB: Check operation_id
-
-    alt Not exists
-        Worker->>DB: Execute transaction
-        Worker->>DB: Insert operation_id
-    else Exists
-        Worker->>Worker: Skip processing
-    end
-```
 
 ---
 
 ## ⚠️ Failure Handling Strategy
 
-### Categories
+### 1. Business Failures
+Examples: insufficient balance, invalid account.
+**Action**: ACK message (do not retry), log warning.
 
-#### 1. Business Failures (Expected)
+### 2. Transient Failures
+Examples: DB timeout, network glitch.
+**Action**: NACK message, let JetStream retry.
 
-Examples:
-- insufficient balance
-- invalid account
-
-Handling:
-- Do NOT retry
-- ACK message
-- Emit domain event (optional)
-
----
-
-#### 2. Transient Failures (Retryable)
-
-Examples:
-- DB timeout
-- network glitch
-
-Handling:
-- DO NOT ACK
-- Let JetStream retry
+### 3. Permanent Failures
+Examples: Serialization error, invalid subject.
+**Action**: Send to DLQ, ACK original message.
 
 ---
 
-#### 3. System Failures (Critical)
+## 📉 Backpressure & Scalability
 
-Examples:
-- database unavailable
-- service dependency down
-
-Handling:
-- DO NOT ACK
-- System backpressure applies
-
----
-
-## 🔌 Circuit Breaker Strategy (Conceptual)
-
-Even without a library, the system should behave as follows:
-
-```mermaid
-sequenceDiagram
-    participant Worker
-    participant ExternalService
-    participant NATS
-
-    Worker->>ExternalService: Request
-
-    alt Service Healthy
-        ExternalService-->>Worker: Response
-        Worker->>NATS: ACK
-    else Service Down
-        ExternalService-->>Worker: Failure
-        Worker-->>NATS: NO ACK
-    end
-```
-
-### Principle
-
-- Fail fast
-- Do not block threads
-- Let message retry later
-
----
-
-## 🧱 Bulkhead Strategy
-
-Isolation is achieved via:
-
-- Separate consumers per use case
-- Independent processing pipelines
-
-Example:
-
-- TransferConsumer
-- WithdrawConsumer
-- DepositConsumer
-
-Failure in one does NOT block others.
-
----
-
-## 📉 Backpressure Handling
-
-Controlled by JetStream:
-
-- max_ack_pending
-- consumer pull limits
-
-System naturally slows down instead of crashing.
-
----
-
-## 🔮 Future Improvements
-
-- Observability (tracing per operation_id)
-- Replay tooling
-- Manual DLQ reprocessing tools
-- Saga orchestration
+- **Bulkhead**: Consumers are isolated by subject and thread pool (Virtual Threads).
+- **Backpressure**: Controlled via `max_ack_pending` in JetStream.
 
 ---
 
 ## 💡 Final Principle
 
 "Reliability is achieved not by avoiding failures, but by designing the system to behave correctly when failures happen."
-

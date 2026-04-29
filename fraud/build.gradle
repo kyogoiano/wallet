@@ -1,0 +1,15 @@
+
+
+group = 'br.com.wallet.fraud'
+
+dependencies {
+    implementation project(":core") // Fraud module depends on core for tracing, etc.
+    implementation 'org.springframework:spring-aspects'
+    // Spring Boot Test dependencies for fraud module
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}

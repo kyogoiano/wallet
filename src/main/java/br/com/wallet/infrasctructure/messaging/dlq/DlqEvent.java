@@ -1,6 +1,6 @@
 package br.com.wallet.infrasctructure.messaging.dlq;
 
-import br.com.wallet.application.aspects.tracing.TraceContext;
+import br.com.wallet.core.tracing.TraceContext;
 
 import java.time.Instant;
 import java.util.Map;

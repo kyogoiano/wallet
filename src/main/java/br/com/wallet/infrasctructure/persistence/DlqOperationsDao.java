@@ -1,6 +1,6 @@
 package br.com.wallet.infrasctructure.persistence;
 
-import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqEvent;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqFailureType;
 import br.com.wallet.infrasctructure.messaging.dlq.DlqStatus;

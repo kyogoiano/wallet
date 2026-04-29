@@ -1,8 +1,8 @@
 package br.com.wallet.application.service;
 
-import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
-import br.com.wallet.exceptions.IdempotencyException;
+import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.infrasctructure.operation.OperationStatus;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;

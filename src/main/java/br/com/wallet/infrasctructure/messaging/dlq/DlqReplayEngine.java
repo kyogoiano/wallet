@@ -1,6 +1,6 @@
 package br.com.wallet.infrasctructure.messaging.dlq;
 
-import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.exceptions.TransientException;
 import br.com.wallet.infrasctructure.persistence.DlqOperationsDao;
 import io.nats.client.Connection;

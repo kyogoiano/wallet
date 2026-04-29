@@ -1,6 +1,6 @@
 package br.com.wallet.infrasctructure.messaging.consumer;
 
-import br.com.wallet.application.aspects.tracing.TraceContext;
+import br.com.wallet.core.tracing.TraceContext;
 import br.com.wallet.application.usecase.UseCase;
 import br.com.wallet.domain.envelope.CommandEnvelope;
 import br.com.wallet.exceptions.ExceptionType;

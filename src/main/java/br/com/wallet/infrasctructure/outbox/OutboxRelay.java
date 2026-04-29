@@ -1,6 +1,6 @@
 package br.com.wallet.infrasctructure.outbox;
 
-import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.domain.event.*;
 import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;

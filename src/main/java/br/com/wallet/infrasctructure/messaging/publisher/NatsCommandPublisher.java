@@ -1,6 +1,6 @@
 package br.com.wallet.infrasctructure.messaging.publisher;
 
-import br.com.wallet.application.aspects.tracing.TraceContext;
+import br.com.wallet.core.tracing.TraceContext;
 import br.com.wallet.domain.envelope.CommandEnvelope;
 import br.com.wallet.exceptions.PermanentException;
 import br.com.wallet.exceptions.TransientException;

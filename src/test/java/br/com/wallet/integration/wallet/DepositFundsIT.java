@@ -6,7 +6,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.DepositFundsUseCase;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.domain.context.Wallet;
-import br.com.wallet.exceptions.IdempotencyException;
+import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.RegisterNatsProperties;

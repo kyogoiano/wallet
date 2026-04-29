@@ -1,6 +1,6 @@
 package br.com.wallet.domain.context;
 
-import br.com.wallet.application.aspects.tracing.TraceContext;
+import br.com.wallet.core.tracing.TraceContext;
 import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;

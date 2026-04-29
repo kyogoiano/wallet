@@ -1,6 +1,6 @@
-package br.com.wallet.application.aspects.tracing;
+package br.com.wallet.core.tracing;
 
-import br.com.wallet.exceptions.IdempotencyException;
+import br.com.wallet.core.exceptions.IdempotencyException;
 import io.micrometer.tracing.BaggageInScope;
 import io.micrometer.tracing.ScopedSpan;
 import io.micrometer.tracing.Tracer;

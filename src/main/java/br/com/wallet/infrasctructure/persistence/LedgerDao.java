@@ -58,7 +58,7 @@ public class LedgerDao {
                     FROM ledger
                     WHERE wallet_id = ? AND sequence = ?
                     LIMIT 1
-                """, rs -> rs.next() ? rs.getString("hash") : null, walletId);
+                """, rs -> rs.next() ? rs.getString("hash") : null, walletId, sequence);
     }
 
     /**

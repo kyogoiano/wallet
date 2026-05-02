@@ -5,11 +5,4 @@ public class AccountNotFoundException extends BusinessException {
         super("Account Not Found!");
     }
 
-    public AccountNotFoundException(String message) {
-        super(message);
-    }
-    public AccountNotFoundException(String message, Throwable cause) {
-        super(message, cause);
-    }
-
 }

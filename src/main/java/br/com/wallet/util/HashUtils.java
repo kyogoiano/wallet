@@ -74,6 +74,7 @@ public class HashUtils {
                 ledgerType.name(),
                 String.valueOf(sequence),
                 operationId.toString(),
+                userId.toString(),
                 String.valueOf(createdAt.toEpochMilli())
         );
     }

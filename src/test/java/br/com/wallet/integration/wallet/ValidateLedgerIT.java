@@ -78,9 +78,11 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @MethodSource("transferScenarios")
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         // simulate transactions
         transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
@@ -102,16 +104,18 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @Test
     void shouldValidateLedgerAfterMultipleTransfers() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("300"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("300"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
         var transfer100 = new Transfer(from, to, new BigDecimal("100"), UUID.randomUUID());
 
         transferFundsUseCase.handle(transfer50);
         transferFundsUseCase.handle(transfer100);
-        //NOTE: reload uuid, so this is not a repeated transfer
+        //NOTE: reload userId, so this is not a repeated transfer
         transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
 
         transferFundsUseCase.handle(transfer50);
@@ -129,9 +133,11 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @Test
     void shouldDetectTamperedLedger() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID()));
@@ -153,9 +159,11 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @Test
     void shouldDetectBrokenSequence() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID()));
@@ -176,9 +184,11 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @Test
     void shouldDetectBrokenHashChain() {
         var fromWallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(fromWallet, new BigDecimal("200"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(fromWallet, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
         var toWallet = UUID.randomUUID();
-        createWalletUseCase.handle(toWallet);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(toWallet, toUserId);
 
         var opId1 = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
@@ -204,9 +214,10 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @Test
     void shouldDetectTamperedAmount() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"),  userId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        createWalletUseCase.handle(to, userId);
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("50"), opId));
@@ -229,9 +240,11 @@ class ValidateLedgerIT extends RegisterNatsProperties {
     @Test
     void shouldDetectChainLinkBroken() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         // Entry 1: Genesis (Sequence 1)
         // Entry 2: Transfer (Sequence 2)

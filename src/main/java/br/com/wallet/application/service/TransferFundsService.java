@@ -85,6 +85,14 @@ public class TransferFundsService implements TransferFundsUseCase {
             log.warn("Recovering operation {}", transfer.operationId());
         }
 
+        // validations
+        Validations.validatePositiveAmount(transfer.amount());
+
+        if (transfer.from().equals(transfer.to())) {
+            log.warn("Invalid transfer: same wallet. walletId={}", transfer.from());
+            throw new IllegalArgumentException("Cannot transfer to same wallet");
+        }
+
         this.execute(transfer);
         outboxDao.save(
                 new TransferCompletedEvent(transfer.from(), transfer.to(), transfer.amount(), transfer.operationId())
@@ -95,29 +103,22 @@ public class TransferFundsService implements TransferFundsUseCase {
 
     protected void execute(@NonNull final Transfer transfer) {
 
-        // validations
-        Validations.validatePositiveAmount(transfer.amount());
-
-        if (transfer.from().equals(transfer.to())) {
-            log.warn("Invalid transfer: same wallet. walletId={}", transfer.from());
-            throw new IllegalArgumentException("Cannot transfer to same wallet");
-        }
 
         // 🔒 lock ordering (avoid deadlocks: no circular wait)
         final var ordered = Stream.of(transfer.from(), transfer.to())
                 .sorted()
                 .toList();
 
-        final var balances = accountDao.getBalancesFromWallets(ordered);
+        final var accountBalances = accountDao.getBalancesFromWallets(ordered);
 
-        if (!balances.containsKey(transfer.from()) || !balances.containsKey(transfer.to())) {
+        if (!accountBalances.containsKey(transfer.from()) || !accountBalances.containsKey(transfer.to())) {
             log.warn("At least one Wallet not found!");
             throw new IllegalArgumentException("At least one Wallet not found");
         }
 
-        final var fromBalance = balances.get(transfer.from());
+        final var fromBalance = accountBalances.get(transfer.from());
 
-        if (fromBalance.compareTo(transfer.amount()) < 0) {
+        if (fromBalance.balance().compareTo(transfer.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",
                     transfer.from(), fromBalance, transfer.amount());
             throw new InsufficientFundsException();
@@ -125,8 +126,10 @@ public class TransferFundsService implements TransferFundsUseCase {
 
         final var now = Instant.now();
         // each child transaction unlock one wallet , first from wallet and then to wallet
-        core.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), now);
-        core.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), now);
+        core.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), fromBalance.userId(), now);
+
+        final var toBalance = accountBalances.get(transfer.to());
+        core.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), toBalance.userId(), now);
 
         // 🧾 ledger entries
         log.info("Transfer completed. from={}, to={}, amount={}, operationId={}",

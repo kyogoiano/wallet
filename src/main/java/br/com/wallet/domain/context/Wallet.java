@@ -9,6 +9,7 @@ import java.util.UUID;
 
 public record Wallet(@NonNull UUID id,
                      BigDecimal initialBalance,
+                     @NonNull UUID userId,
                      UUID operationId) implements TraceContext {
     @Override
     public UUID operationId() {
@@ -17,6 +18,7 @@ public record Wallet(@NonNull UUID id,
     @Override
     public Map<String, String> traceTags() {
         return Map.of(
+                "user.id", userId.toString(),
                 "wallet.id", id.toString()
         );
     }

@@ -33,9 +33,10 @@ public class HashUtils {
             @NonNull LedgerType ledgerType,
             @NonNull Long sequence,
             @NonNull UUID operationId,
+            @NonNull UUID userId,
             @NonNull Instant createdAt
     ) {
-        final var hashInput = HashUtils.buildLedgerHashInput(previousHash, walletId, amount, ledgerType, sequence, operationId, createdAt);
+        final var hashInput = HashUtils.buildLedgerHashInput(previousHash, walletId, amount, ledgerType, sequence, operationId, userId, createdAt);
 
         final byte[] hashBytes = digest.digest(hashInput.getBytes(StandardCharsets.UTF_8));
         return HexFormat.of().formatHex(hashBytes);
@@ -50,6 +51,7 @@ public class HashUtils {
      * @param ledgerType ledger type
      * @param sequence sequence
      * @param operationId operation id
+     * @param userId user id
      * @param createdAt current instant
      * @return ledger hash input
      */
@@ -59,6 +61,7 @@ public class HashUtils {
                                   @NonNull final LedgerType ledgerType,
                                   @NonNull final Long sequence,
                                   @NonNull final UUID operationId,
+                                  @NonNull final UUID userId,
                                   @NonNull final Instant createdAt) {
         final var normalizedAmount = amount
                 .setScale(2, RoundingMode.UNNECESSARY)

@@ -48,9 +48,11 @@ public class ReplayWalletIT extends RegisterNatsProperties {
     @Test
     void shouldReplayWalletBalanceCorrectly() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         var transfer50 = new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID());
@@ -68,9 +70,11 @@ public class ReplayWalletIT extends RegisterNatsProperties {
     void replayShouldMatchStoredBalance() {
 
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("150"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("150"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("40"), UUID.randomUUID()));
@@ -82,9 +86,11 @@ public class ReplayWalletIT extends RegisterNatsProperties {
     @Test
     void replayShouldStillWorkEvenIfLedgerIsCorrupted() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         var opId = UUID.randomUUID();
 

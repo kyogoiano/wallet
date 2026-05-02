@@ -1,9 +1,6 @@
 package br.com.wallet.unit.interfaces.rest;
 
-import br.com.wallet.application.usecase.BalanceUseCase;
-import br.com.wallet.application.usecase.CreateWalletUseCase;
-import br.com.wallet.application.usecase.LedgerUseCase;
-import br.com.wallet.application.usecase.ReplayWalletUseCase;
+import br.com.wallet.application.usecase.*;
 import br.com.wallet.domain.LedgerEntry;
 import br.com.wallet.domain.LedgerType;
 import br.com.wallet.domain.context.Wallet;
@@ -55,6 +52,9 @@ class WalletControllerTest {
     @MockitoBean
     ReplayWalletUseCase replayWalletUseCase;
 
+    @MockitoBean
+    AccountUseCase accountUseCase;
+
     @BeforeEach
     void setup() {
         lenient().when(natsCommandPublisher.publishAsync(anyString(), any()))
@@ -73,11 +73,13 @@ class WalletControllerTest {
 
     @Test
     void shouldCreateEmptyWalletSuccessfully() throws Exception {
-        mockMvc.perform(post("/wallets"))
+        UUID userId = UUID.randomUUID();
+
+        mockMvc.perform(post("/wallets/{userId}", userId))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.walletId").exists());
 
-        verify(createWalletUseCase).handle(any(UUID.class));
+        verify(createWalletUseCase).handle(any(UUID.class), eq(userId));
         verifyNoInteractions(natsCommandPublisher);
     }
 
@@ -86,7 +88,8 @@ class WalletControllerTest {
         UUID opId = UUID.randomUUID();
         var body = """
                 {
-                  "initialBalance": 100
+                  "initialBalance": 100,
+                  "userId": "00000000-0000-0000-0000-000000000001"
                 }
                 """;
 
@@ -139,7 +142,8 @@ class WalletControllerTest {
     void shouldReturnLedgerEntries() throws Exception {
         UUID walletId = UUID.randomUUID();
         var entries = List.of(
-                new LedgerEntry(UUID.randomUUID(), BigDecimal.TEN, LedgerType.CREDIT, UUID.randomUUID(), 1L, "hash", "previousHash", Instant.now())
+                new LedgerEntry(UUID.randomUUID(), BigDecimal.TEN, LedgerType.CREDIT, UUID.randomUUID(), UUID.randomUUID(),
+                        1L, "hash", "previousHash", Instant.now())
         );
         when(ledgerUseCase.getLedger(walletId, 100)).thenReturn(entries);
 

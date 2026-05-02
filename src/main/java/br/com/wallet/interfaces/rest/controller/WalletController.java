@@ -1,18 +1,14 @@
 package br.com.wallet.interfaces.rest.controller;
 
-import br.com.wallet.application.usecase.BalanceUseCase;
-import br.com.wallet.application.usecase.CreateWalletUseCase;
-import br.com.wallet.application.usecase.LedgerUseCase;
-import br.com.wallet.application.usecase.ReplayWalletUseCase;
+import br.com.wallet.application.usecase.*;
+import br.com.wallet.domain.Account;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.infrasctructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.interfaces.rest.api.WalletApi;
-import br.com.wallet.interfaces.rest.dto.BalanceResponse;
-import br.com.wallet.interfaces.rest.dto.CreateWalletCommand;
-import br.com.wallet.interfaces.rest.dto.CreateWalletResponse;
-import br.com.wallet.interfaces.rest.dto.LedgerEntryResponse;
+import br.com.wallet.interfaces.rest.dto.*;
 import br.com.wallet.interfaces.rest.mapper.LedgerMapper;
 import jakarta.validation.Valid;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -36,17 +32,39 @@ public class WalletController implements WalletApi {
     private final CreateWalletUseCase createWalletUseCase;
     private final LedgerUseCase ledgerUseCase;
     private final ReplayWalletUseCase replayWalletUseCase;
+    private final AccountUseCase accountUseCase;
 
     public WalletController(final NatsCommandPublisher natsCommandPublisher,
                             final BalanceUseCase balanceUseCase,
                             final CreateWalletUseCase createWalletUseCase,
                             final LedgerUseCase ledgerUseCase,
-                            final ReplayWalletUseCase replayWalletUseCase) {
+                            final ReplayWalletUseCase replayWalletUseCase, AccountUseCase accountUseCase) {
         this.natsCommandPublisher = natsCommandPublisher;
         this.balanceUseCase = balanceUseCase;
         this.createWalletUseCase = createWalletUseCase;
         this.ledgerUseCase = ledgerUseCase;
         this.replayWalletUseCase = replayWalletUseCase;
+        this.accountUseCase = accountUseCase;
+    }
+
+    @GetMapping("/{walletId}")
+    @Override
+    public AccountResponse getAccount(@PathVariable final UUID walletId) {
+        final var account = accountUseCase.find(walletId);
+        return new AccountResponse(
+                account.id(), account.balance(), account.version(), account.userId(), account.createdAt());
+    }
+
+    @GetMapping()
+    @Override
+    public List<AccountResponse> list(@RequestParam(defaultValue = "100") Integer limit, @RequestParam(defaultValue = "0") Integer offset) {
+        return mapToAccountResponse(accountUseCase.list(limit, offset));
+    }
+
+    private @NonNull List<@NonNull AccountResponse> mapToAccountResponse(@NonNull final List<@NonNull Account> list) {
+        return list.stream()
+                .map(account -> new AccountResponse(
+                        account.id(), account.balance(), account.version(), account.userId(), account.createdAt() ) ).toList();
     }
 
     @GetMapping("/{walletId}/balance")
@@ -68,12 +86,12 @@ public class WalletController implements WalletApi {
     /**
      * Simple wallet creation (Synchronous)
      */
-    @PostMapping
+    @PostMapping("/{userId}")
     @Override
-    public ResponseEntity<CreateWalletResponse> create() {
+    public ResponseEntity<CreateWalletResponse> create(@PathVariable final UUID userId) {
         final UUID walletId = UUID.randomUUID();
-        log.info("Sync wallet creation requested (zero balance). walletId={}", walletId);
-        createWalletUseCase.handle(walletId);
+        log.info("Sync wallet creation requested (zero balance). walletId={}, userId={}", walletId, userId);
+        createWalletUseCase.handle(walletId, userId);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(new CreateWalletResponse(walletId));
     }
@@ -95,8 +113,9 @@ public class WalletController implements WalletApi {
             throw new IllegalArgumentException("Initial balance must be greater than zero for this endpoint");
         }
 
-        log.info("Async wallet creation with deposit requested. walletId={}, amount={}", walletId, initialBalance);
-        final var wallet = new Wallet(walletId, initialBalance, operationId);
+        log.info("Async wallet creation with deposit requested. walletId={}, userId={}, amount={}", walletId, command.userId()
+                , initialBalance);
+        final var wallet = new Wallet(walletId, initialBalance, command.userId(), operationId);
 
         return natsCommandPublisher.publishAsync("commands.wallet", wallet)
                 .thenApply(ack -> {

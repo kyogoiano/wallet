@@ -1,15 +1,16 @@
 package br.com.wallet.interfaces.rest.api;
 
-import br.com.wallet.interfaces.rest.dto.BalanceResponse;
-import br.com.wallet.interfaces.rest.dto.CreateWalletCommand;
-import br.com.wallet.interfaces.rest.dto.CreateWalletResponse;
-import br.com.wallet.interfaces.rest.dto.LedgerEntryResponse;
+import br.com.wallet.interfaces.rest.dto.*;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.NotNull;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.RequestParam;
 
 import java.time.Instant;
 import java.util.List;
@@ -17,6 +18,23 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 public interface WalletApi {
+
+    @Operation(summary = "Get wallet account")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Success"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "404", description = "Wallet not found")
+    })
+    AccountResponse getAccount(UUID walletId);
+
+    @Operation(summary = "List paginated wallets account")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Success"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "404", description = "Wallet not found"),
+            @ApiResponse(responseCode = "422", description = "Limit too high!")
+    })
+    List<AccountResponse> list(@Max(100) Integer limit, Integer offset);
 
     @Operation(summary = "Get wallet balance")
     @ApiResponses({
@@ -35,7 +53,7 @@ public interface WalletApi {
     })
     BalanceResponse getHistorical(
             UUID walletId,
-            Instant at
+            @NotNull Instant at
     );
 
     @Operation(summary = "Create a simple empty wallet (Synchronous)")
@@ -43,7 +61,7 @@ public interface WalletApi {
             @ApiResponse(responseCode = "201", description = "Created"),
             @ApiResponse(responseCode = "400", description = "Invalid request")
     })
-    ResponseEntity<CreateWalletResponse> create();
+    ResponseEntity<CreateWalletResponse> create(@NotNull UUID userId);
 
     @Operation(summary = "Create wallet with initial deposit (Asynchronous)")
     @ApiResponses({
@@ -53,6 +71,7 @@ public interface WalletApi {
     })
     CompletableFuture<ResponseEntity<CreateWalletResponse>> createWithDeposit(
             UUID operationId,
+
             @Valid CreateWalletCommand command
     );
 

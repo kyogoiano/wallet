@@ -3,6 +3,7 @@ package br.com.wallet.application.service;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.core.exceptions.IdempotencyException;
+import br.com.wallet.exceptions.AccountNotFoundException;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -51,23 +52,25 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
             throw new IdempotencyException("Operation already processed: " + withdraw.operationId());
         }
 
+        // validations
+        Validations.validatePositiveAmount(withdraw.amount());
+
         this.execute(withdraw);
     }
 
     protected void execute(@NonNull Withdraw withdraw) {
-        // validations
-        Validations.validatePositiveAmount(withdraw.amount());
 
-        final var balance = accountDao.findWalletBalanceForUpdate(withdraw.walletId())
-                .orElseThrow(() -> new IllegalArgumentException("Wallet not found"));
-        if (balance.compareTo(withdraw.amount()) < 0) {
+        final var userBalance = accountDao.findWalletBalanceForUpdate(withdraw.walletId())
+                .orElseThrow(AccountNotFoundException::new);
+
+        if (userBalance.getValue().compareTo(withdraw.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",
-                    withdraw.walletId(), balance, withdraw.amount());
+                    withdraw.walletId(), userBalance, withdraw.amount());
             throw new InsufficientFundsException();
         }
 
         final var now = Instant.now();
-        core.applyTransaction(withdraw.walletId(), withdraw.amount(), LedgerType.DEBIT, withdraw.operationId(), now);
+        core.applyTransaction(withdraw.walletId(), withdraw.amount(), LedgerType.DEBIT, withdraw.operationId(), userBalance.getKey(), now);
         outboxDao.save(
                 new WithdrawCompletedEvent(withdraw.walletId(), withdraw.amount(), withdraw.operationId())
         );

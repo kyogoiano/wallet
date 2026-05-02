@@ -57,7 +57,8 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldReturnCurrentBalance() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -67,9 +68,10 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldDecreaseSourceBalanceAndIncreaseTargetBalanceAfterTransfer() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        createWalletUseCase.handle(to, userId);
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("40"), UUID.randomUUID()));
@@ -84,9 +86,10 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldReturnHistoricalBalance() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        createWalletUseCase.handle(to, userId);
 
         Instant before = Instant.now();
 
@@ -107,9 +110,10 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldCalculateHistoricalBalanceWithMultipleTransactions() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("200"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("200"), userId, UUID.randomUUID()));
         var other = UUID.randomUUID();
-        createWalletUseCase.handle(other);
+        createWalletUseCase.handle(other, userId);
 
         transferFundsUseCase.handle(new Transfer(wallet, other,
                 new BigDecimal("50"), UUID.randomUUID()));
@@ -127,7 +131,8 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldReturnZeroWhenNoTransactions() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(wallet);
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(wallet, userId);
 
         var result = balanceUseCase.getHistoricalBalance(wallet, Instant.now());
 
@@ -141,7 +146,8 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldNotApplySameOperationTwice() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
         UUID opId = UUID.randomUUID();
 
         withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("30"), opId));
@@ -158,7 +164,8 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldHandleConcurrentWithdrawalsSafely() throws Exception {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
 
         try (final var executor = Executors.newFixedThreadPool(2)) {
 

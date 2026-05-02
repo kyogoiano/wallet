@@ -30,17 +30,20 @@ public class WalletOperationService {
      * * Stateless and reusable *
      * * sequence is updated together with balance, what prevents race conditions conflicts
      * * Ghost reads problem solution is present on the ledger insert operation
-     * @param walletId wallet id (account)
-     * @param amount operation on amount of ( IMPORTANT NOTICE: do not use negative values for DEBIT ops)
-     * @param ledgerType type of operation
+     *
+     * @param walletId    wallet id (account)
+     * @param amount      operation on amount of ( IMPORTANT NOTICE: do not use negative values for DEBIT ops)
+     * @param ledgerType  type of operation
      * @param operationId operation id
-     * @param now operation instant
+     * @param userId      user id
+     * @param now         operation instant
      */
     public void applyTransaction(
             @NonNull UUID walletId,
             @NonNull BigDecimal amount,
             @NonNull LedgerType ledgerType,
             @NonNull UUID operationId,
+            @NonNull UUID userId,
             @NonNull Instant now) {
 
         final BigDecimal signedAmount = (ledgerType == LedgerType.DEBIT)
@@ -51,8 +54,9 @@ public class WalletOperationService {
         log.info("Applying transaction sequence {} to wallet {}, with amount {}", sequence, walletId, amount);
 
         // ledger insert with hash calculation should be matched with previous sequence ( so even on race conditions it will follow the right sequence )
-        ledgerDao.insertLedger(walletId, amount, ledgerType, operationId, sequence, now);
-        log.info("Transaction applied!, ledger entry created with wallet id: {}, sequence: {}, operationId: {}", walletId, sequence, operationId);
+        ledgerDao.insertLedger(walletId, amount, ledgerType, operationId, userId, sequence, now);
+        log.info("Transaction applied!, ledger entry created with wallet id: {}, sequence: {}, operationId: {}, userId: {}",
+                walletId, sequence, operationId, userId);
     }
 
 }

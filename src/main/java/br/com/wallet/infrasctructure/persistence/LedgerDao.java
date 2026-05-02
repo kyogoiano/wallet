@@ -65,34 +65,38 @@ public class LedgerDao {
      * Insert ledger record using db hash calculation, this impl let db cal
      * The inner select that pick the previous hash prevents ghost reads on racing conditions
      * Racing Scene: T1 execute updateBalance -> receive sequence = 10.
-     *               T2 execute updateBalance -> receive sequence = 11.
-     *               T2 try to findPreviousHash(walletI, 10)
+     * T2 execute updateBalance -> receive sequence = 11.
+     * T2 try to findPreviousHash(walletI, 10)
      * Also to adhere to the hash consistency we will calculate hash inside PostgreSQL pgcrypto extension
      * Hash calculations using SHA512 with critical fields
-     * @param walletId wallet id
-     * @param amount money amount
-     * @param ledgerType ledger operation type
-     * @param operationId operation id
+     *
+     * @param walletId     wallet id
+     * @param amount       money amount
+     * @param ledgerType   ledger operation type
+     * @param operationId  operation id
+     * @param userId       user id
      * @param nextSequence next sequence
-     * @param now operation instant
+     * @param now          operation instant
      */
     public void insertLedger(@NonNull final UUID walletId,
-                              @NonNull final BigDecimal amount,
-                              @NonNull final LedgerType ledgerType,
-                              @NonNull final UUID operationId,
-                              @NonNull final Long nextSequence,
-                              @NonNull final Instant now) {
+                             @NonNull final BigDecimal amount,
+                             @NonNull final LedgerType ledgerType,
+                             @NonNull final UUID operationId,
+                             @NonNull final UUID userId,
+                             @NonNull final Long nextSequence,
+                             @NonNull final Instant now) {
         final var params = new MapSqlParameterSource()
                 .addValue("id", UUID.randomUUID())
                 .addValue("walletId", walletId)
                 .addValue("amount", amount)
                 .addValue("type", ledgerType.name())
                 .addValue("operationId", operationId)
+                .addValue("userId", userId)
                 .addValue("now", now.atOffset(ZoneOffset.UTC))
                 .addValue("sequence", nextSequence);
         namedParameterJdbcTemplate.update("""
                             INSERT INTO ledger (
-                                id, wallet_id, amount, type, operation_id, created_at, sequence, previous_hash, hash
+                                id, wallet_id, amount, type, operation_id, user_id, created_at, sequence, previous_hash, hash
                             )
                             WITH prev_data AS (
                                 SELECT hash FROM ledger
@@ -104,6 +108,7 @@ public class LedgerDao {
                                 :amount,
                                 :type,
                                 :operationId,
+                                :userId,
                                 :now,
                                 :sequence,
                                 (SELECT hash FROM prev_data),
@@ -115,6 +120,7 @@ public class LedgerDao {
                                                 :type,
                                                 :sequence::text,
                                                 :operationId::text,
+                                                :userId::text,
                                                 (extract(epoch from :now) * 1000)::bigint::text
                                     ),
                                     'sha512'
@@ -135,7 +141,7 @@ public class LedgerDao {
      */
     public @NonNull List<LedgerEntry> getLedgerEntries(@NonNull UUID walletId, @NonNull Integer limit) {
         return jdbc.query("""
-            SELECT wallet_id, amount, type, operation_id,
+            SELECT wallet_id, amount, type, operation_id, user_id,
                    sequence, hash, previous_hash, created_at
             FROM ledger
             WHERE wallet_id = ?
@@ -146,6 +152,7 @@ public class LedgerDao {
                 rs.getBigDecimal("amount"),
                 LedgerType.valueOf(rs.getString("type")),
                 UUID.fromString(rs.getString("operation_id")),
+                UUID.fromString(rs.getString("user_id")),
                 rs.getLong("sequence"),
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
@@ -159,7 +166,7 @@ public class LedgerDao {
      */
     public @NonNull List<LedgerEntry> getLedgerEntries(@NonNull UUID walletId) {
         return jdbc.query("""
-            SELECT wallet_id, amount, type, operation_id,
+            SELECT wallet_id, amount, type, operation_id, user_id,
                    sequence, hash, previous_hash, created_at
             FROM ledger
             WHERE wallet_id = ?
@@ -169,6 +176,7 @@ public class LedgerDao {
                 rs.getBigDecimal("amount"),
                 LedgerType.valueOf(rs.getString("type")),
                 UUID.fromString(rs.getString("operation_id")),
+                UUID.fromString(rs.getString("user_id")),
                 rs.getLong("sequence"),
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
@@ -203,6 +211,7 @@ public class LedgerDao {
                         type,
                         sequence::text,
                         operation_id::text,
+                        user_id::text,
                         (extract(epoch from created_at) * 1000)::bigint::text
                     ),
                     'sha512'

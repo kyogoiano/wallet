@@ -3,6 +3,7 @@ CREATE TABLE accounts (
     id UUID PRIMARY KEY,
     balance NUMERIC(19,2) NOT NULL CHECK (balance >= 0),
     version BIGINT NOT NULL DEFAULT 0,
+    user_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -16,6 +17,7 @@ CREATE TABLE ledger (
     type VARCHAR(10) NOT NULL,
     reference_id UUID,
     operation_id UUID NOT NULL,
+    user_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- tamper-proof fields

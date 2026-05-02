@@ -3,6 +3,8 @@ package br.com.wallet.application.service;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.core.exceptions.IdempotencyException;
+import br.com.wallet.exceptions.AccountNotFoundException;
+import br.com.wallet.infrasctructure.persistence.AccountDao;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -17,6 +19,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.UUID;
 
 @Service
 class DepositFundsService implements DepositFundsUseCase {
@@ -26,12 +29,14 @@ class DepositFundsService implements DepositFundsUseCase {
     private final WalletOperationService core;
     private final WalletOperationsDao operationsDao;
     private final OutboxDao outboxDao;
+    private final AccountDao accountDao;
 
     public DepositFundsService(final WalletOperationService core,
-                               final WalletOperationsDao operationsDao, OutboxDao outboxDao) {
+                               final WalletOperationsDao operationsDao, OutboxDao outboxDao, AccountDao accountDao) {
         this.core = core;
         this.operationsDao = operationsDao;
         this.outboxDao = outboxDao;
+        this.accountDao = accountDao;
     }
 
     @Traceable("wallet.deposit")
@@ -44,19 +49,22 @@ class DepositFundsService implements DepositFundsUseCase {
             throw new IdempotencyException("Operation already processed: " + deposit.operationId());
         }
 
-        this.execute(deposit);
-    }
+        // this operation might fail if someone deletes the user account in the meantime, as we not lock it for update
+        var userId = accountDao.findUserId(deposit.walletId()).orElseThrow(AccountNotFoundException::new);
 
-    protected void execute(@NonNull Deposit deposit) {
         // validations
         Validations.validatePositiveAmount(deposit.amount());
 
+        this.execute(deposit, userId);
+    }
+
+    protected void execute(@NonNull Deposit deposit, @NonNull UUID userId) {
+
         final var now = Instant.now();
-        core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), now);
+        core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), userId, now);
         outboxDao.save(
                 new DepositCompletedEvent(deposit.walletId(), deposit.amount(), deposit.operationId())
         );
-
         operationsDao.completeOperation(deposit.operationId());
     }
 

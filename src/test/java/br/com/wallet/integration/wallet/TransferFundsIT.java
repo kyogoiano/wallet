@@ -77,9 +77,11 @@ class TransferFundsIT extends RegisterNatsProperties {
             TransferScenario scenario) {
         // given
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         // when
         transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
@@ -93,9 +95,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     void shouldFailWhenInsufficientBalance() {
         // given
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         // when / then
         assertThatThrownBy(() ->
@@ -106,7 +110,8 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldNotAllowTransferToSameWallet() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
 
         assertThatThrownBy(() ->
                 transferFundsUseCase.handle(new Transfer(from, from, BigDecimal.TEN, UUID.randomUUID()))
@@ -116,9 +121,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldInsertOutboxEventOnTransfer() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         UUID opId = UUID.randomUUID();
 
@@ -132,9 +139,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldNotDuplicateOutboxEventOnRetry() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, UUID.randomUUID()));
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, toUserId, UUID.randomUUID()));
 
         UUID opId = UUID.randomUUID();
         var transfer = new Transfer(from, to, new BigDecimal("50"), opId);
@@ -149,9 +158,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldHaveStrictlyIncreasingSequence() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
         transferFundsUseCase.handle(transfer50);

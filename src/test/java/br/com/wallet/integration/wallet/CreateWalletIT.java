@@ -55,12 +55,14 @@ class CreateWalletIT extends RegisterNatsProperties {
     void shouldCreateWalletWithInitialBalance(final BigDecimal initialBalance) {
         // given
         UUID walletId = UUID.randomUUID();
+        UUID userId = UUID.randomUUID();
+
 
         // when
         jdbc.update("""
-            INSERT INTO accounts (id, balance, version)
-            VALUES (?, ?, 0)
-        """, walletId, initialBalance);
+            INSERT INTO accounts (id, balance, user_id, version)
+            VALUES (?, ?, ?, 0)
+        """, walletId, initialBalance, userId);
 
         // then
         BigDecimal storedBalance = jdbc.queryForObject("""
@@ -73,8 +75,9 @@ class CreateWalletIT extends RegisterNatsProperties {
     @Test
     void shouldCreateWalletWithZeroBalance() {
         var walletId = UUID.randomUUID();
+        var userId = UUID.randomUUID();
         // when
-         createWalletUseCase.handle(walletId);
+         createWalletUseCase.handle(walletId, userId);
 
         // then
         testDataHelper.assertWalletExists(walletId);
@@ -87,7 +90,8 @@ class CreateWalletIT extends RegisterNatsProperties {
     @MethodSource("initialBalances")
     void shouldCreateWalletWithGivenInitialBalance(BigDecimal initialBalance) {
         var walletId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(walletId, initialBalance, UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(walletId, initialBalance, userId, UUID.randomUUID()));
 
         testDataHelper.assertBalance(walletId, initialBalance);
     }

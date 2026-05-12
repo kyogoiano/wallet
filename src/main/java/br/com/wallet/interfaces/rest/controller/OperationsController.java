@@ -51,7 +51,7 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final DepositCommand command) {
 
-        var deposit = new Deposit(command.walletId(), command.amount(), operationId);
+        var deposit = new Deposit(command.walletId(), command.userId(), command.amount(), operationId);
         
         return natsCommandPublisher.publishAsync("commands.deposit", deposit)
                 .thenAccept(ack -> log.debug("Deposit command ACKed by NATS: seq={}", ack.getSeqno()));
@@ -64,7 +64,7 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final WithdrawCommand command) {
 
-        var withdraw = new Withdraw(command.walletId(), command.amount(), operationId);
+        final var withdraw = new Withdraw(command.walletId(), command.userId(), command.amount(), operationId);
         
         return natsCommandPublisher.publishAsync("commands.withdraw", withdraw)
                 .thenAccept(ack -> log.debug("Withdraw command ACKed by NATS: seq={}", ack.getSeqno()));

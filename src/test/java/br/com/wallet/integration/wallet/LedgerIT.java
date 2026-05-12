@@ -9,13 +9,14 @@ import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
-import br.com.wallet.support.RegisterNatsProperties;
+import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -23,8 +24,9 @@ import java.util.UUID;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
+@ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-public class LedgerIT extends RegisterNatsProperties {
+public class LedgerIT extends DockerProperties {
 
     @Autowired
     LedgerUseCase ledgerUseCase;

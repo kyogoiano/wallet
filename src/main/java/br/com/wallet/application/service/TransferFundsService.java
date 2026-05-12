@@ -1,5 +1,6 @@
 package br.com.wallet.application.service;
 
+import br.com.wallet.application.fraud.FraudCheckHelper;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.core.exceptions.IdempotencyException;
@@ -19,7 +20,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
+import java.time.Clock;
 import java.util.stream.Stream;
 
 @Service
@@ -30,16 +31,21 @@ public class TransferFundsService implements TransferFundsUseCase {
     private final WalletOperationService core;
     private final OutboxDao outboxDao;
     private final WalletOperationsDao operationsDao;
-
+    private final FraudCheckHelper fraudCheckHelper;
+    private final Clock clock;
 
     public TransferFundsService(final WalletOperationService core,
                                 final OutboxDao outboxDao,
                                 final WalletOperationsDao operationsDao,
-                                final AccountDao accountDao) {
+                                final AccountDao accountDao,
+                                final FraudCheckHelper fraudCheckHelper,
+                                final Clock clock) {
         this.core = core;
         this.outboxDao = outboxDao;
         this.operationsDao = operationsDao;
         this.accountDao = accountDao;
+        this.fraudCheckHelper = fraudCheckHelper;
+        this.clock = clock;
     }
 
 
@@ -72,6 +78,11 @@ public class TransferFundsService implements TransferFundsUseCase {
     @Override
     public void handle(@NonNull final Transfer transfer) {
 
+        fraudCheckHelper.performFraudCheck(transfer);
+
+        // validations
+        Validations.validatePositiveAmount(transfer.amount());
+
         final boolean started = operationsDao.startOperation(transfer.operationId());
 
         if (!started) {
@@ -85,8 +96,6 @@ public class TransferFundsService implements TransferFundsUseCase {
             log.warn("Recovering operation {}", transfer.operationId());
         }
 
-        // validations
-        Validations.validatePositiveAmount(transfer.amount());
 
         if (transfer.from().equals(transfer.to())) {
             log.warn("Invalid transfer: same wallet. walletId={}", transfer.from());
@@ -124,16 +133,18 @@ public class TransferFundsService implements TransferFundsUseCase {
             throw new InsufficientFundsException();
         }
 
-        final var now = Instant.now();
+        // check for frauds
+        final var toBalance = accountBalances.get(transfer.to());
+
+        final var now = clock.instant();
+
         // each child transaction unlock one wallet , first from wallet and then to wallet
         core.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), fromBalance.userId(), now);
 
-        final var toBalance = accountBalances.get(transfer.to());
         core.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), toBalance.userId(), now);
 
         // 🧾 ledger entries
         log.info("Transfer completed. from={}, to={}, amount={}, operationId={}",
                 transfer.from(), transfer.to(), transfer.amount(), transfer.operationId());
     }
-
 }

@@ -37,7 +37,7 @@ public class OutboxDao {
                 UUID.randomUUID(),
                 event.aggregateType(),
                 event.aggregateId(),
-                event.eventType(),
+                event.eventType().name(),
                 jsonUtils.toJson(event)
         );
     }

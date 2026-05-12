@@ -7,13 +7,14 @@ import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
-import br.com.wallet.support.RegisterNatsProperties;
+import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -22,8 +23,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
+@ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-public class WithdrawFundsIT extends RegisterNatsProperties {
+public class WithdrawFundsIT extends DockerProperties {
     @Autowired
     private WithdrawFundsUseCase withdrawFundsUseCase;
 
@@ -52,7 +54,7 @@ public class WithdrawFundsIT extends RegisterNatsProperties {
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, operationId));
+        withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId));
 
         // then
         testDataHelper.assertBalance(walletId, new BigDecimal("70.00"));
@@ -68,7 +70,7 @@ public class WithdrawFundsIT extends RegisterNatsProperties {
 
         // when / then
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, UUID.randomUUID()))
+                withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, UUID.randomUUID()))
         ).isInstanceOf(br.com.wallet.exceptions.InsufficientFundsException.class);
     }
 
@@ -82,8 +84,8 @@ public class WithdrawFundsIT extends RegisterNatsProperties {
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, operationId));
-        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(walletId, withdrawAmount, operationId))).isInstanceOf(IdempotencyException.class); // retry
+        withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId));
+        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId))).isInstanceOf(IdempotencyException.class); // retry
 
         // then
         // Initial 100 - one withdraw of 40 = 60

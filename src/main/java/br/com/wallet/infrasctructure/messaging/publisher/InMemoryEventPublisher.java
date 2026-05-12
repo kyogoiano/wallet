@@ -1,15 +1,18 @@
 package br.com.wallet.infrasctructure.messaging.publisher;
 
+import br.com.wallet.domain.event.DomainEventType;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
+
+import java.io.IOException;
 
 @Component
 public class InMemoryEventPublisher implements EventPublisher {
     private static final Logger log = LoggerFactory.getLogger(InMemoryEventPublisher.class);
 
     @Override
-    public void publish(String eventType, String payload) {
-        log.info("📤 Publishing event. type={}, payload={}", eventType, payload);
+    public void publish(DomainEventType eventType, String payload) throws IOException {
+        log.info("📤 Publishing event. type={}, payload={}", eventType.name(), payload);
     }
 }

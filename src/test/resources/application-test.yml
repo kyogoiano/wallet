@@ -3,3 +3,7 @@ management:
     metrics:
       export:
         enabled: false
+
+redis:
+  socket:
+    enabled: false

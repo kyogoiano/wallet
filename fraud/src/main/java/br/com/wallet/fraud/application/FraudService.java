@@ -1,7 +1,7 @@
 package br.com.wallet.fraud.application;
 
-import br.com.wallet.fraud.domain.FraudDecision;
 import br.com.wallet.fraud.domain.FraudEngine;
+import br.com.wallet.fraud.domain.FraudResponse;
 import br.com.wallet.fraud.domain.context.FraudContext;
 import org.springframework.stereotype.Service;
 
@@ -10,11 +10,11 @@ public class FraudService {
 
     private final FraudEngine engine;
 
-    public FraudService(FraudEngine engine) {
+    public FraudService(final FraudEngine engine) {
         this.engine = engine;
     }
 
-    public FraudDecision check(final FraudContext context) {
+    public FraudResponse check(final FraudContext context) {
         return engine.evaluate(context);
     }
 }

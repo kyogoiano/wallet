@@ -5,5 +5,6 @@ import java.util.UUID;
 
 public interface TraceContext {
     UUID operationId();
+    UUID userId();
     Map<String, String> traceTags();
 }

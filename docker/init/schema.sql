@@ -75,7 +75,7 @@ CREATE TABLE outbox (
     CONSTRAINT outbox_status_chk
         CHECK (status IN ('PENDING', 'FAILED', 'PROCESSING', 'PROCESSED', 'DEAD')),
     CONSTRAINT outbox_event_type_chk -- might be removed for flexibility
-        CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED'))
+        CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED', 'FRAUD'))
 );
 
 CREATE INDEX idx_outbox_unprocessed
@@ -100,6 +100,7 @@ CREATE TABLE IF NOT EXISTS dlq_operations (
   id UUID,
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   operation_id UUID NOT NULL,
+  user_id UUID,
   subject VARCHAR(20) NOT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
   error TEXT,

@@ -66,22 +66,22 @@ public class OutboxRelay {
             final var domainEventType = this.resolveDomainEventType(event.eventType());
             jsonUtils.parseDomainEventPayload(domainEventType, event.payload());
 
-            publisher.publish(event.eventType(), event.payload());
+            publisher.publish(domainEventType, event.payload());
 
             outboxDao.markAsProcessed(event.id(), now);
             log.info("Outbox event marked as processed! id={}, at={}", event.id(), now);
-        } catch (Exception e) {
+        } catch (Exception ex) {
 
             int retryCount = event.retryCount() + 1;
             if (retryCount > 10) {
                 outboxDao.markAsDead(event.id(), now);
-                log.error("Outbox event moved to DLQ! Publish event id={}", event.id(), e);
+                log.error("Outbox event moved to DLQ! Publish event id={}", event.id(), ex);
             } else {
 
                 final var backoff = Duration.ofSeconds((long) Math.pow(2, retryCount));
                 // used for retries
                 outboxDao.markFailed(event.id(), now.plus(backoff));
-                log.warn("Outbox retry scheduled id={}, retryCount={}, backoff={}", event.id(), retryCount, backoff, e);
+                log.warn("Outbox retry scheduled id={}, retryCount={}, backoff={}", event.id(), retryCount, backoff, ex);
             }
         }
     }

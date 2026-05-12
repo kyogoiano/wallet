@@ -6,12 +6,8 @@ import br.com.wallet.exceptions.PermanentException;
 import br.com.wallet.exceptions.TransientException;
 import io.nats.client.*;
 import io.nats.client.api.PublishAck;
-import io.nats.client.api.RetentionPolicy;
-import io.nats.client.api.StorageType;
-import io.nats.client.api.StreamConfiguration;
 import io.nats.client.impl.Headers;
 import io.nats.client.impl.NatsMessage;
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -30,7 +26,7 @@ import java.util.concurrent.CompletableFuture;
  * Nats Command → Async processing → Event
  */
 @Service
-public class NatsCommandPublisher {
+public class NatsCommandPublisher implements JetStreamConfig {
 
     private static final Logger log = LoggerFactory.getLogger(NatsCommandPublisher.class);
 
@@ -46,32 +42,7 @@ public class NatsCommandPublisher {
         final var jsm = this.connection.jetStreamManagement();
         ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
         ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
-    }
-
-    private void ensureStream(@NonNull final JetStreamManagement jsm,
-                              @NonNull final String streamName,
-                              @NonNull final String subjects,
-                              @NonNull final Duration retention)
-            throws IOException, JetStreamApiException {
-
-        try {
-            jsm.getStreamInfo(streamName);
-        } catch (JetStreamApiException e) {
-            if (e.getApiErrorCode() == 404) {
-                final var config = StreamConfiguration.builder()
-                        .name(streamName)
-                        .subjects(subjects)
-                        .retentionPolicy(RetentionPolicy.Limits)
-                        .maxAge(retention)
-                        .storageType(StorageType.File)
-                        .duplicateWindow(Duration.ofMinutes(5))
-                        .build();
-                jsm.addStream(config);
-                log.info("Created JetStream '{}'", streamName);
-            } else {
-                throw e;
-            }
-        }
+        log.info("Commands stream created!");
     }
 
     /**
@@ -95,6 +66,7 @@ public class NatsCommandPublisher {
             headers.add("type", envelope.type());
             headers.add("timestamp", envelope.timestamp().toString());
             headers.add("Nats-Msg-Id", operationId.toString());
+            headers.add("userId", command.userId() == null ? null : command.userId().toString());
 
             final var message = NatsMessage.builder()
                     .subject(subject)

@@ -48,6 +48,30 @@ services:
     networks:
       - wallet-net
 
+  redis:
+    image: redis:8.6-alpine
+    container_name: redis
+    restart: unless-stopped
+
+    command: >
+      redis-server
+      --save ""
+      --appendonly no
+      --protected-mode no
+      --unixsocket /var/run/redis/redis.sock
+      --unixsocketperm 777
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --maxmemory-samples 5
+
+    volumes:
+      - redis-data:/data
+      - redis-socket:/var/run/redis
+
+    networks:
+      - wallet-net
+
+
   openobserve:
     image: openobserve/openobserve:latest-amd64-simd
     container_name: openobserve
@@ -80,6 +104,8 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
+      redis:
+        condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet
       SPRING_DATASOURCE_USERNAME: wallet
@@ -96,7 +122,10 @@ services:
 volumes:
   postgres_data:
   openobserve-data:
+  redis-data:
+  redis-socket:
 
 networks:
+  backend:
   wallet-net:
     driver: bridge

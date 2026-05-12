@@ -4,7 +4,9 @@ group = 'br.com.wallet.fraud'
 
 dependencies {
     implementation project(":core") // Fraud module depends on core for tracing, etc.
-    implementation 'org.springframework:spring-aspects'
+    implementation("io.lettuce:lettuce-core:${lettuceVersion}")
+    implementation 'org.springframework.boot:spring-boot-starter-cache'
+    implementation("com.github.ben-manes.caffeine:caffeine:${caffeineVersion}")
     // Spring Boot Test dependencies for fraud module
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

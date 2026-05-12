@@ -10,13 +10,14 @@ import br.com.wallet.infrasctructure.outbox.OutboxStatus;
 import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
-import br.com.wallet.support.RegisterNatsProperties;
+import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -36,8 +37,9 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
  */
 
 @SpringBootTest
+@ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-class OutboxIT extends RegisterNatsProperties {
+class OutboxIT extends DockerProperties {
 
     @Autowired
     TestDataHelper testDataHelper;
@@ -99,7 +101,7 @@ class OutboxIT extends RegisterNatsProperties {
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
-        failingEventPublisher.failNext(2); // the wallet creation with initial balance is also an event (that deposits)
+        failingEventPublisher.failNext(4); // the wallet creation with initial balance is also an event (that deposits)
 
         assertThatCode(() -> outboxRelay.process())
                 .doesNotThrowAnyException();
@@ -124,8 +126,8 @@ class OutboxIT extends RegisterNatsProperties {
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
-        // first try fails ( after wallet creation with balance)
-        failingEventPublisher.failNext(2);
+        // first try fails ( after wallet creation with balance -> fraud event -> transfer error!)
+        failingEventPublisher.failNext(3);
         outboxRelay.process();
 
 
@@ -141,7 +143,7 @@ class OutboxIT extends RegisterNatsProperties {
 
         assertThat(eventId).isNotNull();
         assertThat(testDataHelper.getStatus(eventId)).isEqualTo(OutboxStatus.PROCESSED);
-        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(1);
+        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(0); // this event id never retried
         assertThat(testDataHelper.getProcessedAt(eventId)).isNotNull();
     }
 
@@ -199,7 +201,7 @@ class OutboxIT extends RegisterNatsProperties {
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
-        failingEventPublisher.failNext(5);
+        failingEventPublisher.failNext(10); // doubled by fraud event
 
         for (int i = 0; i < 5; i++) {
             outboxRelay.process();
@@ -209,7 +211,7 @@ class OutboxIT extends RegisterNatsProperties {
 
         var eventId = testDataHelper.getOutboxIdByOperation(opId);
 
-        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(4);
+        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(3);
     }
 
     @Test
@@ -224,7 +226,7 @@ class OutboxIT extends RegisterNatsProperties {
 
         transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
-        failingEventPublisher.failNext(2);
+        failingEventPublisher.failNext(4);
         outboxRelay.process();
 
         // try again with no delay
@@ -254,6 +256,6 @@ class OutboxIT extends RegisterNatsProperties {
 
         var events = testDataHelper.getOutboxEventsByOperation(opId);
 
-        assertThat(events).isEqualTo(1L);
+        assertThat(events).isEqualTo(2L); // increment by fraud event
     }
 }

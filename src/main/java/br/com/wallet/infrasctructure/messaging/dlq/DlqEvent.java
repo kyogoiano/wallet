@@ -1,6 +1,7 @@
 package br.com.wallet.infrasctructure.messaging.dlq;
 
 import br.com.wallet.core.tracing.TraceContext;
+import org.jspecify.annotations.Nullable;
 
 import java.time.Instant;
 import java.util.Map;
@@ -8,6 +9,7 @@ import java.util.UUID;
 
 public record DlqEvent(UUID id,
                        UUID operationId,
+                       UUID userId,
                        String subject,
                        DlqStatus status,
                        String error,
@@ -20,6 +22,11 @@ public record DlqEvent(UUID id,
     @Override
     public UUID operationId() {
         return this.operationId;
+    }
+
+    @Override
+    public @Nullable UUID userId() {
+        return this.userId;
     }
 
     @Override

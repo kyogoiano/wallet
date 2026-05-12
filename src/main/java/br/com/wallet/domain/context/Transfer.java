@@ -1,6 +1,7 @@
 package br.com.wallet.domain.context;
 
 import br.com.wallet.core.tracing.TraceContext;
+import br.com.wallet.domain.FraudCheckable;
 import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
@@ -12,16 +13,32 @@ public record Transfer(
         @NonNull UUID to,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId
-) implements TraceContext {
+) implements TraceContext, FraudCheckable {
     @Override
     public UUID operationId() {
         return this.operationId;
     }
+
+    @Override
+    public UUID userId() {
+        return this.from;
+    }
+
     @Override
     public Map<String, String> traceTags() {
         return Map.of(
                 "wallet.from", from.toString(),
                 "wallet.to", to.toString()
         );
+    }
+
+    @Override
+    public UUID getSourceUserIdForFraudCheck() {
+        return this.from;
+    }
+
+    @Override
+    public UUID getTargetUserIdForFraudCheck() {
+        return this.to;
     }
 }

@@ -22,7 +22,10 @@ ext {
 	springVersion = "7.0.6"
 	openApiVersion = "3.0.3"
 	jnatsVersion = "2.25.2"
+	lettuceVersion = "7.5.1.RELEASE"
 	otlpAppenderVersion = "2.21.0-alpha"
+	caffeineVersion = "3.2.4"
+	nettyVersion = "4.2.13.Final"
 }
 
 subprojects {
@@ -80,8 +83,12 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
 	
 	// Other dependencies
+	implementation 'org.springframework:spring-aspects'
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${openApiVersion}")
 	implementation("io.nats:jnats:${jnatsVersion}")
+	implementation("io.lettuce:lettuce-core:${lettuceVersion}")
+	implementation("io.netty:netty-transport-native-epoll")
+	implementation("io.netty:netty-transport-native-epoll:${nettyVersion}:linux-x86_64")
 
 	// Test dependencies
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'

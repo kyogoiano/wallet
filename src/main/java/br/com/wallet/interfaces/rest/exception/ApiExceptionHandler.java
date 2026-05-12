@@ -1,6 +1,7 @@
 package br.com.wallet.interfaces.rest.exception;
 
 import br.com.wallet.core.exceptions.IdempotencyException;
+import br.com.wallet.exceptions.FraudBlockedException;
 import br.com.wallet.exceptions.InsufficientFundsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,6 +44,13 @@ public class ApiExceptionHandler {
         log.warn("Idempotency error: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
                 .body(new ApiError(ErrorCode.DUPLICATE_OPERATION, ex.getMessage()));
+    }
+
+    @ExceptionHandler(FraudBlockedException.class)
+    public ResponseEntity<ApiError> handleFraudBlocked(FraudBlockedException ex) {
+        log.warn("Fraud blocked: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN) // 403 Forbidden or 422 Unprocessable Entity
+                .body(new ApiError(ErrorCode.FRAUD_BLOCKED, ex.getMessage()));
     }
 
     @ExceptionHandler(HandlerMethodValidationException.class)

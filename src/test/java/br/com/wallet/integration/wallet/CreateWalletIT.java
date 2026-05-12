@@ -4,7 +4,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
-import br.com.wallet.support.RegisterNatsProperties;
+import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -14,6 +14,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -22,8 +23,9 @@ import java.util.stream.Stream;
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
+@ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-class CreateWalletIT extends RegisterNatsProperties {
+class CreateWalletIT extends DockerProperties {
 
     @Autowired
     JdbcTemplate jdbc;

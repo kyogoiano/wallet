@@ -2,7 +2,8 @@ package br.com.wallet.infrasctructure.messaging.consumer.business;
 
 import br.com.wallet.application.usecase.DepositFundsUseCase;
 import br.com.wallet.domain.context.Deposit;
-import br.com.wallet.infrasctructure.messaging.consumer.AbstractNatsConsumer;
+import br.com.wallet.infrasctructure.messaging.consumer.AbstractCommandsConsumer;
+import br.com.wallet.infrasctructure.messaging.publisher.DlqPublisher;
 import io.nats.client.Connection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -16,7 +17,7 @@ import tools.jackson.databind.ObjectMapper;
  * Optional sub Actions make sense when we have more than one action inside the context ( that may represent an action )
  */
 @Component
-public class DepositCommandConsumer extends AbstractNatsConsumer<Deposit> {
+public class DepositCommandConsumer extends AbstractCommandsConsumer<Deposit> {
     private static final String streamName = "commands";
     private static final String subject = "commands.deposit"; // Subject for transfer commands
     private static final String dlqSubject = "commands.dlq.deposit"; // Subject for dlq transfer commands
@@ -25,8 +26,9 @@ public class DepositCommandConsumer extends AbstractNatsConsumer<Deposit> {
 
     public DepositCommandConsumer(@Autowired final Connection natsConnection,
                                   @Autowired final ObjectMapper objectMapper,
-                                  @Autowired final DepositFundsUseCase depositFundsUseCase) {
-        super(subject, dlqSubject, natsConnection, objectMapper, depositFundsUseCase);
+                                  @Autowired final DepositFundsUseCase depositFundsUseCase,
+                                  @Autowired final DlqPublisher dlqPublisher) {
+        super(subject, dlqSubject, natsConnection, objectMapper, depositFundsUseCase, dlqPublisher);
     }
 
     @Override

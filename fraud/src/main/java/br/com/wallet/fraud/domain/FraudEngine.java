@@ -14,12 +14,9 @@ public class FraudEngine {
         this.rules = rules;
     }
 
-    public FraudDecision evaluate(final FraudContext context) {
-
-        final var score = new RiskScore();
-
-        rules.forEach(rule -> rule.evaluate(context, score));
-
-        return score.decision();
+    public FraudResponse evaluate(final FraudContext context) {
+        final var riskScore = new RiskScore();
+        rules.forEach(rule -> riskScore.add(rule.evaluate(context)));
+        return new FraudResponse(riskScore.decision(), riskScore.value(), riskScore.triggeredRules());
     }
 }

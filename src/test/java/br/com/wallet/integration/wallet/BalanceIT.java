@@ -10,13 +10,14 @@ import br.com.wallet.domain.context.Withdraw;
 import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
-import br.com.wallet.support.RegisterNatsProperties;
+import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -28,8 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
+@ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-class BalanceIT extends RegisterNatsProperties {
+class BalanceIT extends DockerProperties {
 
     @Autowired
     BalanceUseCase balanceUseCase;
@@ -150,8 +152,8 @@ class BalanceIT extends RegisterNatsProperties {
         createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
         UUID opId = UUID.randomUUID();
 
-        withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("30"), opId));
-        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("30"), opId))).isInstanceOf(IdempotencyException.class);
+        withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId));
+        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId))).isInstanceOf(IdempotencyException.class);
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -172,8 +174,8 @@ class BalanceIT extends RegisterNatsProperties {
             var op1 = UUID.randomUUID();
             var op2 = UUID.randomUUID();
 
-            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("80"), op1)));
-            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("80"), op2)));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op1)));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op2)));
 
             executor.shutdown();
             executor.awaitTermination(3, TimeUnit.SECONDS);

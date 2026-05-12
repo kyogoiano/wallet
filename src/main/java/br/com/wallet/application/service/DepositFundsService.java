@@ -1,5 +1,6 @@
 package br.com.wallet.application.service;
 
+import br.com.wallet.application.fraud.FraudCheckHelper;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.core.exceptions.IdempotencyException;
@@ -18,7 +19,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Instant;
+import java.time.Clock;
 import java.util.UUID;
 
 @Service
@@ -30,19 +31,28 @@ class DepositFundsService implements DepositFundsUseCase {
     private final WalletOperationsDao operationsDao;
     private final OutboxDao outboxDao;
     private final AccountDao accountDao;
+    private final FraudCheckHelper fraudCheckHelper;
+    private final Clock clock;
 
     public DepositFundsService(final WalletOperationService core,
-                               final WalletOperationsDao operationsDao, OutboxDao outboxDao, AccountDao accountDao) {
+                               final WalletOperationsDao operationsDao,
+                               final OutboxDao outboxDao,
+                               final AccountDao accountDao,
+                               final FraudCheckHelper fraudCheckHelper, Clock clock) { // Adjust constructor
         this.core = core;
         this.operationsDao = operationsDao;
         this.outboxDao = outboxDao;
         this.accountDao = accountDao;
+        this.fraudCheckHelper = fraudCheckHelper;
+        this.clock = clock;
     }
 
     @Traceable("wallet.deposit")
     @Transactional
     @Override
     public void handle(@NonNull final Deposit deposit) {
+        // Perform fraud check using the helper
+        fraudCheckHelper.performFraudCheck(deposit);
 
         if (!operationsDao.startOperation(deposit.operationId())) {
             log.info("Idempotent operation ignored. operationId={}", deposit.operationId());
@@ -50,23 +60,22 @@ class DepositFundsService implements DepositFundsUseCase {
         }
 
         // this operation might fail if someone deletes the user account in the meantime, as we not lock it for update
-        var userId = accountDao.findUserId(deposit.walletId()).orElseThrow(AccountNotFoundException::new);
+        final var userId = deposit.userId() != null ? deposit.userId() : accountDao.findUserId(deposit.walletId()).orElseThrow(AccountNotFoundException::new);
 
         // validations
         Validations.validatePositiveAmount(deposit.amount());
 
         this.execute(deposit, userId);
-    }
 
-    protected void execute(@NonNull Deposit deposit, @NonNull UUID userId) {
-
-        final var now = Instant.now();
-        core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), userId, now);
         outboxDao.save(
                 new DepositCompletedEvent(deposit.walletId(), deposit.amount(), deposit.operationId())
         );
         operationsDao.completeOperation(deposit.operationId());
     }
 
+    protected void execute(@NonNull final Deposit deposit, @NonNull final UUID userId) {
 
+        final var now = clock.instant(); // Use Clock directly or inject if needed for tests
+        core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), userId, now);
+    }
 }

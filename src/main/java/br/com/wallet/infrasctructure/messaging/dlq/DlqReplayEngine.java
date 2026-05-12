@@ -66,6 +66,7 @@ public class DlqReplayEngine {
         final var headers = new Headers();
 
         headers.add("operation_id", event.operationId().toString());
+        headers.add("userId", event.userId() == null ? null : event.userId().toString());
         headers.add("replayed", "true");
         headers.add("replay_count", String.valueOf(event.retryCount()));
 

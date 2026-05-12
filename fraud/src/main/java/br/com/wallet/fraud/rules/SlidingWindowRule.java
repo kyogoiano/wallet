@@ -1,8 +1,6 @@
 package br.com.wallet.fraud.rules;
 
-import br.com.wallet.fraud.domain.FraudRule;
-import br.com.wallet.fraud.domain.RiskScore;
-import br.com.wallet.fraud.domain.SlidingWindow;
+import br.com.wallet.fraud.domain.*;
 import br.com.wallet.fraud.domain.context.FraudContext;
 import br.com.wallet.fraud.infrasctructure.LocalStateStore;
 import org.jspecify.annotations.NonNull;
@@ -18,12 +16,13 @@ public class SlidingWindowRule implements FraudRule {
     }
 
     @Override
-    public void evaluate(@NonNull final FraudContext ctx, @NonNull final RiskScore score) {
+    public RuleResult evaluate(@NonNull final FraudContext ctx) {
 
         final var window = state.getWindow(ctx.userId());
         final long now = ctx.timestamp().toEpochMilli();
         final long windowStart = now - windowMs;
-
+        boolean triggered = false;
+        int score = 0;
         synchronized (window) {
             var amount = ctx.amountInCents();
             window.queue.addLast(new SlidingWindow.TransactionEntry(now, amount));
@@ -39,8 +38,11 @@ public class SlidingWindowRule implements FraudRule {
 
             // ✅ O(1)
             if (window.total > limit) {
-                score.add(10);
+                score += 10;
+                triggered = true;
             }
         }
+
+        return new RuleResult(RuleType.SLIDING_WINDOW, score, triggered);
     }
 }

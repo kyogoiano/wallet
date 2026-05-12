@@ -78,12 +78,12 @@ public class AccountDao {
         }, walletId);
     }
 
-    public Optional<Map.Entry<@NonNull UUID, @NonNull BigDecimal>> findWalletBalanceForUpdate(@NonNull final UUID walletId) {
+    public Optional<AccountBalance> findWalletBalanceForUpdate(@NonNull final UUID walletId) {
         return jdbc.query("""
                 SELECT user_id, balance FROM accounts WHERE id = ? FOR UPDATE
                 """, rs -> {
             if (rs.next()) {
-                return Optional.of(Map.entry(rs.getObject("user_id", UUID.class), rs.getBigDecimal("balance")));
+                return Optional.of(new AccountBalance(rs.getObject("user_id", UUID.class), rs.getBigDecimal("balance")));
             }
             return Optional.empty();
         }, walletId);

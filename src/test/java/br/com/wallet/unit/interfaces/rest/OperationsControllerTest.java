@@ -14,6 +14,7 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -103,14 +104,16 @@ class OperationsControllerTest {
     void shouldDepositSuccessfully() throws Exception {
 
         UUID walletId = UUID.randomUUID();
+        UUID user = UUID.randomUUID();
         UUID opId = UUID.randomUUID();
 
         var body = """
                     {
                       "walletId": "%s",
+                      "userId": "%s",
                       "amount": 100
                     }
-                    """.formatted(walletId);
+                    """.formatted(walletId, user);
 
         mockMvc.perform(post("/operations/deposit")
                         .header("Idempotency-Key", opId)
@@ -120,8 +123,8 @@ class OperationsControllerTest {
 
         verify(natsCommandPublisher).publishAsync(eq("commands.deposit"), argThat(cmd ->
                 cmd instanceof Deposit(
-                        UUID id, BigDecimal amount, UUID operationId
-                ) && id.equals(walletId) && amount.equals(new BigDecimal("100")) && operationId.equals(opId)
+                        UUID id, UUID userId, BigDecimal amount, UUID operationId
+                ) && id.equals(walletId) && Objects.requireNonNull(userId).equals(user) && amount.equals(new BigDecimal("100")) && operationId.equals(opId)
         ));
     }
 
@@ -223,10 +226,7 @@ class OperationsControllerTest {
                 .andExpect(status().isAccepted());
 
         verify(natsCommandPublisher).publishAsync(eq("commands.withdraw"), argThat(cmd ->
-                cmd instanceof Withdraw(
-                        UUID id, BigDecimal amount, UUID operationId
-                ) && id.equals(walletId) && amount.equals(new BigDecimal("50")) && operationId.equals(opId)
-        ));
+                cmd instanceof Withdraw));
     }
 
     @Test

@@ -54,6 +54,7 @@ public class DlqOperationsDao {
                 (rs, rowNum) -> new DlqEvent(
                         rs.getObject("id", UUID.class),
                         rs.getObject("operation_id", UUID.class),
+                        rs.getObject("user_id", UUID.class),
                         rs.getString("subject"),
                         rs.getObject("status", DlqStatus.class),
                         rs.getString("error"),
@@ -165,13 +166,14 @@ public class DlqOperationsDao {
     public void insert(@NonNull DlqEvent dlqEvent) {
         jdbc.update("""
                     INSERT INTO dlq_operations (
-                        id, operation_id, subject, status, error, payload,
+                        id, operation_id, user_id, subject, status, error, payload,
                         retry_count, next_retry_at, created_at, processed_at, failure_type
                     )
                     VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
                 """,
                 dlqEvent.id(),
                 dlqEvent.operationId(),
+                dlqEvent.userId(),
                 dlqEvent.subject(),
                 dlqEvent.status().name(),
                 dlqEvent.error(),

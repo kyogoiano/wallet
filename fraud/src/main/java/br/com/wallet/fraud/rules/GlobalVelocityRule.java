@@ -6,7 +6,9 @@ import br.com.wallet.fraud.domain.RuleType;
 import br.com.wallet.fraud.domain.context.FraudContext;
 import br.com.wallet.fraud.infrasctructure.RedisVelocityStore;
 import org.jspecify.annotations.NonNull;
+import org.springframework.stereotype.Component;
 
+@Component
 public class GlobalVelocityRule implements FraudRule {
 
     private final RedisVelocityStore redisVelocityStore;

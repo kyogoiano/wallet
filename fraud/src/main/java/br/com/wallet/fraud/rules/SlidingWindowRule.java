@@ -4,7 +4,9 @@ import br.com.wallet.fraud.domain.*;
 import br.com.wallet.fraud.domain.context.FraudContext;
 import br.com.wallet.fraud.infrasctructure.LocalStateStore;
 import org.jspecify.annotations.NonNull;
+import org.springframework.stereotype.Component;
 
+@Component
 public class SlidingWindowRule implements FraudRule {
 
     private final LocalStateStore state;

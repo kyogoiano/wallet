@@ -25,7 +25,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 @SpringBootTest
 @ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-public class ReplayWalletIT extends DockerProperties {
+public class replayWalletIT extends DockerProperties {
 
     @Autowired
     TransferFundsUseCase transferFundsUseCase;

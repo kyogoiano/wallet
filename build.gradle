@@ -21,11 +21,12 @@ repositories {
 ext {
 	springVersion = "7.0.6"
 	openApiVersion = "3.0.3"
-	jnatsVersion = "2.25.2"
-	lettuceVersion = "7.5.1.RELEASE"
+	jnatsVersion = "2.25.3"
+	lettuceVersion = "7.5.2.RELEASE"
 	otlpAppenderVersion = "2.21.0-alpha"
 	caffeineVersion = "3.2.4"
 	nettyVersion = "4.2.13.Final"
+	resilience4jVersion = "2.4.0"
 }
 
 subprojects {

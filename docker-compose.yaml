@@ -3,7 +3,7 @@ version: "3.9"
 services:
 
   nats:
-    image: nats:2.12.7-alpine
+    image: nats:2.14.0-alpine
     container_name: nats_main
     restart: always
     ports:
@@ -29,7 +29,7 @@ services:
       - NATS_TOKEN=dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
 
   postgres:
-    image: postgres:18.3-alpine
+    image: postgres:18.4-alpine
     container_name: wallet-postgres
     environment:
       POSTGRES_DB: wallet

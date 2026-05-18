@@ -1,25 +1,8 @@
 package br.com.wallet.fraud.domain;
 
-public record VelocityResult(
-        Status status,
-        long count
-) {
-
-    public enum Status {
-        OK,
-        EXCEEDED,
-        REPLAY
-    }
-
-    public static VelocityResult ok(long count) {
-        return new VelocityResult(Status.OK, count);
-    }
-
-    public static VelocityResult exceeded(long count) {
-        return new VelocityResult(Status.EXCEEDED, count);
-    }
-
-    public static VelocityResult replay(long count) {
-        return new VelocityResult(Status.REPLAY, count);
-    }
+public sealed interface VelocityResult {
+    record Ok(long count) implements VelocityResult {}
+    record Exceeded(long count) implements VelocityResult {}
+    record Replay(long count) implements VelocityResult {}
+    record Unknown() implements VelocityResult {} // 👈 novo
 }

@@ -3,6 +3,7 @@ package br.com.wallet.fraud.rules;
 import br.com.wallet.fraud.domain.FraudRule;
 import br.com.wallet.fraud.domain.RuleResult;
 import br.com.wallet.fraud.domain.RuleType;
+import br.com.wallet.fraud.domain.VelocityResult;
 import br.com.wallet.fraud.domain.context.FraudContext;
 import br.com.wallet.fraud.infrasctructure.RedisVelocityStore;
 import org.jspecify.annotations.NonNull;
@@ -26,26 +27,26 @@ public class GlobalVelocityRule implements FraudRule {
                 context.timestamp()
         );
 
-        return switch (result.status()) {
-
-            case REPLAY -> // 🔥 critical: do NOT score again
+        return switch (result) {
+            case VelocityResult.Replay replay -> // 🔥 critical: do NOT score again
                     new RuleResult(
                             RuleType.GLOBAL_VELOCITY,
                             0,
                             false
                     );
 
-            case EXCEEDED -> new RuleResult(
+            case VelocityResult.Exceeded exceeded -> new RuleResult(
                     RuleType.GLOBAL_VELOCITY,
                     30,
                     true
             );
 
-            case OK -> new RuleResult(
+            case VelocityResult.Ok ok -> new RuleResult(
                     RuleType.GLOBAL_VELOCITY,
                     0,
                     false
             );
+            default -> throw new IllegalStateException("Unexpected value: " + result);
         };
     }
 }

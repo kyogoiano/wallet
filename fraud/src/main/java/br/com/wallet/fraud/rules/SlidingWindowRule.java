@@ -10,8 +10,8 @@ import org.springframework.stereotype.Component;
 public class SlidingWindowRule implements FraudRule {
 
     private final LocalStateStore state;
-    private final long windowMs = 30_000;
-    private final long limit = 10_000_00;
+    private final static long windowMs = 30_000;
+    private final static long limit = 10_000_00;
 
     public SlidingWindowRule(final LocalStateStore state) {
         this.state = state;

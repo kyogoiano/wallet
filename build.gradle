@@ -25,7 +25,7 @@ ext {
 	lettuceVersion = "7.5.2.RELEASE"
 	otlpAppenderVersion = "2.21.0-alpha"
 	caffeineVersion = "3.2.4"
-	nettyVersion = "4.2.13.Final"
+	nettyVersion = "4.2.12.Final"
 	resilience4jVersion = "2.4.0"
 }
 

@@ -12,8 +12,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @Component
 public class LocalStateStore {
 
-    private final ConcurrentHashMap<UUID, SlidingWindow> store = new ConcurrentHashMap<>();
-
+    private static final ConcurrentHashMap<UUID, SlidingWindow> store = new ConcurrentHashMap<>();
 
     public SlidingWindow getWindow(final UUID userId) {
         return store.computeIfAbsent(userId, k -> new SlidingWindow());

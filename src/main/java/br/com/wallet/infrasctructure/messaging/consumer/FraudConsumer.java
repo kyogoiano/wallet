@@ -43,6 +43,10 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
     }
 
 
+    /**
+     * this handles fraud event processing and implements closed-loop antifraud concept!
+     * @param event fraud event
+     */
     @Override
     void handle(@NonNull final FraudEvent event) {
 

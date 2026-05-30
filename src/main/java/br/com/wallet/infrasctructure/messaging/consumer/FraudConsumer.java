@@ -12,6 +12,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.Map;
+
 
 /**
  * “AntiFraud System Short-term memory”
@@ -44,7 +46,16 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
 
 
     /**
-     * this handles fraud event processing and implements closed-loop antifraud concept!
+     * this handles fraud event processing and implements closed-loop behavioral feedback system for antifraud concept!
+     * In case event is allowed we hit the learning path:
+     * timeline + feature store preparation:
+     *  - average ticket?
+     *  - unique recipients quantity?
+     *  - transactions quantity on REVIEW ?
+     *  - last transaction blocked?
+     *  - time windows usage?
+     * TODO: feature store usage and reputation layer
+     *
      * @param event fraud event
      */
     @Override
@@ -62,9 +73,25 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
                     "user:" + event.from() + ":tx_timeline",
                     event.timestamp().toEpochMilli(),
                     event.operationId()
-            );    // 🧠 learning
-        }
+            );    // learning: behavioral memory enrichment
 
+            default -> {
+                commands.hset(
+                    "tx:" + event.operationId(),
+                    Map.of(
+                            "amount", event.amount().toString(),
+                            "recipient", event.to().toString(),
+                            "decision", event.decision().name(),
+                            "risk", String.valueOf(event.riskScore())
+                    )
+                );
+
+                commands.expire(
+                        "tx:" + event.operationId(),
+                        86400 * 30
+                );
+            }
+        }
     }
 
     @Override

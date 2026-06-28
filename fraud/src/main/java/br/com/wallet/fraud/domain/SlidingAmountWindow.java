@@ -1,63 +1,88 @@
 package br.com.wallet.fraud.domain;
 
-public class SlidingAmountWindow {
+import java.util.concurrent.atomic.LongAdder;
+
+public final class SlidingAmountWindow {
 
     private final long[] bucketAmounts;
-    private final long[] bucketTimestamps;
+    private final long[] bucketSeconds;
 
     private final int windowSizeSeconds;
 
-    private volatile long totalAmount;
-    private long latestObservedSecond;
+    private final LongAdder totalAmount = new LongAdder();
 
-    /**
-     * fixed-size ring buffer indexed by epoch second
-     * O(1) memory and almost O(1) updates
-     * Eventual consistency due to volatile amount
-     * @param windowSizeSeconds window size in seconds
-     */
+    private long latestSecond;
+
     public SlidingAmountWindow(final int windowSizeSeconds) {
         if (windowSizeSeconds <= 0) {
             throw new IllegalArgumentException("Window size must be positive.");
         }
+
         this.windowSizeSeconds = windowSizeSeconds;
-
         this.bucketAmounts = new long[windowSizeSeconds];
-        this.bucketTimestamps = new long[windowSizeSeconds];
-    }
-
-    private void cleanup(long currentSecond) {
-        for (int i = 0; i < windowSizeSeconds; i++) {
-            if (bucketTimestamps[i] != 0 && (currentSecond - bucketTimestamps[i] >= windowSizeSeconds)) {
-                totalAmount -= bucketAmounts[i];
-                bucketAmounts[i] = 0;
-                bucketTimestamps[i] = 0;
-            }
-        }
+        this.bucketSeconds = new long[windowSizeSeconds];
     }
 
     public synchronized void add(final long timestampMs, final long amount) {
-        long second = timestampMs / 1000;
-        if (second > latestObservedSecond) {
-            latestObservedSecond = second;
-        }
-        cleanup(latestObservedSecond);
 
-        int index = (int) (second % windowSizeSeconds);
+        final long second = timestampMs / 1000;
 
-        if (bucketTimestamps[index] == 0) {
-            bucketTimestamps[index] = second;
-        } else if (bucketTimestamps[index] != second) {
-            totalAmount -= bucketAmounts[index];
+        advanceWindow(second);
+
+        final int index = (int) (second % windowSizeSeconds);
+
+        if (bucketSeconds[index] != second) {
+
+            if (bucketAmounts[index] != 0) {
+                totalAmount.add(-bucketAmounts[index]);
+            }
+
             bucketAmounts[index] = 0;
-            bucketTimestamps[index] = second;
+            bucketSeconds[index] = second;
         }
 
         bucketAmounts[index] += amount;
-        totalAmount += amount;
+        totalAmount.add(amount);
+    }
+
+    private void advanceWindow(final long second) {
+
+        if (second <= latestSecond) {
+            return;
+        }
+
+        long gap = second - latestSecond;
+
+        if (gap >= windowSizeSeconds) {
+
+            for (int i = 0; i < windowSizeSeconds; i++) {
+                if (bucketAmounts[i] != 0) {
+                    totalAmount.add(-bucketAmounts[i]);
+                    bucketAmounts[i] = 0;
+                    bucketSeconds[i] = 0;
+                }
+            }
+
+        } else {
+
+            for (long s = latestSecond + 1; s <= second; s++) {
+
+                int index = (int) (s % windowSizeSeconds);
+
+                if (bucketSeconds[index] != 0 &&
+                        s - bucketSeconds[index] >= windowSizeSeconds) {
+
+                    totalAmount.add(-bucketAmounts[index]);
+                    bucketAmounts[index] = 0;
+                    bucketSeconds[index] = 0;
+                }
+            }
+        }
+
+        latestSecond = second;
     }
 
     public long total() {
-        return totalAmount;
+        return totalAmount.sum();
     }
 }

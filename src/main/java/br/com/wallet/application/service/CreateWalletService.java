@@ -1,6 +1,5 @@
 package br.com.wallet.application.service;
 
-import br.com.wallet.application.fraud.FraudCheckHelper;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.application.core.WalletOperationService;
 import br.com.wallet.application.usecase.CreateWalletUseCase;
@@ -29,19 +28,17 @@ public class CreateWalletService implements CreateWalletUseCase {
     private final OutboxDao outboxDao;
     private final WalletOperationService core;
     private final Clock clock;
-    private final FraudCheckHelper fraudCheckHelper;
 
     public CreateWalletService(final AccountDao accountDao,
                                final WalletOperationsDao walletOperationsDao,
                                final OutboxDao outboxDao,
                                final WalletOperationService core,
-                               final Clock clock, FraudCheckHelper fraudCheckHelper) {
+                               final Clock clock) {
         this.accountDao = accountDao;
         this.walletOperationsDao = walletOperationsDao;
         this.outboxDao = outboxDao;
         this.core = core;
         this.clock = clock;
-        this.fraudCheckHelper = fraudCheckHelper;
     }
 
 
@@ -60,7 +57,6 @@ public class CreateWalletService implements CreateWalletUseCase {
     @Transactional
     @Override
     public void handle(@NonNull final Wallet wallet) {
-        fraudCheckHelper.performFraudCheck(wallet);
         walletOperationsDao.startOperation(wallet.operationId());
         execute(wallet);
         walletOperationsDao.completeOperation(wallet.operationId());

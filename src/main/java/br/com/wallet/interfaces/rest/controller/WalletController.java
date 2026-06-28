@@ -1,5 +1,6 @@
 package br.com.wallet.interfaces.rest.controller;
 
+import br.com.wallet.application.fraud.FraudCheckHelper;
 import br.com.wallet.application.usecase.*;
 import br.com.wallet.domain.Account;
 import br.com.wallet.domain.context.Wallet;
@@ -33,18 +34,22 @@ public class WalletController implements WalletApi {
     private final LedgerUseCase ledgerUseCase;
     private final ReplayWalletUseCase replayWalletUseCase;
     private final AccountUseCase accountUseCase;
+    private final FraudCheckHelper fraudCheckHelper;
 
     public WalletController(final NatsCommandPublisher natsCommandPublisher,
                             final BalanceUseCase balanceUseCase,
                             final CreateWalletUseCase createWalletUseCase,
                             final LedgerUseCase ledgerUseCase,
-                            final ReplayWalletUseCase replayWalletUseCase, AccountUseCase accountUseCase) {
+                            final ReplayWalletUseCase replayWalletUseCase,
+                            final AccountUseCase accountUseCase,
+                            final FraudCheckHelper fraudCheckHelper) {
         this.natsCommandPublisher = natsCommandPublisher;
         this.balanceUseCase = balanceUseCase;
         this.createWalletUseCase = createWalletUseCase;
         this.ledgerUseCase = ledgerUseCase;
         this.replayWalletUseCase = replayWalletUseCase;
         this.accountUseCase = accountUseCase;
+        this.fraudCheckHelper = fraudCheckHelper;
     }
 
     @GetMapping("/{walletId}")
@@ -116,6 +121,8 @@ public class WalletController implements WalletApi {
         log.info("Async wallet creation with deposit requested. walletId={}, userId={}, amount={}", walletId, command.userId()
                 , initialBalance);
         final var wallet = new Wallet(walletId, initialBalance, command.userId(), operationId);
+
+        fraudCheckHelper.performFraudCheck(wallet);
 
         return natsCommandPublisher.publishAsync("commands.wallet", wallet)
                 .thenApply(ack -> {

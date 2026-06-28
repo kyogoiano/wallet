@@ -55,6 +55,9 @@ class WalletControllerTest {
     @MockitoBean
     AccountUseCase accountUseCase;
 
+    @MockitoBean
+    br.com.wallet.application.fraud.FraudCheckHelper fraudCheckHelper;
+
     @BeforeEach
     void setup() {
         lenient().when(natsCommandPublisher.publishAsync(anyString(), any()))

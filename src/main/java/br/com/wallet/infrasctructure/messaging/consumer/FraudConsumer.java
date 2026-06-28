@@ -1,7 +1,7 @@
 package br.com.wallet.infrasctructure.messaging.consumer;
 
 import br.com.wallet.domain.event.FraudEvent;
-import br.com.wallet.application.fraud.FraudStateService;
+import br.com.wallet.application.fraud.FraudProjectionEnricher;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.nats.client.Connection;
 import io.nats.client.Message;
@@ -26,15 +26,15 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
     private static final Logger log = LoggerFactory.getLogger(FraudConsumer.class);
 
     private final RedisAsyncCommands<String, String> commands;
-    private final FraudStateService fraudStateService;
+    private final FraudProjectionEnricher fraudStateProjectionService;
 
     public FraudConsumer(@Autowired final Connection connection,
                          @Autowired final ObjectMapper objectMapper,
                          final RedisAsyncCommands<String, String> commands,
-                         final FraudStateService fraudStateService) {
+                         final FraudProjectionEnricher fraudStateProjectionService) {
         super(subject, connection, objectMapper);
         this.commands = commands;
-        this.fraudStateService = fraudStateService;
+        this.fraudStateProjectionService = fraudStateProjectionService;
     }
 
 
@@ -65,9 +65,9 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
                 event.operationId(), event.decision());
 
         switch (event.decision()) {
-            case REVIEW -> fraudStateService.processReviewEvent(event);
+            case REVIEW -> fraudStateProjectionService.processReviewEvent(event);
 
-            case BLOCK -> fraudStateService.processBlockEvent(event);
+            case BLOCK -> fraudStateProjectionService.processBlockEvent(event);
 
             case ALLOW -> commands.zadd(
                     "user:" + event.from() + ":tx_timeline",

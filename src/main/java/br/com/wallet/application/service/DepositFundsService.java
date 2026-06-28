@@ -31,7 +31,6 @@ class DepositFundsService implements DepositFundsUseCase {
     private final WalletOperationsDao operationsDao;
     private final OutboxDao outboxDao;
     private final AccountDao accountDao;
-    private final FraudCheckHelper fraudCheckHelper;
     private final Clock clock;
 
     public DepositFundsService(final WalletOperationService core,
@@ -43,7 +42,6 @@ class DepositFundsService implements DepositFundsUseCase {
         this.operationsDao = operationsDao;
         this.outboxDao = outboxDao;
         this.accountDao = accountDao;
-        this.fraudCheckHelper = fraudCheckHelper;
         this.clock = clock;
     }
 
@@ -51,8 +49,6 @@ class DepositFundsService implements DepositFundsUseCase {
     @Transactional
     @Override
     public void handle(@NonNull final Deposit deposit) {
-        // Perform fraud check using the helper
-        fraudCheckHelper.performFraudCheck(deposit);
 
         if (!operationsDao.startOperation(deposit.operationId())) {
             log.info("Idempotent operation ignored. operationId={}", deposit.operationId());

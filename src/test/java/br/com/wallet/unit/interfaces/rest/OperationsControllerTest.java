@@ -33,6 +33,9 @@ class OperationsControllerTest {
     @MockitoBean
     NatsCommandPublisher natsCommandPublisher;
 
+    @MockitoBean
+    br.com.wallet.application.fraud.FraudCheckHelper fraudCheckHelper;
+
     @BeforeEach
     void setup() {
         // By default, make the mock return a completed future to avoid NullPointerException in controller

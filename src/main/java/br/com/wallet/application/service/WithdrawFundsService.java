@@ -33,21 +33,18 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
     private final OutboxDao outboxDao;
     private final AccountDao accountDao;
     private final Clock clock;
-    private final FraudCheckHelper fraudCheckHelper;
 
 
     public WithdrawFundsService(final WalletOperationService core,
                                 final WalletOperationsDao operationsDao,
                                 final OutboxDao outboxDao,
                                 final AccountDao accountDao,
-                                final Clock clock,
-                                final FraudCheckHelper fraudCheckHelper) {
+                                final Clock clock) {
         this.core = core;
         this.operationsDao = operationsDao;
         this.outboxDao = outboxDao;
         this.accountDao = accountDao;
         this.clock = clock;
-        this.fraudCheckHelper = fraudCheckHelper;
     }
 
     @Traceable("wallet.withdraw")
@@ -84,10 +81,6 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
                 throw new UserNotAllowedException(withdraw.userId(), userBalance.userId());
             }
         }
-
-        // check for frauds
-        fraudCheckHelper.performFraudCheck(withdraw);
-
 
         if (userBalance.balance().compareTo(withdraw.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",

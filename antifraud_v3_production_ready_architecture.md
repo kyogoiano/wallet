@@ -26,11 +26,11 @@ FraudEngine -->|ALLOW| NATS
 FraudEngine -->|BLOCK| Reject
 FraudEngine -->|REVIEW| ReviewQueue
 
-NATS --> WalletWorker --> DB[(PostgreSQL)]
+NATS --> CommandsConsumer --> UseCase --> DB[(PostgreSQL)]
 
 DB --> Outbox --> NATS
 
-NATS --> FraudEnricher --> Redis[(Global State)]
+NATS --> FraudProjectionEnricher --> Redis[(Global State)]
 ````
 
 ---
@@ -104,7 +104,7 @@ transaction.blocked
 
 ---
 
-### 5. FraudEnricher (Async)
+### 5. FraudProjectionEnricher (Async)
 
 Responsibilities:
 
@@ -133,7 +133,7 @@ Responsibilities:
 
 ```
 1. Event published to NATS
-2. FraudEnricher consumes
+2. FraudProjectionEnricher consumes
 3. Redis updated
 4. Future decisions improved
 ```

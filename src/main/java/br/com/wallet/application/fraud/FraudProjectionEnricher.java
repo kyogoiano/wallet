@@ -2,7 +2,6 @@ package br.com.wallet.application.fraud;
 
 import br.com.wallet.config.RedisScripts;
 import br.com.wallet.domain.event.FraudEvent;
-import br.com.wallet.exceptions.ReplayAttackException;
 import br.com.wallet.fraud.domain.RuleType;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.sync.RedisCommands;
@@ -15,11 +14,11 @@ import java.util.List;
 import java.util.UUID;
 
 @Component
-public class FraudStateService {
-    private static final Logger log = LoggerFactory.getLogger(FraudStateService.class);
+public class FraudProjectionEnricher {
+    private static final Logger log = LoggerFactory.getLogger(FraudProjectionEnricher.class);
     private final RedisCommands<String, String> commands;
 
-    public FraudStateService(final RedisCommands<String, String> commands) {
+    public FraudProjectionEnricher(final RedisCommands<String, String> commands) {
         this.commands = commands;
     }
 
@@ -50,7 +49,11 @@ public class FraudStateService {
         Long blocked = result.get(3);
 
         if (processed == 0) {
-            throw new ReplayAttackException(fraudEvent.operationId());
+            log.debug(
+                    "Fraud event already processed. operationId={}",
+                    fraudEvent.operationId()
+            );
+            return;
         }
 
         if (blocked == 1) {
@@ -77,8 +80,17 @@ public class FraudStateService {
         );
 
         if (result.getFirst() == 0) {
-            throw new ReplayAttackException(fraudEvent.operationId());
+            log.debug(
+                    "Block event already processed. operationId={}",
+                    fraudEvent.operationId()
+            );
+            return;
         }
+
+        log.info(
+                "User {} blocked.",
+                fraudEvent.from()
+        );
     }
 
     private String userKey(UUID userId, String suffix) {

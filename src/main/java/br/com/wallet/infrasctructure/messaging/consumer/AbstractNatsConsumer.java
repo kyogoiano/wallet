@@ -23,7 +23,7 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
     private final Logger log = LoggerFactory.getLogger(this.getClass());
     static final long maxDeliver = 5; // should match consumer config
 
-    private final ExecutorService executorService = Executors.newVirtualThreadPerTaskExecutor();
+    private ExecutorService executorService;
     private final Semaphore semaphore = new Semaphore(50);
     private final AtomicBoolean running = new AtomicBoolean(false);
 
@@ -85,14 +85,21 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
                 // bulkhead pattern
                 for (final Message msg : messages) {
                     semaphore.acquire();
-
-                    executorService.submit(() -> {
-                        try {
-                            this.processMessage(msg);
-                        } finally {
-                            semaphore.release();
+                    try {
+                        executorService.submit(() -> {
+                            try {
+                                this.processMessage(msg);
+                            } finally {
+                                semaphore.release();
+                            }
+                        });
+                    } catch (java.util.concurrent.RejectedExecutionException e) {
+                        semaphore.release();
+                        if (running.get()) {
+                            throw e;
                         }
-                    });
+                        break;
+                    }
                 }
             } catch (Exception e) {
                 log.error("Error fetching messages from NATS JetStream: {}", e.getMessage(), e);
@@ -117,6 +124,7 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
             } catch (Exception e) {
                 throw new RuntimeException("Failed to initialize consumer", e);
             }
+            executorService = Executors.newVirtualThreadPerTaskExecutor();
             executorService.submit(this::pollForMessages);
         }
     }
@@ -130,11 +138,13 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
             log.info("Unsubscribed from NATS JetStream.");
         }
 
-        executorService.shutdown(); // immediate stop due to virtual threads
-        log.info("NATS message consumer executor service shut down.");
-        try {
-            executorService.awaitTermination(5, TimeUnit.SECONDS);
-        } catch (InterruptedException ignored) {
+        if (executorService != null) {
+            executorService.shutdown(); // immediate stop due to virtual threads
+            log.info("NATS message consumer executor service shut down.");
+            try {
+                executorService.awaitTermination(5, TimeUnit.SECONDS);
+            } catch (InterruptedException ignored) {
+            }
         }
     }
 

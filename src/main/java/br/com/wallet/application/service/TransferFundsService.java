@@ -31,20 +31,17 @@ public class TransferFundsService implements TransferFundsUseCase {
     private final WalletOperationService core;
     private final OutboxDao outboxDao;
     private final WalletOperationsDao operationsDao;
-    private final FraudCheckHelper fraudCheckHelper;
     private final Clock clock;
 
     public TransferFundsService(final WalletOperationService core,
                                 final OutboxDao outboxDao,
                                 final WalletOperationsDao operationsDao,
                                 final AccountDao accountDao,
-                                final FraudCheckHelper fraudCheckHelper,
                                 final Clock clock) {
         this.core = core;
         this.outboxDao = outboxDao;
         this.operationsDao = operationsDao;
         this.accountDao = accountDao;
-        this.fraudCheckHelper = fraudCheckHelper;
         this.clock = clock;
     }
 
@@ -77,8 +74,6 @@ public class TransferFundsService implements TransferFundsUseCase {
     @Transactional
     @Override
     public void handle(@NonNull final Transfer transfer) {
-
-        fraudCheckHelper.performFraudCheck(transfer);
 
         // validations
         Validations.validatePositiveAmount(transfer.amount());

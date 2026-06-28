@@ -94,6 +94,7 @@ dependencies {
 	// Test dependencies
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	implementation 'org.springframework.boot:spring-boot-webtestclient'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'

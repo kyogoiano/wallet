@@ -14,6 +14,8 @@ import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
@@ -41,6 +43,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 @Import(IntegrationTestBase.class)
 class OutboxIT extends DockerProperties {
 
+    private static final Logger log = LoggerFactory.getLogger(OutboxIT.class);
     @Autowired
     TestDataHelper testDataHelper;
 
@@ -126,8 +129,8 @@ class OutboxIT extends DockerProperties {
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), opId));
 
-        // first try fails ( after wallet creation with balance -> fraud event -> transfer error!)
-        failingEventPublisher.failNext(3);
+        // first try fails ( after wallet creation with balance -> transfer error!)
+        failingEventPublisher.failNext(2);
         outboxRelay.process();
 
 
@@ -143,7 +146,7 @@ class OutboxIT extends DockerProperties {
 
         assertThat(eventId).isNotNull();
         assertThat(testDataHelper.getStatus(eventId)).isEqualTo(OutboxStatus.PROCESSED);
-        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(0); // this event id never retried
+        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(1); // this event id never retried
         assertThat(testDataHelper.getProcessedAt(eventId)).isNotNull();
     }
 
@@ -199,19 +202,21 @@ class OutboxIT extends DockerProperties {
         var toUserId = UUID.randomUUID();
         createWalletUseCase.handle(to, toUserId);
         UUID opId = UUID.randomUUID();
+        log.info("opId={}", opId);
         transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
-        failingEventPublisher.failNext(10); // doubled by fraud event
+        failingEventPublisher.failNext(5);
 
         for (int i = 0; i < 5; i++) {
             outboxRelay.process();
             var failedId = testDataHelper.getOutboxIdByOperation(opId);
+            log.info("failedId={}", failedId);
             testDataHelper.forceRetryNow(failedId);
         }
 
         var eventId = testDataHelper.getOutboxIdByOperation(opId);
 
-        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(3);
+        assertThat(testDataHelper.getRetryCount(eventId)).isEqualTo(4);
     }
 
     @Test
@@ -256,6 +261,6 @@ class OutboxIT extends DockerProperties {
 
         var events = testDataHelper.getOutboxEventsByOperation(opId);
 
-        assertThat(events).isEqualTo(2L); // increment by fraud event
+        assertThat(events).isEqualTo(1L);
     }
 }

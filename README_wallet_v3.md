@@ -1,17 +1,17 @@
-2. `antifraud_v3_production_ready_architecture.md`
-
 # 🛡️ Wallet Service — Fraud & Risk Engine (V3)
 
 ## 🧭 Overview
 
-This document introduces a Fraud & Risk Engine for the Wallet Service.
+This document introduces a Fraud & Risk Engine for the Wallet Service, significantly enhancing its capabilities.
 
 The engine is designed to:
 
 - Detect suspicious financial behavior
 - Prevent abuse (ATO, cash-out, mule accounts)
-- Maintain O(1) evaluation per request
+- Maintain O(1) evaluation per request using optimized local state
 - Preserve stateless API while enabling controlled statefulness
+- Centralize fraud check logic via `FraudCheckHelper` and `FraudCheckable` interface
+- Provide immediate feedback for blocked transactions via `FraudBlockedException`
 
 ---
 
@@ -24,9 +24,7 @@ The ledger remains the source of truth.
 Fraud engine acts as a pre-execution gate:
 
 ```
-
 request → fraud engine → decision → execute use case
-
 ```
 
 ---
@@ -34,31 +32,57 @@ request → fraud engine → decision → execute use case
 ### 2. O(1) evaluation (hot path)
 
 - No scans
-- Sliding window + aggregation
-- Precomputed state
+- Optimized `SlidingAmountWindow` with bucket-array for efficient time-based aggregation
+- Local state managed by Caffeine for fast access and automatic eviction
 
 ---
 
 ### 3. Multi-layer state model
 
-| Layer        | Scope | Consistency | Purpose |
-|-------------|------|------------|--------|
-| Local       | Pod  | Strong     | Fast checks |
-| Distributed | Redis| Eventual   | Global behavior |
-| Async       | NATS | Eventual   | Enrichment |
+| Layer        | Scope | Consistency | Purpose | Implementation |
+|-------------|------|------------|--------|----------------|
+| Local       | Pod  | Strong     | Fast checks | `SlidingAmountWindow` (Caffeine) |
+| Distributed | Redis| Eventual   | Global behavior | Redis `EXISTS` (cached by Caffeine) |
+| Async       | NATS | Eventual   | Enrichment | `FraudEvent` via Outbox |
 
 ---
 
 ## 🧱 Architecture Extension
 
-```
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant FraudEngine
+    participant NATS
+    participant Worker
+    participant DB
+    participant Outbox
+    participant Redis
+    participant OTelCollector
+    participant OpenObserve
 
-Client → API → FraudEngine → Decision
-↘
-NATS → Worker → DB
-→ Outbox → NATS
-→ FraudEnricher → Redis
-
+    Client->>API: Request (e.g., Transfer)
+    API->>FraudEngine: Check Fraud (sync)
+    FraudEngine->>Redis: isBlocked() (cached by Caffeine)
+    FraudEngine->>FraudEngine: Evaluate Local Rules (SlidingAmountWindow)
+    alt Fraud Decision is BLOCK
+        FraudEngine-->>API: FraudBlockedException
+        API-->>Client: 403 Forbidden
+    else Fraud Decision is ALLOW/REVIEW
+        FraudEngine->>Outbox: Save FraudEvent
+        API->>NATS: Publish Command
+        NATS->>Worker: Deliver Command
+        Worker->>DB: Process Transaction
+        Worker->>Outbox: Save Domain Event
+        Outbox->>NATS: Publish Domain Event
+        NATS->>FraudProjectionEnricher: Deliver FraudEvent
+        FraudProjectionEnricher->>Redis: Update Global State
+    end
+    API->>OTelCollector: Traces/Metrics/Logs
+    FraudEngine->>OTelCollector: Traces/Metrics/Logs
+    Worker->>OTelCollector: Traces/Metrics/Logs
+    OTelCollector->>OpenObserve: Export OTLP
 ```
 
 ---
@@ -72,9 +96,7 @@ NATS → Worker → DB
 
 Rule:
 ```
-
 recent credential change + high value transfer → BLOCK
-
 ```
 
 ---
@@ -87,9 +109,7 @@ recent credential change + high value transfer → BLOCK
 
 Rule:
 ```
-
-sum(last 30s) > threshold → BLOCK
-
+sum(last 30s) > threshold → BLOCK (using SlidingAmountWindow)
 ```
 
 ---
@@ -101,9 +121,7 @@ sum(last 30s) > threshold → BLOCK
 
 Rule:
 ```
-
 low retention time → increase risk
-
 ```
 
 ---
@@ -114,9 +132,7 @@ low retention time → increase risk
 
 Rule:
 ```
-
-count(last N seconds) > threshold
-
+count(last N seconds) > threshold (using SlidingAmountWindow)
 ```
 
 ---
@@ -127,30 +143,27 @@ count(last N seconds) > threshold
 
 Rule:
 ```
-
 current_amount >> avg_amount
-
-````
+```
 
 ---
 
 ## ⚙️ Rule Categories
 
-### 🟢 Local Rules (O(1))
+### 🟢 Local Rules (O(1) - Caffeine & SlidingAmountWindow)
 
-- Sliding window (value)
-- Operation count
+- `SlidingAmountWindow` (value and count)
 - New recipient detection
 
 Example:
 
 ```java
-if (opsLast10s > 20) BLOCK;
-````
+if (window.getTotalAmount() > limit) BLOCK;
+```
 
 ---
 
-### 🟡 Global Rules (Redis)
+### 🟡 Global Rules (Redis - Cached)
 
 Eventually consistent.
 
@@ -160,6 +173,7 @@ Examples:
 user:{id}:daily_volume
 user:{id}:risk_score
 user:{id}:unique_recipients
+user:{id}:blocked (cached)
 ```
 
 ---
@@ -200,10 +214,11 @@ else ALLOW;
 
 ## ⚡ Sliding Window Strategy
 
-### Local
+### Local (`SlidingAmountWindow`)
 
-* Ring buffer
-* LongAdder aggregation
+*   Bucket-array based implementation for `O(1)` updates and queries.
+*   Managed by Caffeine cache for automatic eviction of inactive user windows.
+*   Uses `LongAdder` for thread-safe, high-performance aggregation.
 
 ---
 
@@ -237,7 +252,7 @@ transaction.blocked
 
 ### Consumers
 
-#### FraudEnricher
+#### FraudProjectionEnricher
 
 * Updates Redis
 * Maintains aggregates
@@ -257,16 +272,24 @@ transaction.blocked
 
 ### Phase 2
 
-* Sliding window
+* `SlidingAmountWindow`
 * Score engine
 
 ### Phase 3
 
-* Redis global state
+* Redis global state (with Caffeine caching for `isBlocked`)
 
 ### Phase 4
 
 * Async enrichment (NATS)
+
+---
+
+## 📊 Observability (OpenTelemetry & OpenObserve)
+
+- **Distributed Tracing**: All operations are traced, with `operation_id` propagated as baggage for end-to-end correlation.
+- **Log Aggregation**: Structured logs are exported via OTLP to OpenObserve.
+- **Metrics**: Application and system metrics are collected and exported via OTLP to OpenObserve.
 
 ---
 
@@ -285,6 +308,7 @@ transaction.blocked
 * Fraud engine never mutates ledger
 * Only blocks or delays
 * Idempotency preserved
+* `FraudBlockedException` provides immediate feedback for blocked operations
 
 ---
 

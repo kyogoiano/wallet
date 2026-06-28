@@ -1,6 +1,5 @@
 package br.com.wallet.application.service;
 
-import br.com.wallet.application.fraud.FraudCheckHelper;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.core.exceptions.IdempotencyException;

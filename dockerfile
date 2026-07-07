@@ -1,5 +1,5 @@
 # Build stage
-FROM gradle:9.5.0-jdk25 AS build
+FROM gradle:9.6.0-jdk26 AS build
 
 WORKDIR /app
 
@@ -23,7 +23,7 @@ COPY src src
 RUN ./gradlew clean :bootJar --no-daemon
 
 # Runtime stage
-FROM bellsoft/liberica-runtime-container:jdk-25-slim-glibc
+FROM bellsoft/liberica-runtime-container:jdk-26-slim-glibc
 WORKDIR /app
 
 # Copia o JAR gerado (usando um wildcard mais seguro)

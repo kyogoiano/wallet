@@ -24,9 +24,7 @@ ext {
 	jnatsVersion = "2.25.3"
 	lettuceVersion = "7.6.0.RELEASE"
 	otlpAppenderVersion = "2.25.0-alpha"
-	caffeineVersion = "3.2.4"
 	nettyVersion = "4.2.15.Final"
-	resilience4jVersion = "2.4.0"
 }
 
 subprojects {

@@ -61,7 +61,6 @@ class SlidingAmountWindowTest {
         window.add(baseTimestamp + 1000, 200); // Bucket 1
 
         // Advance time past the window size to expire the first bucket
-        Thread.sleep(WINDOW_SIZE_SECONDS * 1000); // Sleep for 10 seconds
 
         window.add(baseTimestamp + WINDOW_SIZE_SECONDS * 1000, 50); // New transaction, should expire 100
         assertThat(window.total()).isEqualTo(250); // 200 + 50
@@ -75,8 +74,6 @@ class SlidingAmountWindowTest {
         window.add(baseTimestamp + 1000, 200);
 
         // Advance time significantly past the window
-        Thread.sleep(WINDOW_SIZE_SECONDS * 2 * 1000); // Sleep for 20 seconds
-
         window.add(baseTimestamp + (WINDOW_SIZE_SECONDS * 2) * 1000, 50); // New transaction
         assertThat(window.total()).isEqualTo(50); // Only the new transaction should remain
     }
@@ -86,8 +83,6 @@ class SlidingAmountWindowTest {
     void shouldHandleMultipleTransactionsInSameBucketAfterAdvance() throws InterruptedException {
         long baseTimestamp = System.currentTimeMillis();
         window.add(baseTimestamp, 100); // Bucket X
-
-        Thread.sleep(WINDOW_SIZE_SECONDS * 1000 + 500); // Advance 10.5 seconds
 
         // These two should fall into the same new bucket (X+10 % 30 = X)
         window.add(baseTimestamp + (WINDOW_SIZE_SECONDS * 1000) + 500, 200);
@@ -111,12 +106,10 @@ class SlidingAmountWindowTest {
         assertThat(window.total()).isEqualTo(600);
 
         // Advance 10 seconds (t0 expires, t1 and t2 remain)
-        Thread.sleep(10 * 1000);
         window.add(baseTimestamp + 10000, 400); // t10, bucket 0 (new cycle)
         assertThat(window.total()).isEqualTo(900); // 200 + 300 + 400
 
         // Advance 1 second (t1 expires, t2 and t10 remain)
-        Thread.sleep(1000);
         window.add(baseTimestamp + 11000, 500); // t11, bucket 1 (new cycle)
         assertThat(window.total()).isEqualTo(1200); // 300 + 400 + 500
     }

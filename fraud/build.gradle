@@ -1,6 +1,11 @@
 
 
 group = 'br.com.wallet.fraud'
+ext {
+    caffeineVersion = "3.2.4"
+    resilience4jVersion = "2.4.0"
+    lettuceVersion = "7.6.0.RELEASE"
+}
 
 dependencies {
     implementation project(":core") // Fraud module depends on core for tracing, etc.

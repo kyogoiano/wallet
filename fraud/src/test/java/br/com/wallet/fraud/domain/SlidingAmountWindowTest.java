@@ -55,7 +55,7 @@ class SlidingAmountWindowTest {
 
     @Test
     @DisplayName("Should expire old amounts when window advances")
-    void shouldExpireOldAmountsWhenWindowAdvances() throws InterruptedException {
+    void shouldExpireOldAmountsWhenWindowAdvances() {
         long baseTimestamp = System.currentTimeMillis();
         window.add(baseTimestamp, 100); // Bucket 0
         window.add(baseTimestamp + 1000, 200); // Bucket 1
@@ -68,7 +68,7 @@ class SlidingAmountWindowTest {
 
     @Test
     @DisplayName("Should expire all amounts when window advances significantly")
-    void shouldExpireAllAmountsWhenWindowAdvancesSignificantly() throws InterruptedException {
+    void shouldExpireAllAmountsWhenWindowAdvancesSignificantly() {
         long baseTimestamp = System.currentTimeMillis();
         window.add(baseTimestamp, 100);
         window.add(baseTimestamp + 1000, 200);
@@ -80,7 +80,7 @@ class SlidingAmountWindowTest {
 
     @Test
     @DisplayName("Should handle multiple transactions that fall into the same bucket after window advance")
-    void shouldHandleMultipleTransactionsInSameBucketAfterAdvance() throws InterruptedException {
+    void shouldHandleMultipleTransactionsInSameBucketAfterAdvance() {
         long baseTimestamp = System.currentTimeMillis();
         window.add(baseTimestamp, 100); // Bucket X
 
@@ -93,7 +93,7 @@ class SlidingAmountWindowTest {
 
     @Test
     @DisplayName("Should accurately track total amount after mixed adds and advances")
-    void shouldAccuratelyTrackTotalAmountAfterMixedOperations() throws InterruptedException {
+    void shouldAccuratelyTrackTotalAmountAfterMixedOperations() {
         long baseTimestamp = System.currentTimeMillis(); // t0
 
         window.add(baseTimestamp, 100); // t0, bucket 0

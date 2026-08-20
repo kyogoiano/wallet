@@ -3,7 +3,7 @@ version: "3.9"
 services:
 
   nats:
-    image: nats:2.14.0-alpine
+    image: nats:2.14.5-alpine
     container_name: nats_main
     restart: always
     ports:
@@ -29,7 +29,7 @@ services:
       - NATS_TOKEN=dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
 
   postgres:
-    image: postgres:19beta1
+    image: postgres:19beta3-alpine
     container_name: wallet-postgres
     environment:
       POSTGRES_DB: wallet
@@ -49,20 +49,22 @@ services:
       - wallet-net
 
   redis:
-    image: redis:8.6-alpine
+    image: redis:8.10.1-alpine
     container_name: redis
     restart: unless-stopped
+    ports:
+      - "6379:6379"
 
     command: >
-      redis-server
-      --save ""
+      sh -c "mkdir -p /var/run/redis && chmod 777 /var/run/redis && exec redis-server
+      --save ''
       --appendonly no
       --protected-mode no
       --unixsocket /var/run/redis/redis.sock
       --unixsocketperm 777
       --maxmemory 256mb
       --maxmemory-policy allkeys-lru
-      --maxmemory-samples 5
+      --maxmemory-samples 5"
 
     volumes:
       - redis-data:/data
@@ -77,7 +79,7 @@ services:
     container_name: openobserve
     environment:
       - ZO_ROOT_USER_EMAIL=leandro.ueg@gmail.com
-      - ZO_ROOT_USER_PASSWORD=admin123
+      - ZO_ROOT_USER_PASSWORD=Admin123!@#
     ports:
       - "5080:5080"
     volumes:
@@ -106,14 +108,20 @@ services:
         condition: service_started
       redis:
         condition: service_started
+    volumes:
+      - redis-socket:/var/run/redis
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet
       SPRING_DATASOURCE_USERNAME: wallet
       SPRING_DATASOURCE_PASSWORD: wallet
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      REDIS_SOCKET_ENABLED: "true"
+      REDIS_SOCKET_PATH: /var/run/redis/redis.sock
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      OTEL_EXPORTER_OTLP_PROTOCOL: http
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_RESOURCE_ATTRIBUTES: service.name=wallet,service.version=0.0.1-SNAPSHOT
-      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC"
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
     ports:
       - "8080:8080"
     networks:

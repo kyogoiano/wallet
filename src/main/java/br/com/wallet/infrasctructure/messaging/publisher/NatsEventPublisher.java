@@ -10,6 +10,7 @@ import io.nats.client.impl.NatsMessage;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
@@ -20,6 +21,7 @@ import java.time.Clock;
 import java.time.Duration;
 
 @Component
+@Profile("!test & !in-memory")
 public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
 
     private final Logger log = LoggerFactory.getLogger(NatsEventPublisher.class);

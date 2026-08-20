@@ -4,7 +4,7 @@ group = 'br.com.wallet.fraud'
 ext {
     caffeineVersion = "3.2.4"
     resilience4jVersion = "2.4.0"
-    lettuceVersion = "7.6.0.RELEASE"
+    lettuceVersion = "7.7.0.RELEASE"
 }
 
 dependencies {

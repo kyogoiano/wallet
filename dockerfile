@@ -1,5 +1,5 @@
 # Build stage
-FROM gradle:9.6.0-jdk26 AS build
+FROM gradle:9.7.1-jdk26 AS build
 
 WORKDIR /app
 

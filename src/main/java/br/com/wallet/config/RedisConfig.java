@@ -3,6 +3,7 @@ package br.com.wallet.config;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
+import io.lettuce.core.SocketOptions;
 import io.lettuce.core.TimeoutOptions;
 import io.lettuce.core.api.StatefulRedisConnection;
 import io.lettuce.core.api.async.RedisAsyncCommands;
@@ -26,7 +27,8 @@ public class RedisConfig {
         boolean useSocket = env.getProperty("redis.socket.enabled", Boolean.class, false);
 
         if (useSocket) {
-            return RedisURI.create("redis-socket:///var/run/redis.sock");
+            String socketPath = env.getProperty("redis.socket.path", "/var/run/redis/redis.sock");
+            return RedisURI.Builder.socket(socketPath).build();
         }
 
         String host = env.getProperty("spring.data.redis.host", "localhost");
@@ -36,7 +38,8 @@ public class RedisConfig {
     }
 
     @Bean(destroyMethod = "shutdown")
-    public RedisClient redisClient(@Autowired @NonNull RedisURI redisUri) {
+    public RedisClient redisClient(@Autowired @NonNull RedisURI redisUri, @NonNull Environment env) {
+        boolean useSocket = env.getProperty("redis.socket.enabled", Boolean.class, false);
 
         final var resources = DefaultClientResources.builder()
                 .ioThreadPoolSize(4)
@@ -46,12 +49,20 @@ public class RedisConfig {
                 resources, redisUri
         );
 
+        final var socketOptionsBuilder = SocketOptions.builder()
+                .connectTimeout(Duration.ofSeconds(2));
+
+        if (useSocket) {
+            socketOptionsBuilder.keepAlive(SocketOptions.KeepAliveOptions.builder().enable(false).build());
+        }
+
         client.setOptions(ClientOptions.builder()
                 .autoReconnect(true)
                 .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
                 .pingBeforeActivateConnection(true)
                 .protocolVersion(ProtocolVersion.RESP3)
                 .replayFilter(cmd -> false)
+                .socketOptions(socketOptionsBuilder.build())
                 .timeoutOptions(TimeoutOptions.builder().fixedTimeout(Duration.ofSeconds(2)).build())
                 .build());
 

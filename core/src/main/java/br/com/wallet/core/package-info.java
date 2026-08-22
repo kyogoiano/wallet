@@ -1,4 +1,4 @@
 @org.springframework.modulith.ApplicationModule(
-    displayName = "Shared Core Foundation"
+    displayName = "Shared Foundation"
 )
 package br.com.wallet.core;

@@ -20,12 +20,11 @@ Each initiative uses a numeric prefix:
 
 | Phase | Spec | Title | Status | Execution Summary |
 | :--- | :--- | :--- | :--- | :--- |
-| **0.0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟢 Completed | [`SUMMARY-000`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md) |
-| **0** | [`SPEC-001`](file:///.spec/SPEC-001-wallet-capability-platform.md) | Wallet Modular Capability Platform (Spring Modulith) | 🟡 Draft / Clarification | — |
-| **1** | `SPEC-002` | Smart Savings & Programmable Money | ⚪ Planned | — |
-| **2** | `SPEC-003` | Financial Goal & Cashflow Engine | ⚪ Planned | — |
-| **3** | `SPEC-004` | Subscription & Spending Intelligence | ⚪ Planned | — |
-| **4** | `SPEC-005` | AI Financial Copilot & MCP Gateway | ⚪ Planned | — |
+| **0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟢 Completed & Reconciled | [`SUMMARY-000`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md) |
+| **1** | [`SPEC-001`](file:///.spec/SPEC-001-smart-savings-automation.md) | Smart Savings Automation (`br.com.wallet.savings`) | 🟡 Ready for Planning | — |
+| **2** | `SPEC-002` | Financial Goal & Cashflow Engine (`br.com.wallet.goals`) | ⚪ Planned | — |
+| **3** | `SPEC-003` | Subscription & Spending Intelligence (`br.com.wallet.intelligence`) | ⚪ Planned | — |
+| **4** | `SPEC-004` | AI Financial Copilot & MCP Gateway (`br.com.wallet.copilot`) | ⚪ Planned | — |
 
 ---
 

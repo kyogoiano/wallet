@@ -1,5 +1,5 @@
 @org.springframework.modulith.ApplicationModule(
-    displayName = "Transactional Ledger & Core Banking Engine",
+    displayName = "Financial Core & Transactional Ledger",
     allowedDependencies = {"core::api", "core", "fraud::api", "fraud"}
 )
 package br.com.wallet.ledger;

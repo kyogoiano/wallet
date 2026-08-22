@@ -101,13 +101,15 @@ br.com.wallet
 
 ---
 
-## 4. Mathematical & System Invariants Preserved
+## 4. Mathematical, Architectural & System Invariants
 
 - **`I-LEDGER-001` (Immutable Source of Truth)**: Ledger append-only property remains untouched.
 - **`I-LEDGER-002` (Hash-Chaining Integrity)**: $\text{hash}_n = \text{SHA256}(\text{hash}_{n-1} + \text{walletId} + \text{amount} + \text{type} + \text{operationId} + \text{sequence})$ calculation logic is preserved identically in `ledger.internal.utils.HashUtils`.
 - **`I-BALANCE-001` & `I-BALANCE-002` (Balance Math & Non-Negativity)**: Account balance projections and validation rules are strictly maintained.
 - **`I-ATOMICITY-001` & `I-IDEMPOTENCY-001`**: Transactional boundaries with `SELECT FOR UPDATE` locking and `operation_id` deduplication remain enforced.
 - **`I-FRAUD-001` & `I-FRAUD-002`**: Pre-execution fraud evaluation gate in `ledger.api.guard.FraudCheckHelper` executes in $O(1)$ prior to transaction lock acquisition.
+- **`I-MODULITH-001` (Internal Encapsulation)**: No module outside `ledger` SHALL directly access types contained in `br.com.wallet.ledger.internal.*`.
+- **`I-MODULITH-002` (Published API Access)**: Cross-module interactions with the ledger engine SHALL occur exclusively through `br.com.wallet.ledger.api.*`.
 
 ---
 
@@ -201,8 +203,8 @@ class ModulithArchitectureTest {
 
 | Scenario | Expected Behavior | Invariant Enforced |
 | :--- | :--- | :--- |
-| External adapter attempts to inject `AccountDao` directly | Spring Modulith verification test fails immediately | `I-CAPABILITY-001` / `REQ-ALIGN-004` |
-| Invalid transfer with negative amount or self-transfer | Core API rejects with `InvalidAmountException` / `TransferSameAccountException` | `I-BALANCE-002` |
+| External adapter attempts to inject `AccountDao` directly | Spring Modulith verification test fails immediately | `I-MODULITH-001` / `REQ-ALIGN-004` |
+| Invalid transfer with negative amount or self-transfer | Ledger API rejects with `IllegalArgumentException` | `I-BALANCE-002` |
 | Duplicate `operation_id` on transfer command | Core use case returns cached response or rejects idempotently | `I-IDEMPOTENCY-001` |
 | Fraud engine blocks transaction | Core use case throws `FraudBlockedException` before acquiring DB lock | `I-FRAUD-001` |
 
@@ -210,10 +212,10 @@ class ModulithArchitectureTest {
 
 ## 9. Acceptance Criteria
 
-- [ ] Spring Modulith starters added to `build.gradle`.
-- [ ] Root `src/` restructured: `core.api` (published API), `core.internal` (sealed implementation), `infrastructure` (rest, messaging, config).
-- [ ] Package typo `infrasctructure` renamed to `infrastructure`.
-- [ ] `:core` and `:fraud` subprojects cleanly linked and validated.
-- [ ] `ModulithArchitectureTest` passes with clean verification.
-- [ ] All unit, integration, and Testcontainers test suites pass completely (`./gradlew test`).
-- [ ] Complete traceability matrix generated confirming zero functional regression.
+- [x] Spring Modulith starters added to `build.gradle`.
+- [x] Root `src/` restructured: `ledger.api` (published API), `ledger.internal` (sealed implementation), `infrastructure` (rest, messaging, config).
+- [x] Package typo `infrasctructure` renamed to `infrastructure`.
+- [x] `:core` (shared foundation) and `:fraud` (anti-fraud engine) subprojects cleanly linked and validated.
+- [x] `ModulithArchitectureTest` passes with clean verification (0 violations, 0 cycles).
+- [x] All unit, integration, and Testcontainers test suites pass completely (`./gradlew test`).
+- [x] Complete execution summary generated in `.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`.

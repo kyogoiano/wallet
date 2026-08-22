@@ -64,11 +64,11 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
 | `br.com.wallet.config.*` | `br.com.wallet.infrastructure.config.*` | `infrastructure` (**INTERNAL**) | Spring configuration beans (OTel, Redis, NATS) |
 
 ### 2.2 Modulith Package Configuration (`package-info.java`)
-- **`core`**: `@ApplicationModule(displayName = "Shared Core Foundation")`
+- **`core`**: `@ApplicationModule(displayName = "Shared Foundation")`
   - `core.context`, `core.tracing`, `core.exceptions` tagged with `@NamedInterface("api")`.
 - **`fraud`**: `@ApplicationModule(displayName = "Fraud & Risk Engine", allowedDependencies = {"core::api", "core"})`
   - `fraud.application`, `fraud.domain`, `fraud.rules`, `fraud.infrastructure` tagged with `@NamedInterface("api")`.
-- **`ledger`**: `@ApplicationModule(displayName = "Transactional Ledger & Core Banking Engine", allowedDependencies = {"core::api", "core", "fraud::api", "fraud"})`
+- **`ledger`**: `@ApplicationModule(displayName = "Financial Core & Transactional Ledger", allowedDependencies = {"core::api", "core", "fraud::api", "fraud"})`
   - All `ledger.api` subpackages tagged with `@NamedInterface("api")`.
 - **`infrastructure`**: `@ApplicationModule(displayName = "Wallet Infrastructure Adapters", allowedDependencies = {"ledger::api", "ledger", "fraud::api", "fraud", "core::api", "core"})`.
 
@@ -83,6 +83,8 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
 | `REQ-ALIGN-003` | Static Analysis / Imports | ✅ PASS | REST controllers and NATS workers only consume `ledger.api` |
 | `REQ-ALIGN-004` | `ModulithArchitectureTest.verifyArchitecture()` | ✅ PASS | Spring Modulith acyclic DAG verified with zero violations |
 | `REQ-ALIGN-005` | Unit & Integration Test Suites | ✅ PASS | Zero functional regressions across existing business scenarios |
+| `I-MODULITH-001` | `ModulithArchitectureTest` | ✅ PASS | Internal encapsulation: 0 illegal references to `ledger.internal` |
+| `I-MODULITH-002` | `ModulithArchitectureTest` | ✅ PASS | Cross-module calls strictly through `ledger.api` |
 | `I-LEDGER-001` | Code & Schema Preservation | ✅ PASS | Ledger remains append-only |
 | `I-LEDGER-002` | `HashUtilTest` & `LedgerServicesTest` | ✅ PASS | Cryptographic SHA-256 hash chaining formula strictly preserved |
 | `I-BALANCE-001` | `BalanceServiceTest` & `ReplayWalletServiceTest` | ✅ PASS | Balance mathematical consistency intact |
@@ -108,6 +110,7 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
   - `GlobalVelocityRuleTest`: velocity exceeded vs OK vs replay.
   - `NewRecipientRuleTest`: ring, mule, fan-out, and normal pattern scoring.
   - `FraudEngineTest`: multi-rule aggregation, score calculation, decision mapping.
+  - `ModulithArchitectureTest`: verification of `I-MODULITH-001` and `I-MODULITH-002`.
 - **Code Coverage Setup & Automation (JaCoCo)**:
   - Configured JaCoCo plugin across root and subprojects (`:core`, `:fraud`).
   - Automated HTML/XML report generation via `finalizedBy jacocoTestReport` in `build.gradle`.
@@ -118,4 +121,4 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
 
 ## 5. Next Steps
 
-Proceed to **Phase 0: `SPEC-001` (Wallet Modular Capability Platform)** to author `PLAN-001` and implement in-process `@ApplicationModuleListener` event routing and the `FinancialProposal` primitive.
+Proceed to **Phase 1: `SPEC-001` (Smart Savings Automation)** to author `PLAN-001` and implement `br.com.wallet.savings` with in-process `@ApplicationModuleListener` event handling and savings rules (Round-up, Percentage, Threshold).

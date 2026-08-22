@@ -1,0 +1,532 @@
+Ficou **muito bom**. Agora o roadmap tem uma progressão arquitetural coerente:
+
+**extensibilidade → automação determinística → estratégia → inteligência → IA/MCP**
+
+E, principalmente, você evitou o erro de introduzir IA antes de existirem **capabilities reais e determinísticas** para a IA consumir.
+
+Eu faria apenas alguns ajustes antes de congelarmos a **Phase 0**, porque ela vai definir contratos que serão usados por todas as fases seguintes.
+
+## 1. A sequência está correta
+
+Eu manteria exatamente:
+
+```text
+SPEC-001 Capability Platform
+        ↓
+SPEC-002 Smart Savings
+        ↓
+SPEC-003 Goal Engine
+        ↓
+SPEC-004 Spending Intelligence
+        ↓
+SPEC-005 AI Copilot / MCP
+```
+
+Isso cria uma evolução natural:
+
+| Fase | Principal abstração introduzida |
+| ---- | ------------------------------- |
+| 0    | Capability                      |
+| 1    | Rule                            |
+| 2    | Strategy                        |
+| 3    | Intelligence                    |
+| 4    | Agent / Tool                    |
+
+Essa é uma separação conceitual muito boa.
+
+---
+
+# 2. Eu adicionaria um conceito importante na Phase 0: **Capability ≠ Plugin ≠ Tool**
+
+A `SPEC-001` deveria estabelecer formalmente essa distinção.
+
+```text
+Capability
+    │
+    │ Business functionality
+    ▼
+Smart Savings
+Goal Engine
+Subscription Intelligence
+
+
+Plugin
+    │
+    │ Packaging / deployment mechanism
+    ▼
+Spring Module
+External Service
+Future Dynamic Module
+
+
+Tool
+    │
+    │ External interaction contract
+    ▼
+MCP Tool
+REST Endpoint
+CLI
+Future Agent Protocol
+```
+
+Isso nos protege de acoplarmos a arquitetura à palavra "plugin".
+
+Por exemplo:
+
+```text
+SmartSavingsCapability
+        │
+        ├── exposed internally via Domain API
+        │
+        ├── invoked by event processing
+        │
+        ├── invoked by REST
+        │
+        └── eventually exposed as MCP Tool
+```
+
+A capability continua sendo a mesma.
+
+---
+
+# 3. Pequeno ajuste no `I-AI-002`
+
+Hoje temos:
+
+> **O(1) AI Path Isolation**
+
+Eu entendo perfeitamente a intenção, mas tecnicamente eu talvez não usasse `O(1)` nesse invariante.
+
+Porque Big-O normalmente representa complexidade algorítmica, e aqui estamos falando de **isolamento do critical path**.
+
+Eu sugeriria:
+
+```text
+I-AI-002 — AI Critical Path Isolation
+
+The AI integration layer SHALL remain outside
+all synchronous monetary transaction critical paths.
+
+Wallet Core correctness, latency, availability,
+and transactional guarantees MUST NOT depend on
+AI model inference or MCP transport availability.
+```
+
+Isso deixa a garantia muito mais precisa.
+
+A arquitetura passa a ser:
+
+```text
+                   AI / MCP
+                      │
+                      ▼
+              Proposal / Analysis
+                      │
+                      ▼
+                 Async / Edge
+                      │
+                      ▼
+                 Approval
+                      │
+                      ▼
+               Typed Command
+                      │
+                      ▼
+┌─────────────────────────────────────────────┐
+│              WALLET CORE                    │
+│                                             │
+│ Authorization → Fraud → Idempotency → Ledger│
+└─────────────────────────────────────────────┘
+```
+
+---
+
+# 4. O ponto que considero mais crítico para a SPEC-001
+
+Eu adicionaria uma classificação explícita de **ações de capability**.
+
+Algo assim:
+
+```text
+CapabilityAction
+│
+├── QUERY
+│     └── no state mutation
+│
+├── ANALYZE
+│     └── derives information from events/state
+│
+├── DECIDE
+│     └── produces a deterministic decision
+│
+├── PROPOSE
+│     └── creates a pending action
+│
+└── COMMAND
+      └── requests a Core state transition
+```
+
+Isso seria extremamente útil no futuro.
+
+Por exemplo:
+
+### Smart Savings
+
+```text
+MoneyReceivedEvent
+        ↓
+ANALYZE
+        ↓
+DECIDE
+        ↓
+PROPOSE / COMMAND
+```
+
+### Subscription Intelligence
+
+```text
+Payment Events
+       ↓
+ANALYZE
+       ↓
+SubscriptionDetected
+```
+
+Nenhuma mutação.
+
+### AI Copilot
+
+```text
+User Prompt
+     ↓
+ANALYZE
+     ↓
+PROPOSE
+     ↓
+PendingProposal
+     ↓
+Human Approval
+     ↓
+COMMAND
+```
+
+Isso cria uma espécie de **capability lifecycle** comum.
+
+---
+
+# 5. Eu também adicionaria `Proposal` como conceito de primeira classe
+
+Hoje ele aparece apenas na Phase 4:
+
+```text
+propose_savings_rule()
+execute_approved_proposal()
+```
+
+Mas acho que devemos introduzi-lo já na plataforma.
+
+Porque o mesmo mecanismo poderá servir para:
+
+```text
+Smart Savings
+        ↓
+Suggested Savings Transfer
+
+Goal Engine
+        ↓
+Suggested Contribution Adjustment
+
+Subscription Intelligence
+        ↓
+Suggested Subscription Review
+
+AI Copilot
+        ↓
+Suggested Financial Action
+```
+
+Então, talvez:
+
+```java
+public interface FinancialProposal {
+
+    ProposalId id();
+
+    ProposalType type();
+
+    ProposalStatus status();
+
+    OperationId operationId();
+
+    Instant expiresAt();
+}
+```
+
+Com:
+
+```text
+DRAFT
+PENDING_APPROVAL
+APPROVED
+REJECTED
+EXPIRED
+EXECUTED
+FAILED
+```
+
+Não estou dizendo que precisamos implementar tudo na Phase 0.
+
+Mas a **SPEC-001 precisa decidir se Proposal é uma primitive da plataforma ou uma concern exclusiva do MCP**.
+
+Minha recomendação: **primitive da plataforma**.
+
+---
+
+# 6. Uma coisa que eu mudaria no deliverable da Phase 0
+
+Atualmente:
+
+> `WalletCapability`, `WalletEventListener<E>`, e `WalletCommandDispatcher`.
+
+Eu incluiria conceitualmente mais duas peças:
+
+```text
+:capability-api
+
+├── WalletCapability
+│
+├── WalletEventListener<E>
+│
+├── WalletCommandDispatcher
+│
+├── CapabilityContext
+│
+└── CapabilityActionResult
+```
+
+Algo nessa direção:
+
+```java
+public interface WalletCapability {
+
+    CapabilityDescriptor descriptor();
+}
+```
+
+```java
+public interface WalletEventListener<E extends WalletEvent>
+        extends WalletCapability {
+
+    Class<E> eventType();
+
+    CapabilityActionResult onEvent(
+        E event,
+        CapabilityContext context
+    );
+}
+```
+
+Mas eu **não congelaria essas interfaces ainda**.
+
+Essa é exatamente uma decisão para a `SPEC-001` → `CLARIFY` → `PLAN-001`.
+
+---
+
+# 7. Uma nova skill que eu considero essencial
+
+Além das skills que discutimos, eu criaria:
+
+```text
+.agents/skills/
+└── capability-driven-development/
+    ├── SKILL.md
+    │
+    ├── capability-classification.md
+    ├── event-consumption.md
+    ├── command-dispatch.md
+    ├── proposal-lifecycle.md
+    ├── extension-boundaries.md
+    └── capability-testing.md
+```
+
+A função dela seria impedir que agentes façam isso:
+
+```text
+Capability
+    ↓
+@Repository
+    ↓
+UPDATE wallet_accounts
+```
+
+Ou isso:
+
+```text
+Capability
+    ↓
+JPA Repository
+    ↓
+INSERT ledger_entries
+```
+
+A skill deveria deixar absolutamente claro:
+
+```text
+Capabilities observe.
+
+Capabilities analyze.
+
+Capabilities decide.
+
+Capabilities propose.
+
+Wallet Core executes monetary state transitions.
+```
+
+Essa frase, inclusive, poderia virar uma **architectural mantra** da plataforma.
+
+---
+
+# 8. Rules que eu adicionaria imediatamente
+
+## `.agents/rules/capability-boundaries.md`
+
+```text
+RULE-CAP-001
+
+A Capability MUST NOT access Core persistence
+repositories directly.
+
+RULE-CAP-002
+
+A Capability MUST NOT mutate ledger, balance,
+wallet or account state directly.
+
+RULE-CAP-003
+
+All monetary side effects MUST be represented
+as typed commands dispatched to Wallet Core.
+
+RULE-CAP-004
+
+Capability event processing MUST tolerate
+at-least-once delivery.
+
+RULE-CAP-005
+
+Capability commands MUST be idempotent.
+
+RULE-CAP-006
+
+A Capability MUST remain independently testable
+from its transport implementation.
+```
+
+Esse último será importante quando chegarmos em:
+
+```text
+NATS
+REST
+MCP
+SSE
+```
+
+Porque a capability não deve saber como foi chamada.
+
+---
+
+# 9. Sobre MCP SSE: eu deixaria a decisão aberta até o PLAN-005
+
+No roadmap está:
+
+> Spring AI MCP / SSE Transport Integration
+
+Eu alteraria para algo como:
+
+```text
+MCP Transport Integration
+
+The implementation SHALL evaluate the
+appropriate MCP transport(s) supported by the
+selected framework and deployment topology.
+```
+
+Porque até chegarmos na Phase 4, o ecossistema MCP provavelmente terá evoluído novamente.
+
+A **SPEC-005 define o contrato MCP**.
+
+O `PLAN-005` escolhe:
+
+```text
+Option A
+Streamable HTTP
+
+Option B
+SSE
+
+Option C
+stdio
+
+Option D
+Dedicated Remote MCP Server
+```
+
+E então fazemos um ADR.
+
+Isso evita que a SPEC de agosto de 2026 congele uma decisão de transporte antes de precisarmos dela.
+
+---
+
+# Minha recomendação para o próximo passo
+
+Eu considero o roadmap **arquiteturalmente pronto** com esses refinamentos conceituais.
+
+Agora eu não partiria direto para código.
+
+Eu seguiria literalmente o pipeline:
+
+```text
+ROADMAP
+   │
+   ▼
+SPEC-001
+   │
+   ├── Intent
+   ├── Scope / Non-Goals
+   ├── Core Invariants
+   ├── Capability Taxonomy
+   ├── Functional Requirements
+   ├── NFRs
+   ├── Interface Contracts
+   ├── Event Delivery Semantics
+   ├── Failure Modes
+   └── Acceptance Criteria
+           │
+           ▼
+        Gate 1
+           │
+           ▼
+        CLARIFY
+           │
+           ▼
+        PLAN-001
+           │
+           ├── Module Architecture
+           ├── SPI alternatives
+           ├── Event flow
+           ├── Idempotency model
+           ├── Proposal lifecycle decision
+           └── ADRs
+```
+
+Para mim, o ponto central da **SPEC-001** deveria ser responder a esta pergunta:
+
+> **How can independently evolving financial capabilities react to Wallet events and request financial actions without ever gaining direct authority over financial state?**
+
+Se fecharmos isso corretamente, as `SPEC-002` até `SPEC-005` passam a ser consumidores naturais de uma plataforma já preparada.
+
+E eu usaria como princípio central:
+
+> **Capabilities observe, analyze, decide, and propose. Wallet Core authorizes and executes.**
+
+Esse é um excelente ponto de partida para formalizarmos agora a **`SPEC-001-wallet-capability-platform.md`**.

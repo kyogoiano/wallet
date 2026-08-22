@@ -1,0 +1,795 @@
+Perfeito. Acho que agora temos material suficiente para transformar a ideia de “adicionar uma feature moderna” em uma **iniciativa arquitetural**, e não simplesmente em mais um módulo da Wallet.
+
+O template que você anexou já nos dá uma estrutura excelente para isso — especialmente porque força **Intent → Scope → Invariants → Requirements → NFRs → Contracts → Failure Modes → Acceptance Criteria**.
+
+Minha proposta seria **não começar imediatamente pela SPEC do Smart Savings**.
+
+Primeiro definiria um pequeno **roadmap de evolução da plataforma Wallet**, porque a decisão sobre *plugin architecture*, MCP ou Spring AI MCP vai afetar várias features futuras.
+
+# Minha visão: três camadas de extensibilidade
+
+```text
+                         ┌──────────────────────────────┐
+                         │       AI / Agent Layer       │
+                         │                              │
+                         │  MCP Tools / AI Agents       │
+                         │  Financial Copilot           │
+                         └──────────────┬───────────────┘
+                                        │
+                                  Capability API
+                                        │
+                         ┌──────────────▼───────────────┐
+                         │      Wallet Extensions       │
+                         │                              │
+                         │ Savings                      │
+                         │ Subscription Intelligence   │
+                         │ Spending Intelligence       │
+                         │ Rewards / Cashback           │
+                         │ Future Plugins               │
+                         └──────────────┬───────────────┘
+                                        │
+                                  Domain API
+                                        │
+        ┌───────────────────────────────▼────────────────────────────┐
+        │                        WALLET CORE                          │
+        │                                                            │
+        │ Ledger │ Balance │ Transfer │ Idempotency │ Fraud │ Outbox │
+        └────────────────────────────────────────────────────────────┘
+```
+
+A principal decisão aqui é:
+
+> **Plugin architecture e MCP architecture não devem ser a mesma coisa.**
+
+Isso é importante.
+
+---
+
+# 1. O que seria um “plugin” na nossa Wallet?
+
+Eu evitaria, inicialmente, um sistema do tipo:
+
+```text
+plugin.jar
+    ↓
+dynamic loading
+    ↓
+runtime reflection
+    ↓
+plugin executes arbitrary code
+```
+
+Isso é interessante tecnicamente, mas adiciona uma quantidade enorme de problemas:
+
+* classloader isolation;
+* version compatibility;
+* dependency conflicts;
+* lifecycle management;
+* security boundaries;
+* database migrations por plugin;
+* observability;
+* deployment/versioning.
+
+Para a nossa Wallet, eu começaria com **modular capabilities**, não com OSGi 2.0.
+
+Algo como:
+
+```text
+wallet-core
+wallet-ledger
+wallet-events
+
+wallet-capability-api
+        │
+        ├── wallet-savings
+        ├── wallet-subscriptions
+        ├── wallet-cashback
+        └── wallet-ai-copilot
+```
+
+Ou seja:
+
+> Um plugin inicialmente é um módulo que implementa contratos estáveis da plataforma.
+
+Mais tarde podemos decidir se queremos:
+
+```text
+Compile-time plugin
+        ↓
+Spring Module
+        ↓
+External Process
+        ↓
+Remote Capability
+        ↓
+Third-party Plugin
+```
+
+Essa evolução progressiva é bem mais saudável.
+
+---
+
+# 2. Onde o MCP entra?
+
+Aqui está a parte que eu acho mais interessante.
+
+Eu não usaria MCP como mecanismo interno para implementar a Wallet.
+
+Não faria:
+
+```text
+TransferFundsService
+        ↓
+MCP
+        ↓
+Savings Plugin
+```
+
+Isso adicionaria latência e complexidade ao caminho transacional.
+
+O MCP ficaria **na borda da plataforma**.
+
+```text
+                  ┌──────────────────┐
+                  │ AI Agent         │
+                  │ Claude / GPT /   │
+                  │ Local Agent      │
+                  └────────┬─────────┘
+                           │
+                     MCP Transport
+                           │
+                           ▼
+                 ┌───────────────────┐
+                 │ Wallet MCP Server │
+                 │                   │
+                 │ Tools             │
+                 │ Resources         │
+                 │ Prompts           │
+                 └─────────┬─────────┘
+                           │
+                    Capability API
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+       Savings       Subscriptions       Analytics
+```
+
+Assim, MCP vira uma espécie de:
+
+> **AI-facing API para a Wallet**
+
+Enquanto nossa Capability API continua sendo:
+
+> **Internal Domain Extension API**
+
+Essa separação, para mim, é fundamental.
+
+---
+
+# 3. Spring AI MCP: provavelmente sim, mas não como primeira decisão
+
+Como nossa stack já é Spring Boot, Spring AI MCP é uma opção muito natural.
+
+Mas eu faria a SPEC de forma **vendor/framework agnostic**.
+
+Por exemplo, a SPEC não deveria dizer:
+
+```text
+REQ-XXX-001:
+The system SHALL use Spring AI MCP Server.
+```
+
+Melhor:
+
+```text
+REQ-XXX-001:
+The Wallet SHALL expose selected capabilities
+to AI agents through a standardized tool protocol.
+
+REQ-XXX-002:
+The AI integration layer SHALL remain isolated
+from the Wallet domain and transaction boundary.
+
+REQ-XXX-003:
+AI-originated commands SHALL pass through
+the same authorization, validation, idempotency
+and fraud controls as external API requests.
+```
+
+E então, no `PLAN`, avaliamos:
+
+```text
+Option A — Spring AI MCP
+Option B — Custom MCP Server
+Option C — Separate MCP Gateway
+Option D — REST/OpenAPI + AI Adapter
+```
+
+Minha hipótese inicial seria:
+
+| Opção               | Minha avaliação                        |
+| ------------------- | -------------------------------------- |
+| Spring AI MCP       | 🟢 Excelente para o primeiro POC       |
+| MCP separado        | 🟡 Melhor para isolamento futuro       |
+| REST + adapter      | 🟢 Mais simples                        |
+| Plugin via SSE      | 🟠 Possível, mas eu não começaria aqui |
+| Dynamic JAR plugins | 🔴 Complexidade prematura              |
+
+---
+
+# 4. SSE transport: eu separaria do conceito de plugin
+
+Acho que você teve uma boa intuição ao mencionar algo como:
+
+```text
+Plugin
+   ↕
+SSE
+```
+
+Mas eu modelaria isso como uma evolução para **Remote Capabilities**.
+
+Por exemplo:
+
+```text
+interface Capability {
+
+    CapabilityDescriptor descriptor();
+
+    CapabilityResult execute(CapabilityCommand command);
+}
+```
+
+Implementação local:
+
+```text
+SavingsCapability
+```
+
+Implementação remota:
+
+```text
+RemoteSavingsCapability
+        ↓
+HTTP / gRPC / MCP / SSE
+        ↓
+Savings Service
+```
+
+Assim, o Core não precisa saber se a capability está:
+
+```text
+LOCAL
+REMOTE
+AI-BACKED
+EXTERNAL
+```
+
+Poderíamos ter:
+
+```java
+public sealed interface CapabilityEndpoint
+        permits LocalCapabilityEndpoint,
+                RemoteCapabilityEndpoint {
+}
+```
+
+Mas eu evitaria definir isso antes de termos um caso real.
+
+---
+
+# 5. O roadmap SDD que eu sugiro
+
+Eu criaria uma nova trilha de evolução.
+
+## Fase 0 — Platform Foundation
+
+### `SPEC-XXX-wallet-capability-platform.md`
+
+Objetivo:
+
+> Definir como novas capacidades financeiras podem ser adicionadas à Wallet sem acoplamento direto ao Core.
+
+Essa SPEC responderia:
+
+* O que é uma Capability?
+* Como ela recebe eventos?
+* Pode executar comandos?
+* Pode escrever diretamente no ledger?
+* Como funciona autorização?
+* Como funciona idempotência?
+* Como funciona isolamento?
+* Como funciona versionamento?
+
+### Invariante crítico
+
+Eu adicionaria algo assim:
+
+```text
+I-CAPABILITY-001
+
+No extension SHALL mutate the Ledger directly.
+
+All monetary state transitions MUST be executed
+through Wallet Core application commands.
+```
+
+Esse seria provavelmente o invariante mais importante da plataforma.
+
+Outro:
+
+```text
+I-CAPABILITY-002
+
+An extension MUST NOT bypass:
+
+Authorization
+Idempotency
+Fraud evaluation
+Ledger consistency
+Transactional boundaries
+```
+
+---
+
+# Fase 1 — Smart Savings
+
+### `SPEC-XXX-smart-savings.md`
+
+Primeira capability real.
+
+```text
+Wallet Event
+      │
+      ▼
+Savings Rule Evaluation
+      │
+      ▼
+Savings Decision
+      │
+      ▼
+Wallet Command
+      │
+      ▼
+Transfer / Ledger
+```
+
+Começaria apenas com:
+
+```text
+Percentage Rule
+```
+
+Exemplo:
+
+```text
+WHEN
+MoneyReceived(amount >= X)
+
+THEN
+Transfer 10%
+
+FROM
+Primary Wallet
+
+TO
+Savings Wallet
+```
+
+---
+
+# Fase 2 — Goal Engine
+
+Aqui a coisa começa a ficar muito interessante.
+
+```text
+Goal
+
+targetAmount = 20,000
+deadline = 2027-08-01
+
+             │
+             ▼
+
+Cash Flow Projection
+
+             │
+             ▼
+
+Savings Strategy
+
+             │
+             ▼
+
+Automation Proposal
+```
+
+Ainda sem IA.
+
+Tudo deterministicamente testável.
+
+---
+
+# Fase 3 — Wallet Intelligence
+
+Aqui entraria:
+
+```text
+Spending Analysis
+Cashflow Forecast
+Recurring Payment Detection
+Goal Optimization
+Anomaly Detection
+```
+
+Isso pode inclusive reutilizar parte da experiência que já temos no motor antifraude, principalmente no conceito de:
+
+```text
+Event
+   ↓
+Feature Extraction
+   ↓
+State
+   ↓
+Decision
+```
+
+Só que agora:
+
+```text
+Fraud Engine
+
+Transaction
+     ↓
+Risk Features
+     ↓
+Decision
+     ↓
+ALLOW / REVIEW / BLOCK
+```
+
+versus:
+
+```text
+Wallet Intelligence
+
+Financial Events
+     ↓
+Financial Features
+     ↓
+Recommendation
+     ↓
+SUGGEST / AUTOMATE / ALERT
+```
+
+Há potencial para criarmos uma abstração comum de processamento de eventos sem misturar os bounded contexts.
+
+---
+
+# Fase 4 — AI Copilot
+
+Somente aqui eu introduziria MCP.
+
+Algo como:
+
+```text
+SPEC-XXX-wallet-ai-copilot.md
+```
+
+Com ferramentas inicialmente read-only:
+
+```text
+get_balance()
+get_wallet_summary()
+get_savings_goal()
+simulate_savings_plan()
+analyze_cashflow()
+```
+
+Depois:
+
+```text
+create_savings_rule()
+update_savings_rule()
+disable_automation()
+```
+
+E **somente mais tarde**:
+
+```text
+execute_transfer()
+```
+
+Mas provavelmente eu exigiria:
+
+```text
+AI Tool Call
+      │
+      ▼
+Command Proposal
+      │
+      ▼
+Policy Evaluation
+      │
+      ├── AUTO APPROVED
+      │
+      └── HUMAN APPROVAL REQUIRED
+```
+
+Nunca:
+
+```text
+LLM → direct ledger mutation
+```
+
+---
+
+# 6. Novas Skills
+
+Aqui acho que podemos melhorar bastante seu ambiente de SDD.
+
+Eu criaria uma skill principal:
+
+```text
+.agents/skills/
+└── wallet-platform/
+    ├── SKILL.md
+    │
+    ├── domain/
+    │   ├── ledger-invariants.md
+    │   ├── monetary-operations.md
+    │   └── idempotency.md
+    │
+    ├── architecture/
+    │   ├── capability-model.md
+    │   ├── event-driven.md
+    │   └── extension-boundaries.md
+    │
+    ├── ai/
+    │   ├── ai-safety.md
+    │   ├── tool-contracts.md
+    │   └── human-in-the-loop.md
+    │
+    └── testing/
+        ├── tdd.md
+        ├── invariant-tests.md
+        └── contract-tests.md
+```
+
+O objetivo da skill não seria explicar todo o projeto.
+
+Ela deveria carregar apenas o que um agente precisa saber para não cometer erros arquiteturais.
+
+---
+
+## Uma skill específica para Financial Domain
+
+```text
+financial-domain/SKILL.md
+```
+
+Com regras como:
+
+```text
+Money MUST NOT use floating point.
+
+Ledger entries are immutable.
+
+All monetary operations are idempotent.
+
+A rejected operation MUST NOT partially mutate state.
+
+Extensions cannot directly mutate balances.
+
+Every financial side effect requires a traceable operationId.
+```
+
+Isso economiza bastante token porque essas regras não precisam ser reexplicadas em cada SPEC.
+
+---
+
+# 7. Rules
+
+Eu separaria Rules de Skills.
+
+### Skill
+
+> Como pensar e trabalhar.
+
+### Rule
+
+> O que não pode ser violado.
+
+Por exemplo:
+
+```text
+.agents/rules/
+├── financial-invariants.md
+├── architecture-boundaries.md
+├── testing-policy.md
+├── event-contract-policy.md
+└── ai-safety.md
+```
+
+`ai-safety.md` poderia ter:
+
+```text
+RULE-AI-001
+
+An LLM MUST NOT directly mutate financial state.
+
+RULE-AI-002
+
+All AI-generated commands MUST be represented
+as typed domain commands.
+
+RULE-AI-003
+
+AI output MUST NOT be executed without
+schema validation.
+
+RULE-AI-004
+
+AI-originated operations MUST pass through
+the standard authorization and fraud pipeline.
+```
+
+---
+
+# 8. Workflows
+
+Eu criaria workflows específicos para o pipeline que você já usa:
+
+```text
+SPEC
+ ↓
+Architecture Review
+ ↓
+PLAN
+ ↓
+ADR Decision
+ ↓
+TASKS
+ ↓
+TDD
+ ↓
+Convergence
+```
+
+Mas adicionaria gates automáticos.
+
+```text
+/specify
+      │
+      ▼
+Invariant Review
+      │
+      ▼
+Gate 1
+      │
+      ▼
+/plan
+      │
+      ▼
+Architecture Boundary Review
+      │
+      ▼
+ADR Review
+      │
+      ▼
+Gate 2
+      │
+      ▼
+/tasks
+      │
+      ▼
+Traceability Validation
+      │
+      ▼
+/implement
+      │
+      ▼
+TDD
+      │
+      ▼
+/converge
+```
+
+O mais interessante seria adicionar um workflow:
+
+```text
+/threat-model
+```
+
+Para qualquer capability que:
+
+* mova dinheiro;
+* use IA;
+* receba eventos externos;
+* introduza extensão remota.
+
+---
+
+# Minha sugestão concreta de ordem
+
+Eu faria assim:
+
+### **SPEC-A — Wallet Capability Platform**
+
+A fundação.
+
+### **PLAN-A — Capability Architecture**
+
+Aqui avaliamos:
+
+* Spring Modules?
+* Java SPI?
+* Spring Bean discovery?
+* Event listeners?
+* Out-of-process plugins?
+* MCP?
+* SSE?
+* HTTP?
+* gRPC?
+
+E tomamos decisões via ADR.
+
+---
+
+### **SPEC-B — Smart Savings Automation**
+
+Nosso primeiro caso de uso real.
+
+---
+
+### **SPEC-C — Financial Goal Engine**
+
+Evolui a capability.
+
+---
+
+### **SPEC-D — Wallet Intelligence**
+
+Feature extraction + analysis + recommendation.
+
+---
+
+### **SPEC-E — AI Financial Copilot**
+
+Aqui finalmente avaliamos:
+
+```text
+Spring AI MCP
+vs
+Dedicated MCP Server
+vs
+AI Gateway
+```
+
+Minha preferência arquitetural inicial seria:
+
+```text
+Wallet Core
+     ↑
+Capability API
+     ↑
+Financial Services
+     ↑
+AI Adapter
+     ↑
+MCP Server
+```
+
+e não:
+
+```text
+Wallet Core
+     ↑
+MCP
+     ↑
+Everything
+```
+
+A grande vantagem dessa sequência é que, quando chegarmos ao MCP, **já teremos ferramentas reais e bem definidas para expor**. Não estaremos procurando um problema para justificar o protocolo.
+
+Eu começaria agora pela **SPEC da Wallet Capability Platform**, usando exatamente o seu template e mantendo os invariantes como elemento central — o template já reserva explicitamente essa seção e também contratos de interface e eventos internos, que serão cruciais para decidir o boundary entre Core, Capabilities e futura camada MCP.

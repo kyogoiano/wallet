@@ -1,6 +1,6 @@
 # 📋 Specification: SPEC-000 — Architecture Alignment & Modulith Core Baseline (Refactoring)
 
-- **Status**: Draft / Under Review
+- **Status**: Ratified
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-22
 - **Target Release / Milestone**: Wallet Service V4 — Milestone 0.0 (Baseline Architecture Alignment)

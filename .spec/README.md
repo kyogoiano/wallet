@@ -19,7 +19,7 @@ Each initiative uses a numeric prefix:
 
 | Phase | Spec | Title | Status |
 | :--- | :--- | :--- | :--- |
-| **0.0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟡 Draft / Clarification |
+| **0.0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟢 Ratified |
 | **0** | [`SPEC-001`](file:///.spec/SPEC-001-wallet-capability-platform.md) | Wallet Modular Capability Platform (Spring Modulith) | 🟡 Draft / Clarification |
 | **1** | `SPEC-002` | Smart Savings & Programmable Money | ⚪ Planned |
 | **2** | `SPEC-003` | Financial Goal & Cashflow Engine | ⚪ Planned |

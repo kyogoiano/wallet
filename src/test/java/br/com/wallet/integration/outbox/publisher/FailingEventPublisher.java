@@ -7,7 +7,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component

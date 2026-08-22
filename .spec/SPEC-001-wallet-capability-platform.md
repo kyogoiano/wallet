@@ -47,34 +47,60 @@ br.com.wallet
 │
 ├── WalletApplication.java
 │
-├── core                                (Core Banking & Ledger Engine)
-│   ├── api                             (Published Public API)
-│   │   ├── TransferFunds.java          (Use Case Interface / Command)
-│   │   ├── DepositFunds.java           (Use Case Interface / Command)
-│   │   ├── WithdrawFunds.java          (Use Case Interface / Command)
-│   │   ├── GetBalance.java             (Query Interface)
-│   │   └── WalletEvents.java           (Domain Events)
+├── [Module 1: br.com.wallet.ledger]       (Core Banking & Transactional Ledger)
+│   ├── api/                                (Published Public API)
+│   │   ├── TransferFundsUseCase.java       (Use Case Interface / Command)
+│   │   ├── DepositFundsUseCase.java        (Use Case Interface / Command)
+│   │   ├── WithdrawFundsUseCase.java       (Use Case Interface / Command)
+│   │   ├── BalanceUseCase.java             (Query Interface)
+│   │   ├── ValidateLedgerUseCase.java      (Audit/Integrity Interface)
+│   │   ├── ReplayWalletUseCase.java        (Reconciliation Interface)
+│   │   ├── CreateWalletUseCase.java        (Wallet Lifecycle Interface)
+│   │   ├── context/                        (Transfer, Deposit, Withdraw, Wallet)
+│   │   ├── domain/                         (AccountBalance, LedgerValidationResult, Account, LedgerEntry)
+│   │   ├── event/                          (TransferCompletedEvent, MoneyReceivedEvent, EventPublisher)
+│   │   ├── exceptions/                     (InsufficientFundsException, BusinessException)
+│   │   ├── guard/                          (FraudCheckHelper connecting to :fraud)
+│   │   ├── envelope/                       (CommandEnvelope)
+│   │   └── utils/                          (JsonUtils, Validations, HashUtils)
 │   │
-│   └── internal                        (Protected Sealed Subpackages)
-│       ├── ledger                      (Ledger DAO, Hash-Chain Verification)
-│       ├── account                     (Accounts DAO, Row-Level Locking)
-│       ├── fraud                       (Pre-Execution Fraud & Velocity Gate)
-│       └── outbox                      (Transactional Outbox & Relay)
+│   └── internal/                           (Protected Sealed Subpackages)
+│       ├── service/                        (TransferFundsService, LedgerService, etc.)
+│       ├── persistence/                    (AccountDao, LedgerDao, OutboxDao, WalletOperationsDao)
+│       ├── outbox/                         (Transactional Outbox & Relay)
+│       └── operation/                      (Operation, OperationStatus)
 │
-├── savings                             (Application Module: Smart Savings)
+├── [Module 2: br.com.wallet.infrastructure] (Framework & Transport Adapters)
+│   ├── rest/                               (REST Controllers, OpenAPI Specs, DTOs, Mappers)
+│   ├── messaging/                          (NATS JetStream Workers, DLQ, Publishers, Enrichers)
+│   ├── persistence/                        (DlqOperationsDao)
+│   └── config/                             (NatsConfig, RedisConfig, OpenTelemetry)
+│
+├── [Subproject :core — Module 3: br.com.wallet.core] (Shared Foundation)
+│   ├── context/                            (FraudContext implementing TraceContext)
+│   ├── tracing/                            (Traceable, TracingAspect, TraceContext)
+│   └── exceptions/                         (IdempotencyException, BusinessException)
+│
+├── [Subproject :fraud — Module 4: br.com.wallet.fraud] (Anti-Fraud & Risk Engine)
+│   ├── domain/                             (FraudEngine, SlidingAmountWindow, FraudDecision, RiskScore)
+│   ├── application/                        (FraudService)
+│   ├── rules/                              (UserBlockRule, GlobalVelocityRule, SlidingWindowRule)
+│   └── infrastructure/                     (RedisUserStore, RedisVelocityStore, LocalStateStore)
+│
+├── savings                                 (Application Module: Smart Savings)
 │   ├── SavingsService.java
 │   ├── SavingsRule.java
 │   └── internal/
 │
-├── goals                               (Application Module: Financial Goals)
+├── goals                                   (Application Module: Financial Goals)
 │   ├── GoalService.java
 │   └── internal/
 │
-├── intelligence                        (Application Module: Spending & Subs)
+├── intelligence                            (Application Module: Spending & Subs)
 │   ├── SubscriptionAnalyzer.java
 │   └── internal/
 │
-└── copilot                             (Application Module: MCP & AI Edge)
+└── copilot                                 (Application Module: MCP & AI Edge)
     ├── WalletTools.java
     ├── ProposalService.java
     └── internal/

@@ -1,10 +1,10 @@
 package br.com.wallet.unit.infrastructure.rest;
 
-import br.com.wallet.wallet.api.*;
-import br.com.wallet.wallet.api.domain.LedgerEntry;
-import br.com.wallet.wallet.api.domain.LedgerType;
-import br.com.wallet.wallet.api.context.Wallet;
-import br.com.wallet.wallet.api.guard.FraudCheckHelper;
+import br.com.wallet.ledger.api.*;
+import br.com.wallet.ledger.api.domain.LedgerEntry;
+import br.com.wallet.ledger.api.domain.LedgerType;
+import br.com.wallet.ledger.api.context.Wallet;
+import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.infrastructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.infrastructure.rest.controller.WalletController;
 import io.nats.client.api.PublishAck;

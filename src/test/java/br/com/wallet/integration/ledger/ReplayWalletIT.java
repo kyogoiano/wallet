@@ -1,0 +1,109 @@
+package br.com.wallet.integration.ledger;
+
+
+import br.com.wallet.ledger.api.CreateWalletUseCase;
+import br.com.wallet.ledger.api.ReplayWalletUseCase;
+import br.com.wallet.ledger.api.TransferFundsUseCase;
+import br.com.wallet.ledger.api.context.Transfer;
+import br.com.wallet.ledger.api.context.Wallet;
+import br.com.wallet.support.DatabaseCleaner;
+import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.DockerProperties;
+import br.com.wallet.support.TestDataHelper;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
+
+import java.math.BigDecimal;
+import java.util.UUID;
+
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+
+@SpringBootTest
+@ActiveProfiles("test")
+@Import(IntegrationTestBase.class)
+public class ReplayWalletIT extends DockerProperties {
+
+    @Autowired
+    TransferFundsUseCase transferFundsUseCase;
+
+    @Autowired
+    CreateWalletUseCase createWalletUseCase;
+
+    @Autowired
+    ReplayWalletUseCase replayWalletUseCase;
+
+    @Autowired
+    TestDataHelper testDataHelper;
+
+    @Autowired
+    DatabaseCleaner cleaner;
+
+    @BeforeEach
+    void setup() {
+        cleaner.clean();
+    }
+
+    @Test
+    void shouldReplayWalletBalanceCorrectly() {
+        var from = UUID.randomUUID();
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
+
+        var transfer50 = new Transfer(from, to,
+                new BigDecimal("50"), UUID.randomUUID());
+        transferFundsUseCase.handle(transfer50);
+        var transfer30 = new Transfer(from, to,
+                new BigDecimal("30"), UUID.randomUUID());
+        transferFundsUseCase.handle(transfer30);
+
+        var replayed = replayWalletUseCase.execute(from);
+
+        assertThat(replayed).isEqualByComparingTo("120");
+    }
+
+    @Test
+    void replayShouldMatchStoredBalance() {
+
+        var from = UUID.randomUUID();
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("150"), fromUserId, UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
+
+        transferFundsUseCase.handle(new Transfer(from, to,
+                new BigDecimal("40"), UUID.randomUUID()));
+
+        var replayed = replayWalletUseCase.execute(from);
+        testDataHelper.assertBalance(from, replayed);
+    }
+
+    @Test
+    void replayShouldStillWorkEvenIfLedgerIsCorrupted() {
+        var from = UUID.randomUUID();
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
+
+        var opId = UUID.randomUUID();
+
+        transferFundsUseCase.handle(new Transfer(from, to,
+                new BigDecimal("50"), opId));
+
+        // 💥 tamper
+        testDataHelper.tamperAmount(from, 2L, new BigDecimal("999"), opId);
+
+        var replayed = replayWalletUseCase.execute(from);
+
+        assertThat(replayed).isNotEqualByComparingTo("150");
+    }
+}

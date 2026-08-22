@@ -1,7 +1,7 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
-import br.com.wallet.wallet.api.exceptions.BusinessException;
-import br.com.wallet.wallet.api.exceptions.PermanentException;
+import br.com.wallet.ledger.api.exceptions.BusinessException;
+import br.com.wallet.ledger.api.exceptions.PermanentException;
 
 public class RetryPolicy {
 

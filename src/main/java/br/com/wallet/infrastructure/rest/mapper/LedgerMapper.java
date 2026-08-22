@@ -1,6 +1,6 @@
 package br.com.wallet.infrastructure.rest.mapper;
 
-import br.com.wallet.wallet.api.domain.LedgerEntry;
+import br.com.wallet.ledger.api.domain.LedgerEntry;
 import br.com.wallet.infrastructure.rest.dto.LedgerEntryResponse;
 
 public class LedgerMapper {

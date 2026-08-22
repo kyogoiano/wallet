@@ -1,8 +1,8 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
-import br.com.wallet.wallet.api.UseCase;
+import br.com.wallet.ledger.api.UseCase;
 import br.com.wallet.core.tracing.TraceContext;
-import br.com.wallet.wallet.api.envelope.CommandEnvelope;
+import br.com.wallet.ledger.api.envelope.CommandEnvelope;
 import br.com.wallet.infrastructure.messaging.publisher.DlqPublisher;
 import io.nats.client.Connection;
 import io.nats.client.Message;

@@ -1,8 +1,8 @@
 package br.com.wallet.infrastructure.rest.exception;
 
 import br.com.wallet.core.exceptions.IdempotencyException;
-import br.com.wallet.wallet.api.exceptions.FraudBlockedException;
-import br.com.wallet.wallet.api.exceptions.InsufficientFundsException;
+import br.com.wallet.ledger.api.exceptions.FraudBlockedException;
+import br.com.wallet.ledger.api.exceptions.InsufficientFundsException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;

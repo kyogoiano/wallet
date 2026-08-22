@@ -1,9 +1,9 @@
 package br.com.wallet.infrastructure.messaging.publisher;
 
 import br.com.wallet.core.tracing.TraceContext;
-import br.com.wallet.wallet.api.envelope.CommandEnvelope;
-import br.com.wallet.wallet.api.exceptions.PermanentException;
-import br.com.wallet.wallet.api.exceptions.TransientException;
+import br.com.wallet.ledger.api.envelope.CommandEnvelope;
+import br.com.wallet.ledger.api.exceptions.PermanentException;
+import br.com.wallet.ledger.api.exceptions.TransientException;
 import io.nats.client.*;
 import io.nats.client.api.PublishAck;
 import io.nats.client.impl.Headers;

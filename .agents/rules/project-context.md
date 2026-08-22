@@ -6,24 +6,35 @@ trigger: always_on
 
 # 🌐 Wallet Service — Project Context
 
-## 1. System Architecture
+## 1. System Architecture (Spring Modulith DAG)
 
-The Wallet Service follows **Clean Architecture** and **Domain-Driven Design (DDD)** principles:
+The Wallet Service follows **Modular Monolith (Spring Modulith)** and **Clean Architecture / DDD** principles:
 
 ```
-[ Interfaces / REST Controllers ] (src/main/java/.../interfaces/rest)
-                ↓
-[ Application / Use Cases ]       (src/main/java/.../application/usecase)
-                ↓
-[ Core Domain & Rules ]           (core/src/main/java/... & fraud/src/main/java/...)
-                ↓
-[ Infrastructure & Persistence ]  (src/main/java/.../infrastructure)
+┌────────────────────────────────────────────────────────┐
+│             br.com.wallet.infrastructure               │
+│    (REST Controllers, NATS JetStream, Config, DLQ)     │
+└──────────────┬───────────┬───────────────┬─────────────┘
+               │           │               │ depends on
+               ▼           ▼               ▼
+┌────────────────────────────┐    ┌──────────────────────┐
+│    br.com.wallet.ledger    │───>│ br.com.wallet.fraud  │
+│ (Use Cases, Ledger, Outbox)│    │(Engine, Rules, State)│
+└──────────────┬─────────────┘    └──────────┬───────────┘
+               │ depends on                  │ depends on
+               └───────────────┬─────────────┘
+                               ▼
+                ┌────────────────────────────┐
+                │    br.com.wallet.core      │
+                │(TraceContext, FraudContext)│
+                └────────────────────────────┘
 ```
 
 ### Module Structure
-- **`:core`**: Pure domain abstractions, exceptions, telemetry annotations, and common context models. Zero framework dependencies.
-- **`:fraud`**: Anti-fraud & risk scoring engine, sliding windows, rules (`UserBlockRule`, `GlobalVelocityRule`), and state stores (Caffeine + Redis).
-- **Root (`:`)**: Spring Boot application, REST controllers, PostgreSQL JDBC/DAO persistence, Outbox Relay, NATS JetStream integration, and OpenTelemetry OTLP exporter.
+- **`:core` (`br.com.wallet.core`)**: Shared foundational types: `TraceContext`, `FraudContext` (implements `TraceContext`), `Traceable`, `TracingAspect`, `IdempotencyException`. Zero outgoing dependencies.
+- **`:fraud` (`br.com.wallet.fraud`)**: Anti-fraud & risk scoring engine, sliding windows, rules (`UserBlockRule`, `GlobalVelocityRule`), and state stores (Caffeine + Redis).
+- **`br.com.wallet.ledger` (in root)**: Transactional ledger & core banking domain (`TransferFundsUseCase`, `DepositFundsUseCase`, `WithdrawFundsUseCase`, `BalanceUseCase`, `ValidateLedgerUseCase`), `AccountDao`, `LedgerDao`, `OutboxDao`, and `FraudCheckHelper`.
+- **`br.com.wallet.infrastructure` (in root)**: REST controllers, NATS JetStream workers, DLQ persistence (`DlqOperationsDao`), and Spring configuration.
 
 ---
 

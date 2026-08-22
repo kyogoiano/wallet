@@ -1,6 +1,6 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
-import br.com.wallet.wallet.api.event.FraudEvent;
+import br.com.wallet.ledger.api.event.FraudEvent;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import io.nats.client.Connection;
 import io.nats.client.Message;

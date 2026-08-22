@@ -1,9 +1,9 @@
 package br.com.wallet.infrastructure.rest.controller;
 
-import br.com.wallet.wallet.api.guard.FraudCheckHelper;
-import br.com.wallet.wallet.api.*;
-import br.com.wallet.wallet.api.domain.Account;
-import br.com.wallet.wallet.api.context.Wallet;
+import br.com.wallet.ledger.api.guard.FraudCheckHelper;
+import br.com.wallet.ledger.api.*;
+import br.com.wallet.ledger.api.domain.Account;
+import br.com.wallet.ledger.api.context.Wallet;
 import br.com.wallet.infrastructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.infrastructure.rest.api.WalletApi;
 import br.com.wallet.infrastructure.rest.dto.*;

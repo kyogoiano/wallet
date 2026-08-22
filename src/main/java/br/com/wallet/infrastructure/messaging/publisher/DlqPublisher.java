@@ -1,6 +1,6 @@
 package br.com.wallet.infrastructure.messaging.publisher;
 
-import br.com.wallet.wallet.api.exceptions.ExceptionType;
+import br.com.wallet.ledger.api.exceptions.ExceptionType;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.Message;

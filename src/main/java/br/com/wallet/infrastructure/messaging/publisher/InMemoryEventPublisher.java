@@ -1,7 +1,7 @@
 package br.com.wallet.infrastructure.messaging.publisher;
 
-import br.com.wallet.wallet.api.event.DomainEventType;
-import br.com.wallet.wallet.api.event.EventPublisher;
+import br.com.wallet.ledger.api.event.DomainEventType;
+import br.com.wallet.ledger.api.event.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Profile;

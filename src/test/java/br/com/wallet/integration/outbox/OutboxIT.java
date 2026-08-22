@@ -1,12 +1,12 @@
 package br.com.wallet.integration.outbox;
 
-import br.com.wallet.wallet.api.CreateWalletUseCase;
-import br.com.wallet.wallet.api.TransferFundsUseCase;
-import br.com.wallet.wallet.api.context.Transfer;
-import br.com.wallet.wallet.api.context.Wallet;
+import br.com.wallet.ledger.api.CreateWalletUseCase;
+import br.com.wallet.ledger.api.TransferFundsUseCase;
+import br.com.wallet.ledger.api.context.Transfer;
+import br.com.wallet.ledger.api.context.Wallet;
 import br.com.wallet.core.exceptions.IdempotencyException;
-import br.com.wallet.wallet.internal.outbox.OutboxRelay;
-import br.com.wallet.wallet.internal.outbox.OutboxStatus;
+import br.com.wallet.ledger.internal.outbox.OutboxRelay;
+import br.com.wallet.ledger.internal.outbox.OutboxStatus;
 import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;

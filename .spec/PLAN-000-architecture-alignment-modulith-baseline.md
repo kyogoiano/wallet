@@ -13,52 +13,55 @@ The purpose of **`PLAN-000`** is to restructure the existing codebase into a ver
 
 ### Architectural Blueprint
 
+### Architectural Blueprint (4-Module DAG)
+
 ```mermaid
 flowchart TD
     subgraph Modulith ["Wallet Application (Spring Modulith Runtime)"]
         subgraph InfrastructureModule ["infrastructure Module (External Adapters)"]
             RestControllers["REST Controllers (infrastructure.rest)"]
             NatsConsumers["NATS Consumers (infrastructure.messaging)"]
+            DlqPersistence["DLQ Persistence (infrastructure.persistence)"]
             AppConfig["Configuration (infrastructure.config)"]
         end
 
-        subgraph CoreModule ["core Module (Transactional Ledger)"]
-            subgraph CoreApi ["core.api (Published Interface)"]
-                TransferFundsAPI["TransferFunds Use Case"]
-                DepositFundsAPI["DepositFunds Use Case"]
-                WithdrawFundsAPI["WithdrawFunds Use Case"]
-                GetBalanceAPI["GetBalance Query"]
-                WalletEvents["WalletEvents (Domain Events)"]
+        subgraph LedgerModule ["ledger Module (Transactional Ledger)"]
+            subgraph LedgerApi ["ledger.api (Published Interface)"]
+                TransferFundsAPI["TransferFundsUseCase"]
+                DepositFundsAPI["DepositFundsUseCase"]
+                WithdrawFundsAPI["WithdrawFundsUseCase"]
+                BalanceAPI["BalanceUseCase"]
+                LedgerAPI["LedgerUseCase & ValidateLedgerUseCase"]
+                WalletEvents["Domain Events (TransferCompletedEvent, etc.)"]
+                FraudGuard["FraudCheckHelper"]
             end
 
-            subgraph CoreInternal ["core.internal (Sealed Implementation)"]
-                CoreServices["Use Case Services (TransferFundsService, etc.)"]
-                FraudGuard["FraudCheckHelper (Integration Gate)"]
-                CoreDomain["Domain Entities (Account, LedgerEntry, HashUtil)"]
-                Persistence["DAOs (AccountDao, LedgerDao, OutboxDao)"]
+            subgraph LedgerInternal ["ledger.internal (Sealed Implementation)"]
+                LedgerServices["Use Case Services (TransferFundsService, etc.)"]
+                CoreDomain["Domain Entities (Account, LedgerEntry, HashUtils)"]
+                Persistence["DAOs (AccountDao, LedgerDao, OutboxDao, WalletOperationsDao)"]
                 OutboxRelay["Outbox Relay & JetStream Publisher"]
                 
-                CoreServices --> FraudGuard
-                CoreServices --> CoreDomain
-                CoreServices --> Persistence
+                LedgerServices --> CoreDomain
+                LedgerServices --> Persistence
                 Persistence --> OutboxRelay
             end
 
-            CoreApi --- CoreServices
+            LedgerApi --- LedgerServices
         end
 
-        RestControllers -->|invokes| CoreApi
-        NatsConsumers -->|invokes| CoreApi
+        InfrastructureModule -->|allowed: ledger::api| LedgerModule
+        InfrastructureModule -->|allowed: fraud::api| FraudEngine
+        InfrastructureModule -->|allowed: core::api| CoreLib
+        LedgerModule -->|allowed: fraud::api| FraudEngine
+        LedgerModule -->|allowed: core::api| CoreLib
+        FraudEngine -->|allowed: core::api| CoreLib
     end
 
     subgraph Subprojects ["Gradle Subprojects"]
-        CoreLib[":core (Tracing Aspect & Context)"]
+        CoreLib[":core (Shared Foundation: TraceContext, FraudContext, Traceable)"]
         FraudEngine[":fraud (Anti-Fraud & Risk Engine)"]
     end
-
-    CoreModule --> CoreLib
-    FraudGuard --> FraudEngine
-    InfrastructureModule --> CoreLib
 ```
 
 ---
@@ -90,21 +93,24 @@ dependencies {
 
 ## 3. Detailed Package Migration Mapping
 
-| Current Location | Target Location | Modulith Visibility | Responsibility |
+| Current Location | Target Location | Modulith Module & Visibility | Responsibility |
 | :--- | :--- | :--- | :--- |
-| `br.com.wallet.application.usecase.*` | `br.com.wallet.core.api.*` | **PUBLIC (API)** | Published Use Case contracts (`TransferFunds`, `DepositFunds`, etc.) |
-| `br.com.wallet.domain.event.*` | `br.com.wallet.core.api.event.*` | **PUBLIC (API)** | Published Domain Events (`MoneyReceivedEvent`, `MoneySentEvent`) |
-| `br.com.wallet.domain.AccountBalance` | `br.com.wallet.core.api.dto.AccountBalance` | **PUBLIC (API)** | Balance snapshot projection model |
-| `br.com.wallet.domain.LedgerValidationResult` | `br.com.wallet.core.api.dto.LedgerValidationResult` | **PUBLIC (API)** | Ledger integrity result model |
-| `br.com.wallet.application.service.*` | `br.com.wallet.core.internal.service.*` | **PACKAGE-PRIVATE (Internal)** | Use Case implementations with `@Transactional` boundaries |
-| `br.com.wallet.domain.Account`, `LedgerEntry` | `br.com.wallet.core.internal.domain.*` | **PACKAGE-PRIVATE (Internal)** | Core entities, SHA-256 hash chaining |
-| `br.com.wallet.util.HashUtil` | `br.com.wallet.core.internal.domain.HashUtil` | **PACKAGE-PRIVATE (Internal)** | Deterministic cryptographic hashing |
-| `br.com.wallet.application.fraud.*` | `br.com.wallet.core.internal.guard.*` | **PACKAGE-PRIVATE (Internal)** | Pre-execution fraud check coordination with `:fraud` |
-| `br.com.wallet.infrasctructure.persistence.*` | `br.com.wallet.core.internal.persistence.*` | **PACKAGE-PRIVATE (Internal)** | JDBC DAOs with row-level `SELECT FOR UPDATE` |
-| `br.com.wallet.infrasctructure.outbox.*` | `br.com.wallet.core.internal.outbox.*` | **PACKAGE-PRIVATE (Internal)** | Transactional Outbox persistence and publishing |
-| `br.com.wallet.interfaces.rest.*` | `br.com.wallet.infrastructure.rest.*` | **INTERNAL (Adapter)** | REST controllers, OpenAPI specs, DTOs, mappers |
-| `br.com.wallet.infrasctructure.messaging.*` | `br.com.wallet.infrastructure.messaging.*` | **INTERNAL (Adapter)** | NATS JetStream command workers and DLQ consumers |
-| `br.com.wallet.config.*` | `br.com.wallet.infrastructure.config.*` | **INTERNAL (Adapter)** | Spring configuration beans (OTel, Redis, NATS) |
+| `fraud.domain.context.FraudContext` | `br.com.wallet.core.context.FraudContext` | `core` (**PUBLIC / API**) | Shared tracing and fraud context model |
+| `br.com.wallet.application.usecase.*` | `br.com.wallet.ledger.api.*` | `ledger` (**PUBLIC / API**) | Published Use Case contracts (`TransferFundsUseCase`, etc.) |
+| `br.com.wallet.domain.context.*` | `br.com.wallet.ledger.api.context.*` | `ledger` (**PUBLIC / API**) | Context parameters (`Transfer`, `Deposit`, `Withdraw`, `Wallet`) |
+| `br.com.wallet.domain.event.*` | `br.com.wallet.ledger.api.event.*` | `ledger` (**PUBLIC / API**) | Published Domain Events (`TransferCompletedEvent`, `EventPublisher`) |
+| `br.com.wallet.domain.AccountBalance` | `br.com.wallet.ledger.api.domain.AccountBalance` | `ledger` (**PUBLIC / API**) | Balance snapshot projection model |
+| `br.com.wallet.domain.LedgerValidationResult` | `br.com.wallet.ledger.api.domain.LedgerValidationResult` | `ledger` (**PUBLIC / API**) | Ledger integrity result model |
+| `br.com.wallet.application.fraud.FraudCheckHelper` | `br.com.wallet.ledger.api.guard.FraudCheckHelper` | `ledger` (**PUBLIC / API**) | Pre-execution fraud check coordination with `:fraud` |
+| `br.com.wallet.application.service.*` | `br.com.wallet.ledger.internal.service.*` | `ledger` (**INTERNAL**) | Use Case implementations with `@Transactional` boundaries |
+| `br.com.wallet.domain.Account`, `LedgerEntry` | `br.com.wallet.ledger.api.domain.*` | `ledger` (**PUBLIC / API**) | Core entities, SHA-256 hash chaining |
+| `br.com.wallet.util.HashUtil` | `br.com.wallet.ledger.internal.utils.HashUtils` | `ledger` (**INTERNAL**) | Deterministic cryptographic hashing |
+| `br.com.wallet.infrasctructure.persistence.*` | `br.com.wallet.ledger.internal.persistence.*` | `ledger` (**INTERNAL**) | JDBC DAOs with row-level `SELECT FOR UPDATE` |
+| `br.com.wallet.infrasctructure.outbox.*` | `br.com.wallet.ledger.internal.outbox.*` | `ledger` (**INTERNAL**) | Transactional Outbox persistence and publishing |
+| `br.com.wallet.interfaces.rest.*` | `br.com.wallet.infrastructure.rest.*` | `infrastructure` (**INTERNAL**) | REST controllers, OpenAPI specs, DTOs, mappers |
+| `br.com.wallet.infrasctructure.messaging.*` | `br.com.wallet.infrastructure.messaging.*` | `infrastructure` (**INTERNAL**) | NATS JetStream command workers and DLQ consumers |
+| `br.com.wallet.infrasctructure.persistence.DlqOperationsDao` | `br.com.wallet.infrastructure.persistence.DlqOperationsDao` | `infrastructure` (**INTERNAL**) | DLQ persistence operations |
+| `br.com.wallet.config.*` | `br.com.wallet.infrastructure.config.*` | `infrastructure` (**INTERNAL**) | Spring configuration beans (OTel, Redis, NATS) |
 
 ---
 
@@ -149,19 +155,24 @@ class ModulithArchitectureTest {
 - **Context**: We need modularity for future capabilities (Smart Savings, Goal Engine, AI Copilot) without dynamic JAR or OSGi runtime complexity.
 - **Decision**: Adopt Spring Modulith 2.1.x as the architectural framework for in-process application modules and structural verification.
 - **Consequences**:
-  - Positive: Clean `core.api` vs `core.internal` separation, verified by unit tests in $<2\text{s}$.
+  - Positive: Clean `api` vs `internal` separation, verified by unit tests in $<2\text{s}$.
   - Positive: Ready-to-use `@ApplicationModuleListener` for internal event routing.
   - Neutral: Requires clean package organization under root package `br.com.wallet`.
 
-### 🏛️ ADR-000-2: Reorganization of Root Packages
-- **Context**: The root project had top-level packages (`application`, `domain`, `infrasctructure`, `interfaces`) which flattened all concerns.
-- **Decision**: Restructure into two top-level modules under `br.com.wallet`:
-  1. `core`: containing `core.api` and `core.internal`.
-  2. `infrastructure`: containing `rest`, `messaging`, and `config`.
-  Fix the typo `infrasctructure` $\rightarrow$ `infrastructure`.
+### 🏛️ ADR-000-2: 4-Module DAG Layout & Namespace Disambiguation (`ledger`)
+- **Context**: Gradle already had subprojects `:core` (`br.com.wallet.core`) and `:fraud` (`br.com.wallet.fraud`). To prevent module collision and package stutter (`wallet.wallet`), the root domain is named `ledger` (`br.com.wallet.ledger`).
+- **Decision**: Establish a clean 4-module Directed Acyclic Graph (DAG):
+  1. `core` (`br.com.wallet.core`): Shared foundational subproject (`TraceContext`, `FraudContext`, `Traceable`, `IdempotencyException`).
+  2. `fraud` (`br.com.wallet.fraud`): Anti-Fraud engine depending on `core::api`.
+  3. `ledger` (`br.com.wallet.ledger`): Core Banking & Transactional Ledger domain depending on `core::api` and `fraud::api`.
+  4. `infrastructure` (`br.com.wallet.infrastructure`): Framework adapters depending on `ledger::api`, `fraud::api`, `core::api`.
 - **Consequences**:
-  - Positive: Clear dependency direction: `infrastructure` $\rightarrow$ `core.api`.
-  - Positive: Spring Modulith easily detects `core` and `infrastructure` as distinct modules.
+  - Positive: Zero module cycles. Complete DAG compliance.
+  - Positive: Allows future capability modules (`savings`, `goals`, `intelligence`, `copilot`) to sit symmetrically as peer modules under `br.com.wallet.*`.
+
+### 🏛️ ADR-000-3: JaCoCo Coverage Automation & SDD Enforcement
+- **Context**: Invariant verification and code quality require automated coverage monitoring without manual guesswork.
+- **Decision**: Configure JaCoCo across root and subprojects, bind `test.finalizedBy jacocoTestReport`, and enforce minimum coverage targets ($\ge 70\%$ overall, $\ge 85\%$ core services & fraud rules) in SDD Stage 7.
 
 ---
 

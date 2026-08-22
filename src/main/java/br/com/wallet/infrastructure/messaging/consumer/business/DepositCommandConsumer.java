@@ -1,7 +1,7 @@
 package br.com.wallet.infrastructure.messaging.consumer.business;
 
-import br.com.wallet.wallet.api.DepositFundsUseCase;
-import br.com.wallet.wallet.api.context.Deposit;
+import br.com.wallet.ledger.api.DepositFundsUseCase;
+import br.com.wallet.ledger.api.context.Deposit;
 import br.com.wallet.infrastructure.messaging.consumer.AbstractCommandsConsumer;
 import br.com.wallet.infrastructure.messaging.publisher.DlqPublisher;
 import io.nats.client.Connection;

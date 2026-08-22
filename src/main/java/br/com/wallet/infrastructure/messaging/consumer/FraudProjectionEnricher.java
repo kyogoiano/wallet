@@ -1,7 +1,7 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
 import br.com.wallet.infrastructure.config.RedisScripts;
-import br.com.wallet.wallet.api.event.FraudEvent;
+import br.com.wallet.ledger.api.event.FraudEvent;
 import br.com.wallet.fraud.domain.RuleType;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.sync.RedisCommands;

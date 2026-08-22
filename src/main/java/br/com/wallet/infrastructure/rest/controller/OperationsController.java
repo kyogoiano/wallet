@@ -1,9 +1,9 @@
 package br.com.wallet.infrastructure.rest.controller;
 
-import br.com.wallet.wallet.api.guard.FraudCheckHelper;
-import br.com.wallet.wallet.api.context.Deposit;
-import br.com.wallet.wallet.api.context.Transfer;
-import br.com.wallet.wallet.api.context.Withdraw;
+import br.com.wallet.ledger.api.guard.FraudCheckHelper;
+import br.com.wallet.ledger.api.context.Deposit;
+import br.com.wallet.ledger.api.context.Transfer;
+import br.com.wallet.ledger.api.context.Withdraw;
 import br.com.wallet.infrastructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.infrastructure.rest.api.OperationsApi;
 import br.com.wallet.infrastructure.rest.dto.DepositCommand;

@@ -1,8 +1,8 @@
 package br.com.wallet.unit.infrastructure.rest;
 
-import br.com.wallet.wallet.api.exceptions.FraudBlockedException;
+import br.com.wallet.ledger.api.exceptions.FraudBlockedException;
 import br.com.wallet.core.exceptions.IdempotencyException;
-import br.com.wallet.wallet.api.exceptions.InsufficientFundsException;
+import br.com.wallet.ledger.api.exceptions.InsufficientFundsException;
 import br.com.wallet.infrastructure.rest.exception.ApiError;
 import br.com.wallet.infrastructure.rest.exception.ApiExceptionHandler;
 import br.com.wallet.infrastructure.rest.exception.ErrorCode;

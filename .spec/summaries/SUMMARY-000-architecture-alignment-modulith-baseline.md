@@ -21,7 +21,7 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
                │ depends on                │ depends on
                ▼                           ▼
 ┌────────────────────────────┐    ┌──────────────────────┐
-│           wallet           │───>│        fraud         │
+│           ledger           │───>│        fraud         │
 │ (Use Cases, Ledger, Outbox)│    │(Engine, Rules, State)│
 └──────────────┬─────────────┘    └──────────┬───────────┘
                │ depends on                  │ depends on
@@ -35,10 +35,10 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
 
 1. **`core` (`br.com.wallet.core`)**: Standalone foundation providing `TraceContext`, `FraudContext` (implementing `TraceContext`), `Traceable`, `TracingAspect`, and `IdempotencyException`. Zero outgoing dependencies.
 2. **`fraud` (`br.com.wallet.fraud`)**: Anti-Fraud & Risk Engine depending exclusively on `core::api` (`FraudContext`, `TraceContext`).
-3. **`wallet` (`br.com.wallet.wallet`)**: Core Banking & Transactional Ledger domain depending on `core::api` and `fraud::api`. Partitioned into `wallet.api` and `wallet.internal`.
-4. **`infrastructure` (`br.com.wallet.infrastructure`)**: Framework adapters (REST, NATS, Config) depending on `wallet::api`, `fraud::api`, and `core::api`.
+3. **`ledger` (`br.com.wallet.ledger`)**: Transactional Ledger & Core Banking domain depending on `core::api` and `fraud::api`. Partitioned into `ledger.api` and `ledger.internal`.
+4. **`infrastructure` (`br.com.wallet.infrastructure`)**: Framework adapters (REST, NATS, Config) depending on `ledger::api`, `fraud::api`, and `core::api`.
 5. Created **`ModulithArchitectureTest`** verifying module boundaries via `ApplicationModules.of(WalletApplication.class).verify()`.
-6. Zero package mismatches, zero broken imports (all 183 types resolved), zero cycles, and 100% financial invariant preservation.
+6. Zero package mismatches, zero broken imports (all 192 types resolved), zero cycles, and 100% financial invariant preservation.
 
 ---
 
@@ -48,16 +48,16 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
 | Original Path | Target Path | Modulith Module & Visibility | Purpose |
 | :--- | :--- | :--- | :--- |
 | `fraud/domain/context/FraudContext.java` | `core/context/FraudContext.java` | `core` (**PUBLIC / API**) | Shared tracing and fraud context model |
-| `br.com.wallet.application.usecase.*` | `br.com.wallet.wallet.api.*` | `wallet` (**PUBLIC / API**) | Published Use Case contracts (`TransferFundsUseCase`, etc.) |
-| `br.com.wallet.domain.context.*` | `br.com.wallet.wallet.api.context.*` | `wallet` (**PUBLIC / API**) | Context parameters (`Transfer`, `Deposit`, `Withdraw`, `Wallet`) |
-| `br.com.wallet.domain.event.*` | `br.com.wallet.wallet.api.event.*` | `wallet` (**PUBLIC / API**) | Published Domain Events (`TransferCompletedEvent`, `EventPublisher`) |
-| `br.com.wallet.domain.*` | `br.com.wallet.wallet.api.domain.*` | `wallet` (**PUBLIC / API**) | Domain models (`AccountBalance`, `LedgerValidationResult`, `Account`, `LedgerEntry`) |
-| `br.com.wallet.exceptions.*` | `br.com.wallet.wallet.api.exceptions.*` | `wallet` (**PUBLIC / API**) | Domain exceptions (`InsufficientFundsException`, `BusinessException`) |
-| `br.com.wallet.application.fraud.FraudCheckHelper` | `br.com.wallet.wallet.api.guard.FraudCheckHelper` | `wallet` (**PUBLIC / API**) | Pre-execution fraud check gate |
-| `br.com.wallet.domain.envelope.CommandEnvelope` | `br.com.wallet.wallet.api.envelope.CommandEnvelope` | `wallet` (**PUBLIC / API**) | Command envelope format |
-| `br.com.wallet.application.service.*` | `br.com.wallet.wallet.internal.service.*` | `wallet` (**INTERNAL**) | Use case implementations with `@Transactional` boundaries |
-| `br.com.wallet.infrasctructure.persistence.*` | `br.com.wallet.wallet.internal.persistence.*` | `wallet` (**INTERNAL**) | JDBC DAOs (`AccountDao`, `LedgerDao`, `OutboxDao`, `WalletOperationsDao`) |
-| `br.com.wallet.infrasctructure.outbox.*` | `br.com.wallet.wallet.internal.outbox.*` | `wallet` (**INTERNAL**) | Transactional Outbox persistence & relay |
+| `br.com.wallet.application.usecase.*` | `br.com.wallet.ledger.api.*` | `ledger` (**PUBLIC / API**) | Published Use Case contracts (`TransferFundsUseCase`, etc.) |
+| `br.com.wallet.domain.context.*` | `br.com.wallet.ledger.api.context.*` | `ledger` (**PUBLIC / API**) | Context parameters (`Transfer`, `Deposit`, `Withdraw`, `Wallet`) |
+| `br.com.wallet.domain.event.*` | `br.com.wallet.ledger.api.event.*` | `ledger` (**PUBLIC / API**) | Published Domain Events (`TransferCompletedEvent`, `EventPublisher`) |
+| `br.com.wallet.domain.*` | `br.com.wallet.ledger.api.domain.*` | `ledger` (**PUBLIC / API**) | Domain models (`AccountBalance`, `LedgerValidationResult`, `Account`, `LedgerEntry`) |
+| `br.com.wallet.exceptions.*` | `br.com.wallet.ledger.api.exceptions.*` | `ledger` (**PUBLIC / API**) | Domain exceptions (`InsufficientFundsException`, `BusinessException`) |
+| `br.com.wallet.application.fraud.FraudCheckHelper` | `br.com.wallet.ledger.api.guard.FraudCheckHelper` | `ledger` (**PUBLIC / API**) | Pre-execution fraud check gate |
+| `br.com.wallet.domain.envelope.CommandEnvelope` | `br.com.wallet.ledger.api.envelope.CommandEnvelope` | `ledger` (**PUBLIC / API**) | Command envelope format |
+| `br.com.wallet.application.service.*` | `br.com.wallet.ledger.internal.service.*` | `ledger` (**INTERNAL**) | Use case implementations with `@Transactional` boundaries |
+| `br.com.wallet.infrasctructure.persistence.*` | `br.com.wallet.ledger.internal.persistence.*` | `ledger` (**INTERNAL**) | JDBC DAOs (`AccountDao`, `LedgerDao`, `OutboxDao`, `WalletOperationsDao`) |
+| `br.com.wallet.infrasctructure.outbox.*` | `br.com.wallet.ledger.internal.outbox.*` | `ledger` (**INTERNAL**) | Transactional Outbox persistence & relay |
 | `br.com.wallet.interfaces.rest.*` | `br.com.wallet.infrastructure.rest.*` | `infrastructure` (**INTERNAL**) | REST controllers, OpenAPI docs, DTOs, mappers, exception handlers |
 | `br.com.wallet.infrasctructure.messaging.*` | `br.com.wallet.infrastructure.messaging.*` | `infrastructure` (**INTERNAL**) | NATS JetStream command consumers, publishers, DLQ, enrichers |
 | `br.com.wallet.infrasctructure.persistence.DlqOperationsDao` | `br.com.wallet.infrastructure.persistence.DlqOperationsDao` | `infrastructure` (**INTERNAL**) | DLQ persistence operations |
@@ -68,9 +68,9 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
   - `core.context`, `core.tracing`, `core.exceptions` tagged with `@NamedInterface("api")`.
 - **`fraud`**: `@ApplicationModule(displayName = "Fraud & Risk Engine", allowedDependencies = {"core::api", "core"})`
   - `fraud.application`, `fraud.domain`, `fraud.rules`, `fraud.infrastructure` tagged with `@NamedInterface("api")`.
-- **`wallet`**: `@ApplicationModule(displayName = "Wallet Domain & Ledger Engine", allowedDependencies = {"core::api", "core", "fraud::api", "fraud"})`
-  - All `wallet.api` subpackages tagged with `@NamedInterface("api")`.
-- **`infrastructure`**: `@ApplicationModule(displayName = "Wallet Infrastructure Adapters", allowedDependencies = {"wallet::api", "wallet", "fraud::api", "fraud", "core::api", "core"})`.
+- **`ledger`**: `@ApplicationModule(displayName = "Transactional Ledger & Core Banking Engine", allowedDependencies = {"core::api", "core", "fraud::api", "fraud"})`
+  - All `ledger.api` subpackages tagged with `@NamedInterface("api")`.
+- **`infrastructure`**: `@ApplicationModule(displayName = "Wallet Infrastructure Adapters", allowedDependencies = {"ledger::api", "ledger", "fraud::api", "fraud", "core::api", "core"})`.
 
 ---
 
@@ -78,16 +78,16 @@ The **`SPEC-000`** initiative successfully restructured the Wallet Service repos
 
 | Requirement / Invariant ID | Verification Method | Status | Evidence / Notes |
 | :--- | :--- | :--- | :--- |
-| `REQ-ALIGN-001` | Static Analysis / Code Structure | ✅ PASS | Core use cases and events exposed under `br.com.wallet.wallet.api` |
-| `REQ-ALIGN-002` | Static Analysis / Package Structure | ✅ PASS | DAOs, outbox, and service implementations encapsulated in `wallet.internal` |
-| `REQ-ALIGN-003` | Static Analysis / Imports | ✅ PASS | REST controllers and NATS workers only consume `wallet.api` |
+| `REQ-ALIGN-001` | Static Analysis / Code Structure | ✅ PASS | Core use cases and events exposed under `br.com.wallet.ledger.api` |
+| `REQ-ALIGN-002` | Static Analysis / Package Structure | ✅ PASS | DAOs, outbox, and service implementations encapsulated in `ledger.internal` |
+| `REQ-ALIGN-003` | Static Analysis / Imports | ✅ PASS | REST controllers and NATS workers only consume `ledger.api` |
 | `REQ-ALIGN-004` | `ModulithArchitectureTest.verifyArchitecture()` | ✅ PASS | Spring Modulith acyclic DAG verified with zero violations |
 | `REQ-ALIGN-005` | Unit & Integration Test Suites | ✅ PASS | Zero functional regressions across existing business scenarios |
 | `I-LEDGER-001` | Code & Schema Preservation | ✅ PASS | Ledger remains append-only |
-| `I-LEDGER-002` | `HashUtilTest` & `LedgerScenarioTest` | ✅ PASS | Cryptographic SHA-256 hash chaining formula strictly preserved |
-| `I-BALANCE-001` | `BalanceScenarioTest` | ✅ PASS | Balance mathematical consistency intact |
-| `I-ATOMICITY-001` | `TransferFundsScenarioTest` | ✅ PASS | Row-level locking (`SELECT FOR UPDATE`) & single transaction boundary intact |
-| `I-FRAUD-001` | `FraudCheckHelperTest` | ✅ PASS | Pre-execution fraud evaluation gate preserved |
+| `I-LEDGER-002` | `HashUtilTest` & `LedgerServicesTest` | ✅ PASS | Cryptographic SHA-256 hash chaining formula strictly preserved |
+| `I-BALANCE-001` | `BalanceServiceTest` & `ReplayWalletServiceTest` | ✅ PASS | Balance mathematical consistency intact |
+| `I-ATOMICITY-001` | `TransferFundsServiceTest` | ✅ PASS | Row-level locking (`SELECT FOR UPDATE`) & single transaction boundary intact |
+| `I-FRAUD-001` | `FraudCheckHelperTest` & `SlidingWindowRuleTest` | ✅ PASS | Pre-execution fraud evaluation gate preserved |
 
 ---
 

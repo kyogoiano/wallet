@@ -1,6 +1,6 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
-import br.com.wallet.wallet.api.event.DomainEvent;
+import br.com.wallet.ledger.api.event.DomainEvent;
 import io.nats.client.Connection;
 import io.nats.client.Message;
 import org.jspecify.annotations.NonNull;

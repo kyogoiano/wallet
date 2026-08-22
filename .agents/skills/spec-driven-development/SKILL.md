@@ -71,7 +71,9 @@ Verify the following consistency rules:
 - Implement minimal code to pass (`Green`).
 - Refactor for clarity and performance while tests remain green.
 
-### Stage 7: Converge
-- Run full test suite (`./gradlew test`).
-- Generate final Traceability Report comparing implementation evidence against acceptance criteria.
-- Author `.spec/summaries/SUMMARY-XXX-<name>.md` using [`templates/summary-template.md`](file:///.agents/skills/spec-driven-development/templates/summary-template.md) to record the execution results, code changes, and invariant verification.
+### Stage 7: Converge (Verification, Coverage & Reconciliation Gate)
+- **Build & Test**: Run full test suite (`./gradlew test jacocoTestReport`).
+- **Architecture Verification**: Ensure `ModulithArchitectureTest.verifyArchitecture()` passes with 0 violations and 0 cycles.
+- **Coverage Check**: Verify line coverage meets minimum thresholds ($\ge 70\%$ overall, $\ge 85\%$ core services/fraud rules).
+- **Zero Spec-Drift Reconciliation**: Compare actual implemented code, package names, and interfaces against `SPEC-XXX` and `PLAN-XXX`. If technical realities or ADRs required adjustments, reconcile `SPEC-XXX` and `PLAN-XXX` immediately so that Spec, Plan, Tasks, and Code remain 100% congruent.
+- **Execution Summary**: Author `.spec/summaries/SUMMARY-XXX-<name>.md` using [`templates/summary-template.md`](file:///.agents/skills/spec-driven-development/templates/summary-template.md) recording metrics, code changes, and invariant verification evidence.

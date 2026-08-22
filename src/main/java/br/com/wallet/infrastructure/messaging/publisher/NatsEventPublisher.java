@@ -1,8 +1,8 @@
 package br.com.wallet.infrastructure.messaging.publisher;
 
-import br.com.wallet.wallet.api.event.DomainEventType;
-import br.com.wallet.wallet.api.event.EventPublisher;
-import br.com.wallet.wallet.api.exceptions.EventPublishException;
+import br.com.wallet.ledger.api.event.DomainEventType;
+import br.com.wallet.ledger.api.event.EventPublisher;
+import br.com.wallet.ledger.api.exceptions.EventPublishException;
 import io.nats.client.Connection;
 import io.nats.client.JetStreamApiException;
 import io.nats.client.PublishOptions;

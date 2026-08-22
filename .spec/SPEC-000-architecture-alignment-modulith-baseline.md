@@ -30,35 +30,55 @@ Currently, the root application contains clean architecture packages (`applicati
 - **Subproject `:fraud`**:
   - Standalone Anti-Fraud engine: `FraudEngine`, `SlidingAmountWindow`, rules (`UserBlockRule`, `GlobalVelocityRule`), and state stores.
 
-### 2.2 Target Spring Modulith Structure
+## 2. Target Spring Modulith Architecture (4-Module DAG)
+
 ```text
 br.com.wallet
 │
-├── WalletApplication.java              (Spring Boot Entry Point)
+├── [Root Application: br.com.wallet]
+│   └── WalletApplication.java              (Spring Boot Entry Point)
 │
-├── core                                (Core Banking & Transactional Ledger Module)
-│   ├── api                             (Published Public Interface)
-│   │   ├── TransferFunds.java          (Use Case Interface)
-│   │   ├── DepositFunds.java           (Use Case Interface)
-│   │   ├── WithdrawFunds.java          (Use Case Interface)
-│   │   ├── GetBalance.java             (Query Interface)
-│   │   ├── ValidateLedger.java         (Audit/Integrity Interface)
-│   │   ├── ReplayWallet.java           (Reconciliation Interface)
-│   │   └── WalletEvents.java           (Published Domain Events)
+├── [Module 1: br.com.wallet.ledger]       (Core Banking & Transactional Ledger Module)
+│   ├── api                                 (Published Public Interface)
+│   │   ├── TransferFundsUseCase.java       (Use Case Interface)
+│   │   ├── DepositFundsUseCase.java        (Use Case Interface)
+│   │   ├── WithdrawFundsUseCase.java       (Use Case Interface)
+│   │   ├── BalanceUseCase.java             (Query Interface)
+│   │   ├── ValidateLedgerUseCase.java      (Audit/Integrity Interface)
+│   │   ├── ReplayWalletUseCase.java        (Reconciliation Interface)
+│   │   ├── CreateWalletUseCase.java        (Wallet Lifecycle Interface)
+│   │   ├── context/                        (Transfer, Deposit, Withdraw, Wallet)
+│   │   ├── domain/                         (AccountBalance, LedgerValidationResult, Account, LedgerEntry)
+│   │   ├── event/                          (TransferCompletedEvent, MoneyReceivedEvent, EventPublisher)
+│   │   ├── exceptions/                     (InsufficientFundsException, BusinessException)
+│   │   ├── guard/                          (FraudCheckHelper connecting to :fraud)
+│   │   ├── envelope/                       (CommandEnvelope)
+│   │   └── utils/                          (JsonUtils, Validations, HashUtils)
 │   │
-│   └── internal                        (Protected Implementation Packages)
-│       ├── domain                      (Account, LedgerEntry, HashUtil)
-│       ├── service                     (TransferFundsService, LedgerService, etc.)
-│       ├── persistence                 (AccountDao, LedgerDao, OutboxDao)
-│       ├── outbox                      (OutboxPublisher, OutboxRelay)
-│       └── guard                       (FraudCheckHelper connecting to :fraud)
+│   └── internal                            (Protected Implementation Packages)
+│       ├── service/                        (TransferFundsService, LedgerService, etc.)
+│       ├── persistence/                    (AccountDao, LedgerDao, OutboxDao, WalletOperationsDao)
+│       ├── outbox/                         (OutboxRelay, OutboxEvent, OutboxStatus)
+│       └── operation/                      (Operation, OperationStatus)
 │
-├── infrastructure                      (Framework & Transport Adapters)
-│   ├── messaging                       (NATS JetStream Workers & DLQ)
-│   ├── rest                            (REST API Controllers & OpenAPI)
-│   └── config                          (NatsConfig, RedisConfig, OpenTelemetry)
+├── [Module 2: br.com.wallet.infrastructure] (Framework & Transport Adapters)
+│   ├── rest/                               (REST Controllers, OpenAPI Specs, DTOs, Mappers)
+│   ├── messaging/                          (NATS JetStream Workers, DLQ, Publishers, Enrichers)
+│   ├── persistence/                        (DlqOperationsDao)
+│   └── config/                             (NatsConfig, RedisConfig, OpenTelemetry)
 │
-└── [Future Application Modules: savings, goals, intelligence, copilot]
+├── [Subproject :core — Module 3: br.com.wallet.core] (Shared Foundation)
+│   ├── context/                            (FraudContext implementing TraceContext)
+│   ├── tracing/                            (Traceable, TracingAspect, TraceContext)
+│   └── exceptions/                         (IdempotencyException, BusinessException)
+│
+├── [Subproject :fraud — Module 4: br.com.wallet.fraud] (Anti-Fraud & Risk Engine)
+│   ├── domain/                             (FraudEngine, SlidingAmountWindow, FraudDecision, RiskScore)
+│   ├── application/                        (FraudService)
+│   ├── rules/                              (UserBlockRule, GlobalVelocityRule, SlidingWindowRule)
+│   └── infrastructure/                     (RedisUserStore, RedisVelocityStore, LocalStateStore)
+│
+└── [Future Peer Modules: savings, goals, intelligence, copilot]
 ```
 
 ---
@@ -66,10 +86,10 @@ br.com.wallet
 ## 3. Scope & Non-Goals
 
 ### In Scope
-- Add `spring-modulith-starter-core` and `spring-modulith-starter-test` to `build.gradle`.
-- Restructure core domain logic in root `src/` into explicit `core.api` (published contracts) and `core.internal` (sealed persistence and use case services).
+- Add `spring-modulith-starter-core`, `spring-modulith-starter-test`, and `jacoco` to `build.gradle`.
+- Restructure core domain logic in root `src/` into explicit `ledger.api` (published contracts) and `ledger.internal` (sealed persistence and use case services).
 - Fix naming typos (e.g. `infrasctructure` $\rightarrow$ `infrastructure`).
-- Ensure REST controllers and NATS message consumers consume `core.api` interfaces rather than internal services/DAOs.
+- Ensure REST controllers and NATS message consumers consume `ledger.api` interfaces rather than internal services/DAOs.
 - Maintain existing subproject boundaries (`:core` for cross-cutting tracing/exceptions, `:fraud` for anti-fraud engine).
 - Implement `ModulithArchitectureTest` asserting `ApplicationModules.of(WalletApplication.class).verify()`.
 - Ensure 100% test passing across all existing unit, integration, and Testcontainers tests with zero regression.
@@ -84,20 +104,20 @@ br.com.wallet
 ## 4. Mathematical & System Invariants Preserved
 
 - **`I-LEDGER-001` (Immutable Source of Truth)**: Ledger append-only property remains untouched.
-- **`I-LEDGER-002` (Hash-Chaining Integrity)**: $\text{hash}_n = \text{SHA256}(\text{hash}_{n-1} + \text{walletId} + \text{amount} + \text{type} + \text{operationId} + \text{sequence})$ calculation logic is preserved identically in `core.internal.domain`.
+- **`I-LEDGER-002` (Hash-Chaining Integrity)**: $\text{hash}_n = \text{SHA256}(\text{hash}_{n-1} + \text{walletId} + \text{amount} + \text{type} + \text{operationId} + \text{sequence})$ calculation logic is preserved identically in `ledger.internal.utils.HashUtils`.
 - **`I-BALANCE-001` & `I-BALANCE-002` (Balance Math & Non-Negativity)**: Account balance projections and validation rules are strictly maintained.
 - **`I-ATOMICITY-001` & `I-IDEMPOTENCY-001`**: Transactional boundaries with `SELECT FOR UPDATE` locking and `operation_id` deduplication remain enforced.
-- **`I-FRAUD-001` & `I-FRAUD-002`**: Pre-execution fraud evaluation gate in `core.internal.guard` executes in $O(1)$ prior to transaction lock acquisition.
+- **`I-FRAUD-001` & `I-FRAUD-002`**: Pre-execution fraud evaluation gate in `ledger.api.guard.FraudCheckHelper` executes in $O(1)$ prior to transaction lock acquisition.
 
 ---
 
 ## 5. Functional Requirements
 
-- **`REQ-ALIGN-001` (Core API Definition)**: The system SHALL expose all core banking operations via typed interfaces in `br.com.wallet.core.api` (`TransferFunds`, `DepositFunds`, `WithdrawFunds`, `GetBalance`, `ValidateLedger`, `ReplayWallet`).
-- **`REQ-ALIGN-002` (Core Internal Encapsulation)**: All database repositories (`AccountDao`, `LedgerDao`, `OutboxDao`), service implementations, and internal domain models SHALL reside under `br.com.wallet.core.internal.*`.
-- **`REQ-ALIGN-003` (Adapter Decoupling)**: REST controllers (`infrastructure.rest`) and NATS consumers (`infrastructure.messaging`) SHALL only inject and invoke interfaces from `core.api`.
+- **`REQ-ALIGN-001` (Ledger API Definition)**: The system SHALL expose all core banking operations via typed interfaces in `br.com.wallet.ledger.api` (`TransferFundsUseCase`, `DepositFundsUseCase`, `WithdrawFundsUseCase`, `BalanceUseCase`, `ValidateLedgerUseCase`, `ReplayWalletUseCase`, `CreateWalletUseCase`).
+- **`REQ-ALIGN-002` (Ledger Internal Encapsulation)**: All database repositories (`AccountDao`, `LedgerDao`, `OutboxDao`, `WalletOperationsDao`), service implementations, and internal domain models SHALL reside under `br.com.wallet.ledger.internal.*`.
+- **`REQ-ALIGN-003` (Adapter Decoupling)**: REST controllers (`infrastructure.rest`) and NATS consumers (`infrastructure.messaging`) SHALL only inject and invoke interfaces from `ledger.api`.
 - **`REQ-ALIGN-004` (Automated Architecture Verification)**: The test suite SHALL execute `ModulithArchitectureTest` on every build, asserting zero illegal cross-package access.
-- **`REQ-ALIGN-005` (Zero Regression)**: All existing integration scenarios (`TransferFundsTest`, `LedgerValidationTest`, `SlidingWindowRuleTest`, `OutboxPublisherTest`) MUST pass without modification to business expectations.
+- **`REQ-ALIGN-005` (Zero Regression)**: All existing integration scenarios (`TransferFundsIT`, `LedgerIT`, `ValidateLedgerIT`, `SlidingWindowRuleTest`, `OutboxIT`) MUST pass without modification to business expectations.
 
 ---
 
@@ -111,39 +131,40 @@ br.com.wallet
 
 ## 7. Interface Contracts
 
-### 7.1 Core Published API (`br.com.wallet.core.api`)
+### 7.1 Ledger Published API (`br.com.wallet.ledger.api`)
 
 ```java
-package br.com.wallet.core.api;
+package br.com.wallet.ledger.api;
 
+import br.com.wallet.ledger.api.context.*;
+import br.com.wallet.ledger.api.domain.*;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-public interface TransferFunds {
-    TransferResult execute(TransferCommand command);
+public interface TransferFundsUseCase {
+    void handle(Transfer transfer);
 }
 
-public interface DepositFunds {
-    DepositResult execute(DepositCommand command);
+public interface DepositFundsUseCase {
+    void handle(Deposit deposit);
 }
 
-public interface WithdrawFunds {
-    WithdrawResult execute(WithdrawCommand command);
+public interface WithdrawFundsUseCase {
+    void handle(Withdraw withdraw);
 }
 
-public interface GetBalance {
-    AccountBalance currentBalance(UUID walletId);
-    AccountBalance historicalBalance(UUID walletId, Instant atTimestamp);
+public interface BalanceUseCase {
+    BigDecimal getBalance(UUID walletId);
+    BigDecimal getHistoricalBalance(UUID walletId, Instant at);
 }
 
-public interface ValidateLedger {
-    LedgerValidationResult validate();
-    LedgerValidationResult validate(UUID walletId);
+public interface ValidateLedgerUseCase {
+    LedgerValidationResult execute(UUID walletId);
 }
 
-public interface ReplayWallet {
-    AccountBalance replay(UUID walletId);
+public interface ReplayWalletUseCase {
+    BigDecimal execute(UUID walletId);
 }
 ```
 

@@ -4,7 +4,7 @@ import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.infrastructure.messaging.dlq.DlqEvent;
 import br.com.wallet.infrastructure.messaging.dlq.DlqFailureType;
 import br.com.wallet.infrastructure.messaging.dlq.DlqStatus;
-import br.com.wallet.wallet.api.utils.JsonUtils;
+import br.com.wallet.ledger.api.utils.JsonUtils;
 import org.jspecify.annotations.NonNull;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;

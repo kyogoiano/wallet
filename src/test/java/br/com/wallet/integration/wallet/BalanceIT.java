@@ -1,12 +1,12 @@
 package br.com.wallet.integration.wallet;
 
-import br.com.wallet.application.usecase.BalanceUseCase;
-import br.com.wallet.application.usecase.CreateWalletUseCase;
-import br.com.wallet.application.usecase.TransferFundsUseCase;
-import br.com.wallet.application.usecase.WithdrawFundsUseCase;
-import br.com.wallet.domain.context.Transfer;
-import br.com.wallet.domain.context.Wallet;
-import br.com.wallet.domain.context.Withdraw;
+import br.com.wallet.wallet.api.BalanceUseCase;
+import br.com.wallet.wallet.api.CreateWalletUseCase;
+import br.com.wallet.wallet.api.TransferFundsUseCase;
+import br.com.wallet.wallet.api.WithdrawFundsUseCase;
+import br.com.wallet.wallet.api.context.Transfer;
+import br.com.wallet.wallet.api.context.Wallet;
+import br.com.wallet.wallet.api.context.Withdraw;
 import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;

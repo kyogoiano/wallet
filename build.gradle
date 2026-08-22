@@ -1,11 +1,18 @@
 plugins {
 	id 'java'
+	id 'jacoco'
 	id 'org.springframework.boot' version '4.1.0'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
 group = 'br.com.wallet'
 version = '0.0.1-SNAPSHOT'
+
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.modulith:spring-modulith-bom:2.1.0"
+	}
+}
 
 java {
 	toolchain {
@@ -29,6 +36,7 @@ ext {
 
 subprojects {
 	apply plugin: 'java'
+	apply plugin: 'jacoco'
 	apply plugin: 'io.spring.dependency-management'
 
 	version = '0.0.1-SNAPSHOT'
@@ -36,6 +44,7 @@ subprojects {
 	dependencyManagement {
 		imports {
 			mavenBom "org.springframework.boot:spring-boot-dependencies:4.1.0"
+			mavenBom "org.springframework.modulith:spring-modulith-bom:2.1.0"
 		}
 	}
 
@@ -59,6 +68,7 @@ subprojects {
 
 	dependencies {
 		implementation 'org.springframework.boot:spring-boot-starter'
+		implementation 'org.springframework.modulith:spring-modulith-starter-core'
 	}
 }
 
@@ -95,6 +105,11 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-webtestclient'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
+	// Spring Modulith
+	implementation 'org.springframework.modulith:spring-modulith-starter-core'
+	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
+	testImplementation 'org.springframework.modulith:spring-modulith-docs'
+
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
 	testImplementation 'org.testcontainers:testcontainers-postgresql'
@@ -104,4 +119,24 @@ dependencies {
 
 tasks.named('test') {
 	useJUnitPlatform()
+	finalizedBy jacocoTestReport
+}
+
+jacocoTestReport {
+	dependsOn test
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+	}
+}
+
+jacocoTestCoverageVerification {
+	violationRules {
+		rule {
+			limit {
+				minimum = 0.70
+			}
+		}
+	}
 }

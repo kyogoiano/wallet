@@ -74,3 +74,4 @@ Verify the following consistency rules:
 ### Stage 7: Converge
 - Run full test suite (`./gradlew test`).
 - Generate final Traceability Report comparing implementation evidence against acceptance criteria.
+- Author `.spec/summaries/SUMMARY-XXX-<name>.md` using [`templates/summary-template.md`](file:///.agents/skills/spec-driven-development/templates/summary-template.md) to record the execution results, code changes, and invariant verification.

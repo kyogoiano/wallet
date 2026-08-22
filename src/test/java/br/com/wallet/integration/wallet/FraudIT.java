@@ -1,14 +1,14 @@
 package br.com.wallet.integration.wallet;
 
-import br.com.wallet.application.usecase.CreateWalletUseCase;
-import br.com.wallet.domain.context.Wallet;
-import br.com.wallet.domain.event.FraudEvent;
+import br.com.wallet.wallet.api.CreateWalletUseCase;
+import br.com.wallet.wallet.api.context.Wallet;
+import br.com.wallet.wallet.api.event.FraudEvent;
 import br.com.wallet.fraud.application.FraudService;
 import br.com.wallet.fraud.domain.FraudDecision;
 import br.com.wallet.fraud.domain.FraudResponse;
 import br.com.wallet.fraud.domain.RuleType;
-import br.com.wallet.fraud.domain.context.FraudContext;
-import br.com.wallet.infrasctructure.persistence.OutboxDao;
+import br.com.wallet.core.context.FraudContext;
+import br.com.wallet.wallet.internal.persistence.OutboxDao;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.IntegrationTestBase;

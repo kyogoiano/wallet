@@ -1,8 +1,8 @@
 package br.com.wallet.support;
 
-import br.com.wallet.domain.LedgerEntry;
-import br.com.wallet.domain.LedgerType;
-import br.com.wallet.infrasctructure.outbox.OutboxStatus;
+import br.com.wallet.wallet.api.domain.LedgerEntry;
+import br.com.wallet.wallet.api.domain.LedgerType;
+import br.com.wallet.wallet.internal.outbox.OutboxStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;

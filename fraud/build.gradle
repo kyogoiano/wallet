@@ -9,6 +9,8 @@ ext {
 
 dependencies {
     implementation project(":core") // Fraud module depends on core for tracing, etc.
+    implementation 'org.springframework.modulith:spring-modulith-starter-core'
+
     implementation("io.lettuce:lettuce-core:${lettuceVersion}")
     implementation("com.github.ben-manes.caffeine:caffeine:${caffeineVersion}")
     implementation("io.github.resilience4j:resilience4j-spring-boot4:${resilience4jVersion}")

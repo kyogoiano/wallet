@@ -1,6 +1,6 @@
 package br.com.wallet.fraud.domain;
 
-import br.com.wallet.fraud.domain.context.FraudContext;
+import br.com.wallet.core.context.FraudContext;
 import org.springframework.stereotype.Component;
 
 import java.util.List;

@@ -1,14 +1,15 @@
 package br.com.wallet.integration.wallet;
 
-import br.com.wallet.application.usecase.CreateWalletUseCase;
-import br.com.wallet.application.usecase.WithdrawFundsUseCase;
-import br.com.wallet.domain.context.Wallet;
-import br.com.wallet.domain.context.Withdraw;
+import br.com.wallet.wallet.api.CreateWalletUseCase;
+import br.com.wallet.wallet.api.WithdrawFundsUseCase;
+import br.com.wallet.wallet.api.context.Wallet;
+import br.com.wallet.wallet.api.context.Withdraw;
 import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
+import br.com.wallet.wallet.api.exceptions.InsufficientFundsException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -71,7 +72,7 @@ public class WithdrawFundsIT extends DockerProperties {
         // when / then
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
                 withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, UUID.randomUUID()))
-        ).isInstanceOf(br.com.wallet.exceptions.InsufficientFundsException.class);
+        ).isInstanceOf(InsufficientFundsException.class);
     }
 
     @Test

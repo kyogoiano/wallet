@@ -4,6 +4,8 @@ group = 'br.com.wallet.core'
 
 dependencies {
     // Tracing dependencies needed by core
+
+    implementation 'org.springframework.modulith:spring-modulith-starter-core'
     implementation 'org.springframework:spring-aspects'
     implementation 'io.micrometer:micrometer-tracing'
     implementation 'org.jspecify:jspecify'

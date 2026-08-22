@@ -8,23 +8,24 @@ This directory contains feature specifications, architectural plans, and task br
 
 Each initiative uses a numeric prefix:
 
-- **Roadmap**: [`ROADMAP.md`](file:///.spec/ROADMAP.md) — 5-Phase Feature Evolution & Capability Architecture
+- **Roadmap**: [`ROADMAP.md`](file:///.spec/ROADMAP.md) — 6-Phase Feature Evolution & Capability Architecture
 - **Specification**: `SPEC-XXX-<name>.md` (e.g. `SPEC-001-wallet-capability-platform.md`)
 - **Architecture Plan**: `PLAN-XXX-<name>.md` (e.g. `PLAN-001-wallet-capability-platform.md`)
 - **Task Tracker**: `TASKS-XXX-<name>.md` (e.g. `TASKS-001-wallet-capability-platform.md`)
+- **Execution Summary**: `summaries/SUMMARY-XXX-<name>.md` (e.g. `summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`)
 
 ---
 
 ## 🗺️ Active Initiatives
 
-| Phase | Spec | Title | Status |
-| :--- | :--- | :--- | :--- |
-| **0.0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟢 Ratified |
-| **0** | [`SPEC-001`](file:///.spec/SPEC-001-wallet-capability-platform.md) | Wallet Modular Capability Platform (Spring Modulith) | 🟡 Draft / Clarification |
-| **1** | `SPEC-002` | Smart Savings & Programmable Money | ⚪ Planned |
-| **2** | `SPEC-003` | Financial Goal & Cashflow Engine | ⚪ Planned |
-| **3** | `SPEC-004` | Subscription & Spending Intelligence | ⚪ Planned |
-| **4** | `SPEC-005` | AI Financial Copilot & MCP Gateway | ⚪ Planned |
+| Phase | Spec | Title | Status | Execution Summary |
+| :--- | :--- | :--- | :--- | :--- |
+| **0.0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟢 Completed | [`SUMMARY-000`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md) |
+| **0** | [`SPEC-001`](file:///.spec/SPEC-001-wallet-capability-platform.md) | Wallet Modular Capability Platform (Spring Modulith) | 🟡 Draft / Clarification | — |
+| **1** | `SPEC-002` | Smart Savings & Programmable Money | ⚪ Planned | — |
+| **2** | `SPEC-003` | Financial Goal & Cashflow Engine | ⚪ Planned | — |
+| **3** | `SPEC-004` | Subscription & Spending Intelligence | ⚪ Planned | — |
+| **4** | `SPEC-005` | AI Financial Copilot & MCP Gateway | ⚪ Planned | — |
 
 ---
 

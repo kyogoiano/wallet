@@ -2,7 +2,7 @@
 
 - **Associated Spec**: [`SPEC-000-architecture-alignment-modulith-baseline.md`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md)
 - **Associated Plan**: [`PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/PLAN-000-architecture-alignment-modulith-baseline.md)
-- **Status**: Not Started
+- **Status**: In Progress / Verification
 - **Author**: Antigravity Financial Architecture Team
 
 ---
@@ -27,14 +27,14 @@
 ## 2. Implementation Tasks
 
 ### Phase 1: Gradle & Modulith Dependencies Setup
-- [ ] `TASK-0.1` Configure Spring Modulith dependencies (`spring-modulith-starter-core`, `spring-modulith-starter-test`, `spring-modulith-docs`) in `build.gradle`.
+- [x] `TASK-0.1` Configure Spring Modulith dependencies (`spring-modulith-starter-core`, `spring-modulith-starter-test`, `spring-modulith-docs`) in `build.gradle`.
 
 ### Phase 2: Core Module Reorganization (`br.com.wallet.core`)
-- [ ] `TASK-0.2` Structure `br.com.wallet.core.api` package:
+- [x] `TASK-0.2` Structure `br.com.wallet.core.api` package:
   - Migrate use case contracts: `TransferFunds`, `DepositFunds`, `WithdrawFunds`, `GetBalance`, `ValidateLedger`, `ReplayWallet`.
   - Migrate published domain events: `MoneyReceivedEvent`, `MoneySentEvent`, `WalletCreatedEvent`.
   - Migrate published projection models: `AccountBalance`, `LedgerValidationResult`.
-- [ ] `TASK-0.3` Structure `br.com.wallet.core.internal` package:
+- [x] `TASK-0.3` Structure `br.com.wallet.core.internal` package:
   - `core.internal.domain`: `Account`, `LedgerEntry`, `LedgerType`, `HashUtil`.
   - `core.internal.service`: `TransferFundsService`, `DepositFundsService`, `WithdrawFundsService`, `BalanceService`, `LedgerService`, `CreateWalletService`, `ReplayWalletService`, `ValidateLedgerService`.
   - `core.internal.persistence`: `AccountDao`, `LedgerDao`, `OutboxDao`.
@@ -42,18 +42,18 @@
   - `core.internal.guard`: `FraudCheckHelper` (interacting with `:fraud`).
 
 ### Phase 3: Infrastructure Adapters Reorganization (`br.com.wallet.infrastructure`)
-- [ ] `TASK-0.4` Fix typo `infrasctructure` $\rightarrow$ `infrastructure`.
-- [ ] `TASK-0.5` Migrate REST adapters into `br.com.wallet.infrastructure.rest`:
+- [x] `TASK-0.4` Fix typo `infrasctructure` $\rightarrow$ `infrastructure`.
+- [x] `TASK-0.5` Migrate REST adapters into `br.com.wallet.infrastructure.rest`:
   - Controllers: `OperationsController`, `WalletController`, `LedgerController`.
   - DTOs, mappers, exception handlers (`RestExceptionHandler`).
   - Ensure controllers strictly inject and call `core.api` interfaces.
-- [ ] `TASK-0.6` Migrate Messaging adapters into `br.com.wallet.infrastructure.messaging`:
+- [x] `TASK-0.6` Migrate Messaging adapters into `br.com.wallet.infrastructure.messaging`:
   - NATS JetStream consumers: `TransferConsumer`, `WithdrawConsumer`, `DepositConsumer`.
   - DLQ handler, command publisher.
   - Configuration: `NatsConfig`, `RedisConfig`, `OpenTelemetryConfiguration`.
 
 ### Phase 4: Verification & Convergence
-- [ ] `TASK-0.7` Implement `ModulithArchitectureTest`:
+- [x] `TASK-0.7` Implement `ModulithArchitectureTest`:
   - Test `verifyArchitecture()` enforcing zero illegal package coupling.
   - Test `writeDocumentation()` generating PlantUML component diagrams.
 - [ ] `TASK-0.8` Run full test suite and verify 100% pass rate:

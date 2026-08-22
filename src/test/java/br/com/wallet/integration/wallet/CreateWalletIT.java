@@ -1,7 +1,7 @@
 package br.com.wallet.integration.wallet;
 
-import br.com.wallet.application.usecase.CreateWalletUseCase;
-import br.com.wallet.domain.context.Wallet;
+import br.com.wallet.wallet.api.CreateWalletUseCase;
+import br.com.wallet.wallet.api.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
 import br.com.wallet.support.DockerProperties;

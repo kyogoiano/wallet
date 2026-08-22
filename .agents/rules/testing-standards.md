@@ -46,3 +46,17 @@ Every financial operation test suite must verify:
 - [ ] **Concurrent Execution**: Race conditions and concurrent transfers do not corrupt balances or cause deadlocks.
 - [ ] **Anti-Fraud Triggers**: Blocked/exceeded thresholds produce `FraudBlockedException` with zero ledger mutation.
 - [ ] **Outbox Relay**: Events are written to `outbox` table and processed asynchronously.
+
+---
+
+## 4. Code Coverage Standards (JaCoCo)
+
+- **Automated Generation**: Every `./gradlew test` automatically triggers `jacocoTestReport`.
+- **Report Location**:
+  - Root: `build/reports/jacoco/test/html/index.html`
+  - Subprojects: `<module>/build/reports/jacoco/test/html/index.html`
+- **Coverage Thresholds**:
+  - Overall project line coverage: $\ge 70\%$
+  - Core domain & ledger services (`br.com.wallet.wallet.internal.service`): $\ge 85\%$
+  - Anti-fraud rules & scoring (`br.com.wallet.fraud.rules`): $\ge 85\%$
+- **Traceability Integration**: All SDD execution summaries ([`.spec/summaries/SUMMARY-XXX.md`](file:///.spec/summaries/)) must record code coverage results.

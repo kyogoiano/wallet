@@ -1,10 +1,10 @@
 package br.com.wallet.integration.wallet;
 
-import br.com.wallet.application.usecase.CreateWalletUseCase;
-import br.com.wallet.application.usecase.TransferFundsUseCase;
-import br.com.wallet.application.usecase.ValidateLedgerUseCase;
-import br.com.wallet.domain.context.Transfer;
-import br.com.wallet.domain.context.Wallet;
+import br.com.wallet.wallet.api.CreateWalletUseCase;
+import br.com.wallet.wallet.api.TransferFundsUseCase;
+import br.com.wallet.wallet.api.ValidateLedgerUseCase;
+import br.com.wallet.wallet.api.context.Transfer;
+import br.com.wallet.wallet.api.context.Wallet;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;

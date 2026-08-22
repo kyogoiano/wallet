@@ -2,7 +2,7 @@ package br.com.wallet.fraud.application;
 
 import br.com.wallet.fraud.domain.FraudEngine;
 import br.com.wallet.fraud.domain.FraudResponse;
-import br.com.wallet.fraud.domain.context.FraudContext;
+import br.com.wallet.core.context.FraudContext;
 import org.springframework.stereotype.Service;
 
 @Service

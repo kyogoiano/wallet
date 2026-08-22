@@ -111,22 +111,22 @@ Before introducing new business capabilities (Smart Savings, Goal Engine, Subscr
 gantt
     title Wallet Service Evolution Roadmap
     dateFormat  YYYY-MM-DD
-    section Phase 0.0: Baseline Refactor
+    section Phase 0: Baseline Refactor
     SPEC-000 Architecture Alignment     :done, p00_1, 2026-08-22, 2d
     TASKS-000 & Modulith Baseline       :active, p00_2, after p00_1, 2d
-    section Phase 0: Platform
+    section Phase 1: Platform
     SPEC-001 Capability Platform SPI    :p0_1, after p00_2, 2d
     PLAN-001 & Architecture Verification:p0_2, after p0_1, 2d
-    section Phase 1: Programmable Money
+    section Phase 2: Programmable Money
     SPEC-002 Smart Savings Module       :p1_1, after p0_2, 3d
     TASKS-002 & TDD Implementation      :p1_2, after p1_1, 4d
-    section Phase 2: Goal Engine
+    section Phase 3: Goal Engine
     SPEC-003 Financial Goal Engine      :p2_1, after p1_2, 3d
     TASKS-003 & Strategy Engine         :p2_2, after p2_1, 4d
-    section Phase 3: Intelligence
+    section Phase 4: Intelligence
     SPEC-004 Subscription & Spend Intel :p3_1, after p2_2, 3d
     TASKS-004 & Pattern Extraction      :p3_2, after p3_1, 4d
-    section Phase 4: AI Copilot & MCP
+    section Phase 5: AI Copilot & MCP
     SPEC-005 MCP Server & AI Copilot    :p4_1, after p3_2, 3d
     TASKS-005 & Tool Protocol Delivery  :p4_2, after p4_1, 5d
 ```

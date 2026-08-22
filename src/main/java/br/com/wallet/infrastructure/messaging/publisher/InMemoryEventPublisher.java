@@ -15,7 +15,7 @@ public class InMemoryEventPublisher implements EventPublisher {
     private static final Logger log = LoggerFactory.getLogger(InMemoryEventPublisher.class);
 
     @Override
-    public void publish(DomainEventType eventType, String payload) throws IOException {
+    public void publish(DomainEventType eventType, String payload) {
         log.info("📤 Publishing event. type={}, payload={}", eventType.name(), payload);
     }
 }

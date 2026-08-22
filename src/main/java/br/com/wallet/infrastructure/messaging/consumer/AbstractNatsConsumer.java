@@ -142,7 +142,8 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
             executorService.shutdown(); // immediate stop due to virtual threads
             log.info("NATS message consumer executor service shut down.");
             try {
-                executorService.awaitTermination(5, TimeUnit.SECONDS);
+                final var finished = executorService.awaitTermination(5, TimeUnit.SECONDS);
+                log.debug("NATS message consumer executor service shut down finished? : {}",  finished);
             } catch (InterruptedException ignored) {
             }
         }

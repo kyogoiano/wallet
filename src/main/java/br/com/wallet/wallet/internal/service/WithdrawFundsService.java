@@ -7,7 +7,6 @@ import br.com.wallet.wallet.api.exceptions.AccountNotFoundException;
 import br.com.wallet.wallet.api.exceptions.UserNotAllowedException;
 import br.com.wallet.wallet.internal.persistence.OutboxDao;
 import br.com.wallet.wallet.internal.persistence.WalletOperationsDao;
-import br.com.wallet.wallet.internal.service.WalletOperationService;
 import br.com.wallet.wallet.api.WithdrawFundsUseCase;
 import br.com.wallet.wallet.internal.utils.Validations;
 import br.com.wallet.wallet.api.domain.LedgerType;

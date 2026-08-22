@@ -15,7 +15,7 @@ public class InstallOpenTelemetryAppender implements InitializingBean {
     }
 
     @Override
-    public void afterPropertiesSet() throws Exception {
+    public void afterPropertiesSet() {
         OpenTelemetryAppender.install(openTelemetry);
     }
 }

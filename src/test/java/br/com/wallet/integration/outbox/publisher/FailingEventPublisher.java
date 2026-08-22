@@ -22,7 +22,7 @@ public class FailingEventPublisher implements EventPublisher {
     }
 
     @Override
-    public void publish(DomainEventType eventType, String payload) throws IOException {
+    public void publish(DomainEventType eventType, String payload) {
 
         if (failCount.getAndDecrement() > 0) {
             throw new RuntimeException("Simulated failure");

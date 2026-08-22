@@ -6,7 +6,6 @@ import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.wallet.internal.operation.OperationStatus;
 import br.com.wallet.wallet.internal.persistence.OutboxDao;
 import br.com.wallet.wallet.internal.persistence.WalletOperationsDao;
-import br.com.wallet.wallet.internal.service.WalletOperationService;
 import br.com.wallet.wallet.api.TransferFundsUseCase;
 import br.com.wallet.wallet.internal.utils.Validations;
 import br.com.wallet.wallet.api.domain.LedgerType;

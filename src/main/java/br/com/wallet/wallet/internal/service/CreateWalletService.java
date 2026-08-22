@@ -1,7 +1,6 @@
 package br.com.wallet.wallet.internal.service;
 
 import br.com.wallet.core.tracing.Traceable;
-import br.com.wallet.wallet.internal.service.WalletOperationService;
 import br.com.wallet.wallet.api.CreateWalletUseCase;
 import br.com.wallet.wallet.api.domain.LedgerType;
 import br.com.wallet.wallet.api.context.Wallet;

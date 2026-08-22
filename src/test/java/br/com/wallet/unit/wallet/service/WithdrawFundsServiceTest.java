@@ -1,6 +1,5 @@
 package br.com.wallet.unit.wallet.service;
 
-import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.wallet.api.context.Withdraw;
 import br.com.wallet.wallet.api.domain.AccountBalance;
 import br.com.wallet.wallet.api.domain.LedgerType;

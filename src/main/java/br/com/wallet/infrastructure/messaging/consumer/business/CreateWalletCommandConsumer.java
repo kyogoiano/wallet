@@ -28,7 +28,7 @@ public class CreateWalletCommandConsumer extends AbstractCommandsConsumer<Wallet
                                        @Autowired final ObjectMapper objectMapper,
                                        @Autowired final CreateWalletUseCase createWalletUseCase,
                                        @Autowired final DlqPublisher dlqPublisher) {
-        super(subject, dlqSubject, natsConnection, objectMapper, createWalletUseCase, dlqPublisher);
+        super(subject, dlqSubject, natsConnection, objectMapper, createWalletUseCase, dlqPublisher, Wallet.class);
     }
 
     @Override

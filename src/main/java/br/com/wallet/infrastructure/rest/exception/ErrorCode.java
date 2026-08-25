@@ -8,7 +8,8 @@ public enum ErrorCode {
     MISSING_HEADER("wallet.missing_header"),
     VALIDATION_ERROR("wallet.validation_error"),
     DUPLICATE_OPERATION("wallet.duplicate_operation"),
-    FRAUD_BLOCKED("wallet.fraud_blocked");
+    FRAUD_BLOCKED("wallet.fraud_blocked"),
+    ACCOUNT_BLOCKED("wallet.account_blocked");
 
     private final String error;
 

@@ -12,7 +12,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
-import java.time.Duration;
 
 @Component
 public class DlqPublisher {
@@ -47,37 +46,5 @@ public class DlqPublisher {
         } catch (Exception ex) {
             log.error("Failed to publish to DLQ", ex);
         }
-    }
-
-    public void replay(@NonNull final Message dlqMessage, @NonNull final Connection connection) {
-
-        dlqMessage.getHeaders().add("replayed", "true");
-        dlqMessage.getHeaders().add("replay_at", clock.instant().toString());
-        final long deliveries = dlqMessage.metaData().deliveredCount();
-
-        final var originalSubject = dlqMessage.getHeaders().getFirst("original_subject");
-
-        final var replayMessage = NatsMessage.builder()
-                .subject(originalSubject)
-                .headers(dlqMessage.getHeaders())
-                .data(dlqMessage.getData())
-                .build();
-
-        try {
-            final JetStream jetStream = connection.jetStream();
-            jetStream.publish(replayMessage);
-        } catch (Exception ex) {
-            log.error("Failed to publish to DLQ", ex);
-            dlqMessage.nakWithDelay(retryDelay(deliveries));
-        }
-    }
-
-    private Duration retryDelay(long deliveries) {
-        return switch ((int) deliveries) {
-            case 1 -> Duration.ofSeconds(1);
-            case 2 -> Duration.ofSeconds(5);
-            case 3 -> Duration.ofSeconds(10);
-            default -> Duration.ofSeconds(30);
-        };
     }
 }

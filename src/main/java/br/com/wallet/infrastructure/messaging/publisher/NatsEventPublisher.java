@@ -1,10 +1,10 @@
 package br.com.wallet.infrastructure.messaging.publisher;
 
+import br.com.wallet.ledger.api.event.DomainEvent;
 import br.com.wallet.ledger.api.event.DomainEventType;
 import br.com.wallet.ledger.api.event.EventPublisher;
 import br.com.wallet.ledger.api.exceptions.EventPublishException;
 import io.nats.client.Connection;
-import io.nats.client.JetStreamApiException;
 import io.nats.client.PublishOptions;
 import io.nats.client.impl.Headers;
 import io.nats.client.impl.NatsMessage;
@@ -15,14 +15,15 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectReader;
+import tools.jackson.databind.ObjectWriter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
-import java.time.Duration;
+import java.util.UUID;
 
 @Component
-@Profile("!test & !in-memory")
+@Profile({"!in-memory", "!fail"})
 public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
 
     private final Logger log = LoggerFactory.getLogger(NatsEventPublisher.class);
@@ -30,29 +31,26 @@ public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
     private final ObjectReader objectReader;
     private final Clock clock;
 
-    public NatsEventPublisher(final Connection connection, final ObjectMapper objectMapper, final Clock clock) throws JetStreamApiException, IOException {
+    public NatsEventPublisher(final Connection connection, final ObjectMapper objectMapper, final Clock clock) {
         this.connection = connection;
         this.objectReader = objectMapper.reader();
         this.clock = clock;
-
-        final var jsm = this.connection.jetStreamManagement();
-        ensureStream(jsm, "events", "events.*", Duration.ofHours(24));
     }
 
     
 
     @Override
-    public void publish(@NonNull final DomainEventType eventType, final @NonNull String payload) throws IOException {
+    public void publish(@NonNull final DomainEventType eventType, final @NonNull String payload, UUID aggregateId) throws IOException {
         final var headers = new Headers();
-        headers.add("type", eventType.name());
+        headers.add("type", eventType.getClazz().getSimpleName());
         headers.add("version", "v1"); // used for future extensions
         headers.add("created_at", clock.instant().toString());
 
         // 🔥 importante para idempotência
         final var eventNode = objectReader.readTree(payload);
+        log.info("Publishing event data: {}", eventNode.toString());
 
-        final var operationId = eventNode.get("operationId").asString();
-        headers.add("Nats-Msg-Id", operationId); // dedup JetStream
+        headers.add("Nats-Msg-Id", aggregateId.toString()); // dedup JetStream
         final var message = NatsMessage.builder()
                 .subject(eventType.getSubject())
                 .headers(headers)

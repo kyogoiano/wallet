@@ -9,6 +9,7 @@ import br.com.wallet.fraud.domain.FraudDecision;
 import br.com.wallet.fraud.domain.FraudResponse;
 import br.com.wallet.fraud.domain.RuleType;
 import br.com.wallet.core.context.FraudContext;
+import br.com.wallet.ledger.internal.persistence.AccountDao;
 import br.com.wallet.ledger.internal.persistence.OutboxDao;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -27,6 +28,8 @@ import java.util.UUID;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.contains;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,6 +39,8 @@ class FraudCheckHelperTest {
     private FraudService fraudService;
     @Mock
     private OutboxDao outboxDao;
+    @Mock
+    private AccountDao accountDao;
     @Mock
     private Clock clock;
 
@@ -49,7 +54,7 @@ class FraudCheckHelperTest {
 
     @BeforeEach
     void setUp() {
-        fraudCheckHelper = new FraudCheckHelper(fraudService, outboxDao, clock);
+        fraudCheckHelper = new FraudCheckHelper(fraudService, outboxDao, accountDao, clock);
         when(clock.instant()).thenReturn(fixedInstant);
     }
 
@@ -113,7 +118,7 @@ class FraudCheckHelperTest {
     }
 
     @Test
-    @DisplayName("Should throw FraudBlockedException when decision is BLOCK")
+    @DisplayName("Should throw FraudBlockedException, persist account block in DB, and sync Redis when decision is BLOCK")
     void shouldThrowFraudBlockedExceptionWhenDecisionIsBlock() {
         // Given
         FraudCheckable operation = mock(FraudCheckable.class);
@@ -133,7 +138,9 @@ class FraudCheckHelperTest {
                 .hasFieldOrPropertyWithValue("userId", sourceUserId);
 
         verify(fraudService).check(any(FraudContext.class));
-        verify(outboxDao).save(any(FraudEvent.class)); // Event should still be saved
+        verify(outboxDao).save(any(FraudEvent.class));
+        verify(accountDao).blockAccountByUserId(eq(sourceUserId), contains("Fraud risk score: 100"));
+        verify(fraudService).blockUser(sourceUserId);
     }
 
     @Test

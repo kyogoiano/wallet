@@ -68,7 +68,7 @@ logging:
     org.springframework.web: INFO
     org.springframework: INFO
     org.hibernate: INFO
-    io.opentelemetry: DEBUG
+    io.opentelemetry: INFO
   pattern:
     level: "%5p [traceId=%X{traceId} spanId=%X{spanId} operationId=%X{operationId}]"
 

@@ -49,21 +49,22 @@ public class DlqOperationsDao {
                     SET status = 'PROCESSING'
                     FROM claimed
                     WHERE d.id = claimed.id
-                    RETURNING d.id, d.operation_id, d.subject, d.status, d.error, d.payload, d.retry_count, d.next_retry_at, d.created_at, d.processed_at, d.failure_type
+                    RETURNING d.id, d.operation_id, d.user_id, d.subject, d.status, d.error, d.payload, d.retry_count, d.next_retry_at, d.created_at, d.processed_at, d.failure_type, d.event_type
         """,
                 (rs, rowNum) -> new DlqEvent(
                         rs.getObject("id", UUID.class),
                         rs.getObject("operation_id", UUID.class),
                         rs.getObject("user_id", UUID.class),
                         rs.getString("subject"),
-                        rs.getObject("status", DlqStatus.class),
+                        DlqStatus.valueOf(rs.getString("status")),
                         rs.getString("error"),
                         rs.getString("payload"),
                         rs.getObject("retry_count", Integer.class),
-                        rs.getObject("next_retry_at", Instant.class),
-                        rs.getObject("created_at", Instant.class),
-                        rs.getObject("processed_at", Instant.class),
-                        rs.getObject("failure_type", DlqFailureType.class)
+                        Objects.isNull(rs.getTimestamp("next_retry_at")) ? null : rs.getTimestamp("next_retry_at").toInstant(),
+                        rs.getTimestamp("created_at").toInstant(),
+                        Objects.isNull(rs.getTimestamp("processed_at")) ? null : rs.getTimestamp("processed_at").toInstant(),
+                        DlqFailureType.valueOf(rs.getString("failure_type")),
+                        rs.getString("event_type")
                 ),
                 now.atOffset(ZoneOffset.UTC),
                 limit
@@ -74,11 +75,11 @@ public class DlqOperationsDao {
         jdbc.update("""
             update dlq_operations
             set retry_count = retry_count + 1,
-                status = 'FAILED'
+                status = 'FAILED',
                 failure_type = ?,
                 next_retry_at = ? + (INTERVAL '1 second' * POWER(2, retry_count +1))
             WHERE id = ?
-        """, failureType, now.atOffset(ZoneOffset.UTC), id);
+        """, failureType.name(), now.atOffset(ZoneOffset.UTC), id);
     }
 
     public void markAsCompleted(@NonNull final UUID id, @NonNull final Instant now) {
@@ -163,13 +164,13 @@ public class DlqOperationsDao {
     }
 
     @Traceable("dlq.insert")
-    public void insert(@NonNull DlqEvent dlqEvent) {
+    public void insert(@NonNull final DlqEvent dlqEvent) {
         jdbc.update("""
                     INSERT INTO dlq_operations (
                         id, operation_id, user_id, subject, status, error, payload,
-                        retry_count, next_retry_at, created_at, processed_at, failure_type
+                        retry_count, next_retry_at, created_at, processed_at, failure_type, event_type
                     )
-                    VALUES (?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
                 """,
                 dlqEvent.id(),
                 dlqEvent.operationId(),
@@ -182,7 +183,8 @@ public class DlqOperationsDao {
                 dlqEvent.nextRetryAt() != null ? dlqEvent.nextRetryAt().atOffset(ZoneOffset.UTC) : null,
                 dlqEvent.createdAt().atOffset(ZoneOffset.UTC),
                 dlqEvent.processedAt() != null ? dlqEvent.processedAt().atOffset(ZoneOffset.UTC) : null,
-                dlqEvent.failureType().name()
+                dlqEvent.failureType().name(),
+                dlqEvent.eventType()
         );
     }
 }

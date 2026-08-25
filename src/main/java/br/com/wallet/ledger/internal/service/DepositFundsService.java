@@ -1,5 +1,7 @@
 package br.com.wallet.ledger.internal.service;
 
+import br.com.wallet.core.exceptions.AccountBlockedException;
+import br.com.wallet.ledger.api.domain.Account;
 import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.ledger.api.context.Deposit;
@@ -15,6 +17,7 @@ import br.com.wallet.ledger.api.event.DepositCompletedEvent;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -28,20 +31,23 @@ public class DepositFundsService implements DepositFundsUseCase {
 
     private final WalletOperationService core;
     private final WalletOperationsDao operationsDao;
-    private final OutboxDao outboxDao;
+    private final OutboxDao<DepositCompletedEvent> outboxDao;
     private final AccountDao accountDao;
     private final Clock clock;
+    private final ApplicationEventPublisher publisher;
 
     public DepositFundsService(final WalletOperationService core,
                                final WalletOperationsDao operationsDao,
-                               final OutboxDao outboxDao,
+                               final OutboxDao<DepositCompletedEvent> outboxDao,
                                final AccountDao accountDao,
-                               final FraudCheckHelper fraudCheckHelper, Clock clock) { // Adjust constructor
+                               final Clock clock,
+                               final ApplicationEventPublisher  publisher) {
         this.core = core;
         this.operationsDao = operationsDao;
         this.outboxDao = outboxDao;
         this.accountDao = accountDao;
         this.clock = clock;
+        this.publisher = publisher;
     }
 
     @Traceable("wallet.deposit")
@@ -54,17 +60,29 @@ public class DepositFundsService implements DepositFundsUseCase {
             throw new IdempotencyException("Operation already processed: " + deposit.operationId());
         }
 
-        // this operation might fail if someone deletes the user account in the meantime, as we not lock it for update
-        final var userId = deposit.userId() != null ? deposit.userId() : accountDao.findUserId(deposit.walletId()).orElseThrow(AccountNotFoundException::new);
+        Account account = accountDao.findAccount(deposit.walletId())
+                .orElseThrow(AccountNotFoundException::new);
+        if (!account.isActive()) {
+            log.warn("Deposit rejected: account is not active. walletId={}, status={}", deposit.walletId(), account.status());
+            throw new AccountBlockedException(deposit.walletId(), account.blockedReason());
+        }
+        final var userId = deposit.userId() != null ? deposit.userId() : account.userId();
 
         // validations
         Validations.validatePositiveAmount(deposit.amount());
 
         this.execute(deposit, userId);
 
-        outboxDao.save(
-                new DepositCompletedEvent(deposit.walletId(), deposit.amount(), deposit.operationId())
+        final var event = new DepositCompletedEvent(
+                deposit.walletId(), deposit.amount(), deposit.operationId(), deposit.origin()
         );
+
+        // internal events handled by spring with transactional warranties so if the infra fails we have failed transaction
+        // but if the listener transaction fails this still conclude
+        publisher.publishEvent(event);
+
+        // external transport events handled by nats
+        outboxDao.save(event);
         operationsDao.completeOperation(deposit.operationId());
     }
 

@@ -1,5 +1,6 @@
 package br.com.wallet.fraud.infrastructure;
 
+import io.lettuce.core.SetArgs;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
@@ -64,5 +65,15 @@ public class RedisUserStore extends AsyncUserCache<Boolean> {
      */
     public boolean isBlocked(@NonNull final UUID userId) {
         return this.getCache().get(userId).join();
+    }
+
+    public void setBlocked(@NonNull final UUID userId, final boolean blocked) {
+        log.info("Setting user blocked status in Redis: userId={}, blocked={}", userId, blocked);
+        if (blocked) {
+            commands.set(userKey(userId, "blocked"), "1", SetArgs.Builder.ex(600));
+        } else {
+            commands.del(userKey(userId, "blocked"));
+        }
+        getCache().put(userId, java.util.concurrent.CompletableFuture.completedFuture(blocked));
     }
 }

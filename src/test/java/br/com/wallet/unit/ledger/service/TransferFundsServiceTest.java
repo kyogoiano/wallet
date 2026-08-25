@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -45,11 +46,15 @@ class TransferFundsServiceTest {
     private AccountDao accountDao;
 
     private final Clock clock = Clock.fixed(Instant.parse("2026-08-22T12:00:00Z"), ZoneId.of("UTC"));
+
+    @Mock
+    private ApplicationEventPublisher publisher;
+
     private TransferFundsService service;
 
     @BeforeEach
     void setUp() {
-        service = new TransferFundsService(core, outboxDao, operationsDao, accountDao, clock);
+        service = new TransferFundsService(core, outboxDao, operationsDao, accountDao, clock, publisher);
     }
 
     @Test
@@ -138,6 +143,26 @@ class TransferFundsServiceTest {
 
         assertThatThrownBy(() -> service.handle(transfer))
                 .isInstanceOf(InsufficientFundsException.class);
+
+        verifyNoInteractions(core);
+    }
+
+    @Test
+    @DisplayName("Should propagate AccountBlockedException when account is BLOCKED (I-ACCOUNT-001)")
+    void shouldPropagateAccountBlockedException() {
+        final UUID fromWallet = UUID.randomUUID();
+        final UUID toWallet = UUID.randomUUID();
+        final UUID opId = UUID.randomUUID();
+        final BigDecimal amount = BigDecimal.valueOf(50.00);
+
+        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId);
+
+        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(accountDao.getBalancesFromWallets(any()))
+                .thenThrow(new br.com.wallet.core.exceptions.AccountBlockedException(fromWallet, "Fraud suspicion"));
+
+        assertThatThrownBy(() -> service.handle(transfer))
+                .isInstanceOf(br.com.wallet.core.exceptions.AccountBlockedException.class);
 
         verifyNoInteractions(core);
     }

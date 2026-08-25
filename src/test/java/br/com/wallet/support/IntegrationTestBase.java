@@ -1,9 +1,12 @@
 package br.com.wallet.support;
 
 
+import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
+import br.com.wallet.ledger.api.event.EventPublisher;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Primary;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.postgresql.PostgreSQLContainer;
@@ -42,13 +45,17 @@ public class IntegrationTestBase {
                 .withInitScript("schema.sql");
     }
 
-    private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.12.6-alpine");
+    private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.14.5-alpine");
 
     // Definimos como static para que ele inicie antes do Contexto do Spring
     public static final GenericContainer<?> NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
-            .withExposedPorts(4222)
-            .withCommand("-js")
-            .waitingFor(Wait.forListeningPort());
+            .withExposedPorts(4222, 8222)
+            .withCommand("-js", "-sd", "/tmp", "--auth", "dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n", "-m", "8222")
+            .waitingFor(
+                    Wait.forHttp("/healthz")
+                            .forPort(8222)
+                            .forStatusCode(200)
+            );
 
     private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:8.6-alpine");
     public static final GenericContainer<?> REDIS = new GenericContainer<>(REDIS_IMAGE).withExposedPorts(6379);
@@ -64,7 +71,11 @@ public class IntegrationTestBase {
         return NATS_CONTAINER;
     }
 
-
+    @Bean
+    @Primary
+    public EventPublisher eventPublisher() {
+        return new FailingEventPublisher();
+    }
 
 
 }

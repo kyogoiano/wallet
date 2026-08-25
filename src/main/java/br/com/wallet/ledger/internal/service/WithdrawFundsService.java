@@ -28,14 +28,14 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
 
     private final WalletOperationService core;
     private final WalletOperationsDao operationsDao;
-    private final OutboxDao outboxDao;
+    private final OutboxDao<WithdrawCompletedEvent> outboxDao;
     private final AccountDao accountDao;
     private final Clock clock;
 
 
     public WithdrawFundsService(final WalletOperationService core,
                                 final WalletOperationsDao operationsDao,
-                                final OutboxDao outboxDao,
+                                final OutboxDao<WithdrawCompletedEvent> outboxDao,
                                 final AccountDao accountDao,
                                 final Clock clock) {
         this.core = core;

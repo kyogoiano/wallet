@@ -53,6 +53,13 @@ public class ApiExceptionHandler {
                 .body(new ApiError(ErrorCode.FRAUD_BLOCKED, ex.getMessage()));
     }
 
+    @ExceptionHandler(br.com.wallet.core.exceptions.AccountBlockedException.class)
+    public ResponseEntity<ApiError> handleAccountBlocked(br.com.wallet.core.exceptions.AccountBlockedException ex) {
+        log.warn("Account blocked: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(new ApiError(ErrorCode.ACCOUNT_BLOCKED, ex.getMessage()));
+    }
+
     @ExceptionHandler(HandlerMethodValidationException.class)
     public ResponseEntity<ApiError> handleMethodValidation(HandlerMethodValidationException ex) {
         log.warn("Method validation error: {}", ex.getMessage());

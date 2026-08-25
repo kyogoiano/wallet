@@ -45,31 +45,33 @@ public class TracingAspect {
         }
 
         // crates a baggage for cross-service propagation
-        try (final BaggageInScope baggage = tracer.createBaggageInScope(OPERATION_ID, operationId)) {
-            if (operationId != null) {
-                span.tag(OPERATION_ID, operationId); // normalized names ( attribute promotion easily observable)
+        if (operationId != null) {
+            span.tag(OPERATION_ID, operationId); // normalized names ( attribute promotion easily observable)
+
+            try (final BaggageInScope baggage = tracer.createBaggageInScope(OPERATION_ID, operationId)) {
+                log.info("Baggage: {}", baggage.get());
+                return pjp.proceed();
+            } catch (IdempotencyException ex) {
+                log.warn("IdempotencyException caught in aspect: {}", ex.getMessage());
+                span.tag("status", "IDEMPOTENT_IGNORE");
+                // Still re-throw so the Controller/Handler can catch it
+                throw ex;
+            } catch (RuntimeException ex) {
+                log.error("RuntimeException caught in aspect: {}", ex.getMessage());
+                span.error(ex);
+                span.tag("status", "FAILED");
+                throw ex;
+            } catch (Throwable ex) {
+                log.error("Throwable caught in aspect: {}", ex.getMessage());
+                span.error(ex);
+                span.tag("status", "FAILED");
+                throw ex;
+            } finally {
+                span.end();
+                log.debug("Aspect finished for: {}", traceable.value());
             }
-
+        } else {
             return pjp.proceed();
-
-        } catch (IdempotencyException ex) {
-            log.warn("IdempotencyException caught in aspect: {}", ex.getMessage());
-            span.tag("status", "IDEMPOTENT_IGNORE");
-            // Still re-throw so the Controller/Handler can catch it
-            throw ex;
-        } catch (RuntimeException ex) {
-            log.error("RuntimeException caught in aspect: {}", ex.getMessage());
-            span.error(ex);
-            span.tag("status", "FAILED");
-            throw ex;
-        } catch (Throwable ex) {
-            log.error("Throwable caught in aspect: {}", ex.getMessage());
-            span.error(ex);
-            span.tag("status", "FAILED");
-            throw ex;
-        } finally {
-            span.end();
-            log.debug("Aspect finished for: {}", traceable.value());
         }
     }
 }

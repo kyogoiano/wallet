@@ -34,13 +34,13 @@ public class OutboxRelay {
 
     private static final Logger log = LoggerFactory.getLogger(OutboxRelay.class);
     private final EventPublisher publisher;
-    private final OutboxDao outboxDao;
+    private final OutboxDao<OutboxEvent> outboxDao;
     private final Clock clock;
     private final JsonUtils jsonUtils;
 
 
     public OutboxRelay(final EventPublisher publisher,
-                       final OutboxDao outboxDao,
+                       final OutboxDao<OutboxEvent> outboxDao,
                        final Clock clock, JsonUtils jsonUtils) {
         this.publisher = publisher;
         this.outboxDao = outboxDao;
@@ -48,7 +48,8 @@ public class OutboxRelay {
         this.jsonUtils = jsonUtils;
     }
 
-    @Scheduled(fixedDelay = 10000)
+
+    @Scheduled(fixedDelayString = "${wallet.outbox.relay.fixed-delay:10000}", initialDelayString = "${wallet.outbox.relay.initial-delay:1000}")
     @Traceable("outbox.process")
     @Transactional
     public void process() {
@@ -63,10 +64,9 @@ public class OutboxRelay {
 
     private void processSingleEvent(@NonNull OutboxEvent event, @NonNull Instant now) {
         try {
-            final var domainEventType = this.resolveDomainEventType(event.eventType());
-            jsonUtils.parseDomainEventPayload(domainEventType, event.payload());
+            jsonUtils.parseDomainEventPayload(event.eventType(), event.payload()); // parser here is only a pre-check
 
-            publisher.publish(domainEventType, event.payload());
+            publisher.publish(event.eventType(), event.payload(), event.aggregateId());
 
             outboxDao.markAsProcessed(event.id(), now);
             log.info("Outbox event marked as processed! id={}, at={}", event.id(), now);

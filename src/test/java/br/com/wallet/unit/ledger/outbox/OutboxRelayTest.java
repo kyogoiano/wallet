@@ -30,7 +30,7 @@ class OutboxRelayTest {
     private EventPublisher publisher;
 
     @Mock
-    private OutboxDao outboxDao;
+    private OutboxDao<?> outboxDao;
 
     @Mock
     private Clock clock;
@@ -49,9 +49,12 @@ class OutboxRelayTest {
 
         var event = new OutboxEvent(
                 UUID.randomUUID(),
-                "TRANSFER_COMPLETED",
+                DomainEventType.TRANSFER_COMPLETED,
                 "{\"foo\":\"bar\"}",
-                0
+                0,
+                UUID.randomUUID(),
+                "type",
+                UUID.randomUUID()
         );
 
         when(outboxDao.claimBatch(now, 100))
@@ -59,7 +62,7 @@ class OutboxRelayTest {
 
         relay.process();
 
-        verify(publisher).publish(eq(DomainEventType.TRANSFER_COMPLETED), anyString());
+        verify(publisher).publish(eq(DomainEventType.TRANSFER_COMPLETED), anyString(), any());
         verify(outboxDao).markAsProcessed(event.id(), now);
         verify(outboxDao, never()).markFailed(any(), any());
     }
@@ -72,9 +75,12 @@ class OutboxRelayTest {
 
         var event = new OutboxEvent(
                 UUID.randomUUID(),
-                "TRANSFER_COMPLETED",
+                DomainEventType.TRANSFER_COMPLETED,
                 "{}",
-                0
+                0,
+                UUID.randomUUID(),
+                "type",
+                UUID.randomUUID()
         );
 
         when(outboxDao.claimBatch(now, 100))
@@ -82,7 +88,7 @@ class OutboxRelayTest {
 
         doThrow(new IOException("boom"))
                 .when(publisher)
-                .publish(any(), any());
+                .publish(any(), any(), any());
 
         relay.process();
 
@@ -98,16 +104,22 @@ class OutboxRelayTest {
 
         var event1 = new OutboxEvent(
                 UUID.randomUUID(),
-                "TRANSFER_COMPLETED",
+                DomainEventType.TRANSFER_COMPLETED,
                 validTransferPayload(),
-                0
+                0,
+                UUID.randomUUID(),
+                "type",
+                UUID.randomUUID()
         );
 
         var event2 = new OutboxEvent(
                 UUID.randomUUID(),
-                "DEPOSIT_COMPLETED",
+                DomainEventType.DEPOSIT_COMPLETED,
                 validDepositPayload(),
-                0
+                0,
+                UUID.randomUUID(),
+                "type",
+                UUID.randomUUID()
         );
 
         when(outboxDao.claimBatch(now, 100))
@@ -115,7 +127,7 @@ class OutboxRelayTest {
 
         doThrow(new RuntimeException())
                 .when(publisher)
-                .publish(eq(DomainEventType.TRANSFER_COMPLETED), any());
+                .publish(eq(DomainEventType.TRANSFER_COMPLETED), any(), any());
 
         relay.process();
 

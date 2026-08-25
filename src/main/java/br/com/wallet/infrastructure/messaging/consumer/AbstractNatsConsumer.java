@@ -80,7 +80,7 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
                 if (messages.isEmpty()) {
                     continue; // keep polling
                 }
-                log.debug("Fetched {} messages from NATS JetStream.", messages.size());
+                log.info("Fetched {} messages from NATS JetStream.", messages.size());
 
                 // bulkhead pattern
                 for (final Message msg : messages) {

@@ -69,7 +69,7 @@ public class DlqReplayEngine {
         headers.add("userId", event.userId() == null ? null : event.userId().toString());
         headers.add("replayed", "true");
         headers.add("replay_count", String.valueOf(event.retryCount()));
-
+        headers.add("type", event.eventType());
         final var message = NatsMessage.builder()
                 .subject(event.subject())
                 .headers(headers)

@@ -13,6 +13,6 @@ public class DatabaseCleaner {
     }
 
     public void clean() {
-        jdbc.execute("TRUNCATE TABLE ledger, accounts, outbox, wallet_operations RESTART IDENTITY CASCADE");
+        jdbc.execute("TRUNCATE TABLE savings_execution_history, savings_rules, savings_plans, ledger, accounts, outbox, wallet_operations RESTART IDENTITY CASCADE");
     }
 }

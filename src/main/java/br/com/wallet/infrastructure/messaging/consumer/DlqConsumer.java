@@ -76,7 +76,8 @@ public class DlqConsumer extends AbstractNatsConsumer {
                 null,
                 Instant.parse(Objects.requireNonNull(headers.getFirst("failed_at"))),
                 null,
-                DlqFailureType.from(headers.getFirst("failure_type"))
+                DlqFailureType.from(headers.getFirst("failure_type")),
+                headers.getFirst("type")
         );
     }
 }

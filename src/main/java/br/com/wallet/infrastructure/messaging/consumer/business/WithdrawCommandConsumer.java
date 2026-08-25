@@ -28,7 +28,7 @@ public class WithdrawCommandConsumer extends AbstractCommandsConsumer<Withdraw> 
                                    @Autowired final ObjectMapper objectMapper,
                                    @Autowired final WithdrawFundsUseCase withdrawFundsUseCase,
                                    @Autowired final DlqPublisher dlqPublisher) {
-        super(subject, dlqSubject, natsConnection, objectMapper, withdrawFundsUseCase, dlqPublisher);
+        super(subject, dlqSubject, natsConnection, objectMapper, withdrawFundsUseCase, dlqPublisher, Withdraw.class);
     }
 
     @Override

@@ -18,7 +18,8 @@ public record DlqEvent(UUID id,
                        Instant nextRetryAt,
                        Instant createdAt,
                        Instant processedAt,
-                       DlqFailureType failureType) implements TraceContext {
+                       DlqFailureType failureType,
+                       String eventType) implements TraceContext {
     @Override
     public UUID operationId() {
         return this.operationId;

@@ -23,25 +23,22 @@ public abstract class AbstractCommandsConsumer <T extends TraceContext> extends 
     private final UseCase<T> useCase;
     private final DlqPublisher dlqPublisher;
     private final String dlqSubject;
+    private final Class<T> commandClass;
 
-    public AbstractCommandsConsumer(String subject, String dlqSubject, Connection natsConnection, ObjectMapper objectMapper, UseCase<T> useCase, DlqPublisher dlqPublisher) {
+    public AbstractCommandsConsumer(String subject, String dlqSubject, Connection natsConnection, ObjectMapper objectMapper, UseCase<T> useCase, DlqPublisher dlqPublisher, Class<T> commandClass) {
         super(subject, natsConnection);
         this.objectMapper = objectMapper;
         this.useCase = useCase;
         this.dlqPublisher = dlqPublisher;
         this.dlqSubject = dlqSubject;
+        this.commandClass = commandClass;
     }
 
     void processMessage(@NonNull final Message message) {
-        final CommandEnvelope<T> envelope;
+        final T command;
         try {
             log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders().toString());
-            envelope = objectMapper.readValue(
-                    message.getData(),
-                    objectMapper.getTypeFactory()
-                            .constructParametricType(CommandEnvelope.class,
-                                    Class.forName("br.com.wallet.core.api.context." + message.getHeaders().getFirst("type")))
-            );
+            command = objectMapper.readValue(message.getData(), commandClass);
         } catch (Exception e) {
             log.error("Poison message detected: subject={}", message.getSubject(), e);
             dlqPublisher.handleDlqMessage(dlqSubject, natsConnection, message, e);
@@ -50,13 +47,13 @@ public abstract class AbstractCommandsConsumer <T extends TraceContext> extends 
         }
 
         final long deliveries = message.metaData().deliveredCount();
-        final var operationId = envelope.operationId();
+        final var operationId = command.operationId();
 
         try {
             log.info("Processing attempt {} for operationId={}", deliveries, operationId);
 
             // 💼 Transactional business logic
-            useCase.handle(envelope.payload());
+            useCase.handle(command);
             message.ack();
 
             log.info("event=processed operationId={} subject={} deliveries={}",

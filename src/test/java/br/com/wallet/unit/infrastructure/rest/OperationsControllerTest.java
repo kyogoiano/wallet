@@ -1,5 +1,6 @@
 package br.com.wallet.unit.infrastructure.rest;
 
+import br.com.wallet.core.context.OperationOrigin;
 import br.com.wallet.ledger.api.context.Deposit;
 import br.com.wallet.ledger.api.context.Withdraw;
 import br.com.wallet.ledger.api.guard.FraudCheckHelper;
@@ -127,8 +128,9 @@ class OperationsControllerTest {
 
         verify(natsCommandPublisher).publishAsync(eq("commands.deposit"), argThat(cmd ->
                 cmd instanceof Deposit(
-                        UUID id, UUID userId, BigDecimal amount, UUID operationId
-                ) && id.equals(walletId) && Objects.requireNonNull(userId).equals(user) && amount.equals(new BigDecimal("100")) && operationId.equals(opId)
+                        UUID id, UUID userId, BigDecimal amount, UUID operationId, OperationOrigin origin
+                ) && id.equals(walletId) && Objects.requireNonNull(userId).equals(user) && amount.equals(new BigDecimal("100"))
+                        && operationId.equals(opId) && origin.equals(OperationOrigin.USER)
         ));
     }
 

@@ -15,6 +15,7 @@ import br.com.wallet.ledger.internal.persistence.AccountDao;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,21 +27,24 @@ public class TransferFundsService implements TransferFundsUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(TransferFundsService.class);
     private final AccountDao accountDao;
-    private final WalletOperationService core;
-    private final OutboxDao outboxDao;
+    private final WalletOperationService operationService;
+    private final OutboxDao<TransferCompletedEvent> outboxDao;
     private final WalletOperationsDao operationsDao;
     private final Clock clock;
+    private final ApplicationEventPublisher publisher;
 
-    public TransferFundsService(final WalletOperationService core,
-                                final OutboxDao outboxDao,
+    public TransferFundsService(final WalletOperationService operationService,
+                                final OutboxDao<TransferCompletedEvent> outboxDao,
                                 final WalletOperationsDao operationsDao,
                                 final AccountDao accountDao,
-                                final Clock clock) {
-        this.core = core;
+                                final Clock clock,
+                                final ApplicationEventPublisher publisher) {
+        this.operationService = operationService;
         this.outboxDao = outboxDao;
         this.operationsDao = operationsDao;
         this.accountDao = accountDao;
         this.clock = clock;
+        this.publisher = publisher;
     }
 
 
@@ -96,10 +100,13 @@ public class TransferFundsService implements TransferFundsUseCase {
         }
 
         this.execute(transfer);
-        outboxDao.save(
-                new TransferCompletedEvent(transfer.from(), transfer.to(), transfer.amount(), transfer.operationId())
-        );
 
+        final TransferCompletedEvent event = new TransferCompletedEvent(
+                transfer.from(), transfer.to(), transfer.amount(), transfer.operationId(), transfer.origin()
+        );
+        publisher.publishEvent(event);
+
+        outboxDao.save(event);
         operationsDao.completeOperation(transfer.operationId());
     }
 
@@ -132,9 +139,9 @@ public class TransferFundsService implements TransferFundsUseCase {
         final var now = clock.instant();
 
         // each child transaction unlock one wallet , first from wallet and then to wallet
-        core.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), fromBalance.userId(), now);
+        operationService.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), fromBalance.userId(), now);
 
-        core.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), toBalance.userId(), now);
+        operationService.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), toBalance.userId(), now);
 
         // 🧾 ledger entries
         log.info("Transfer completed. from={}, to={}, amount={}, operationId={}",

@@ -1,6 +1,7 @@
 package br.com.wallet.ledger.internal.persistence;
 
 import br.com.wallet.ledger.api.event.DomainEvent;
+import br.com.wallet.ledger.api.event.DomainEventType;
 import br.com.wallet.ledger.internal.outbox.OutboxEvent;
 import br.com.wallet.ledger.api.utils.JsonUtils;
 import org.jspecify.annotations.NonNull;
@@ -13,7 +14,7 @@ import java.util.List;
 import java.util.UUID;
 
 @Repository
-public class OutboxDao {
+public class OutboxDao <T extends DomainEvent> {
 
     private final JdbcTemplate jdbc;
     private final JsonUtils jsonUtils;
@@ -23,29 +24,31 @@ public class OutboxDao {
         this.jsonUtils = jsonUtils;
     }
 
-    public void save(@NonNull final DomainEvent event) {
+    public void save(@NonNull final T event) {
         jdbc.update("""
             INSERT INTO outbox (
                 id,
                 aggregate_type,
                 aggregate_id,
                 event_type,
-                payload
+                payload,
+                partition_key
             )
-            VALUES (?, ?, ?, ?, ?::jsonb)
+            VALUES (?, ?, ?, ?, ?::jsonb, ?)
         """,
                 UUID.randomUUID(),
                 event.aggregateType(),
                 event.aggregateId(),
                 event.eventType().name(),
-                jsonUtils.toJson(event)
+                jsonUtils.toJson(event),
+                event.partitionKey()
         );
     }
 
     @NonNull
     public List<OutboxEvent> getOutboxEvents(@NonNull Instant now) {
         return jdbc.query("""
-                    SELECT id, event_type, payload
+                    SELECT id, event_type, payload, retry_count, aggregate_id, aggregate_type, partition_key
                     FROM outbox
                     WHERE status IN ('PENDING', 'FAILED')
                         AND (next_retry_at IS NULL OR next_retry_at <= ?)
@@ -54,9 +57,12 @@ public class OutboxDao {
                     LIMIT 10
                 """, (rs, rowNum) -> new OutboxEvent(
                 rs.getObject("id", UUID.class),
-                rs.getString("event_type"),
+                DomainEventType.valueOf(rs.getString("event_type")),
                 rs.getString("payload"),
-                rs.getObject("retry_count", Integer.class)
+                rs.getObject("retry_count", Integer.class),
+                rs.getObject("aggregate_id", UUID.class),
+                rs.getString("aggregate_type"),
+                rs.getObject("partition_key", UUID.class)
         ), now.atOffset(ZoneOffset.UTC));
     }
 
@@ -76,13 +82,16 @@ public class OutboxDao {
           SET status = 'PROCESSING'
           FROM claimed
           WHERE o.id = claimed.id
-          RETURNING o.id, o.event_type, o.payload, o.retry_count
+          RETURNING o.id, o.event_type, o.payload, o.retry_count, o.aggregate_id, o.aggregate_type, o.partition_key
         """,
                 (rs, rowNum) -> new OutboxEvent(
                         rs.getObject("id", UUID.class),
-                        rs.getString("event_type"),
+                        DomainEventType.valueOf(rs.getString("event_type")),
                         rs.getString("payload"),
-                        rs.getObject("retry_count", Integer.class)
+                        rs.getObject("retry_count", Integer.class),
+                        rs.getObject("aggregate_id", UUID.class),
+                        rs.getString("aggregate_type"),
+                        rs.getObject("partition_key", UUID.class)
                 ),
                 now.atOffset(ZoneOffset.UTC),
                 limit

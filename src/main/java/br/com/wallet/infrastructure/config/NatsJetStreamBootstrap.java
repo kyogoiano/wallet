@@ -25,6 +25,6 @@ public class NatsJetStreamBootstrap implements InitializingBean, JetStreamConfig
         log.info(">>>> Inicializando Streams NATS...");
         ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
         ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
-        ensureStream(jsm, "events", "events.*", Duration.ofDays(7));
+        ensureStream(jsm, "events", "events.>", Duration.ofHours(24));
     }
 }

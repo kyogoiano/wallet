@@ -24,13 +24,13 @@ public class CreateWalletService implements CreateWalletUseCase {
     private static final Logger log = LoggerFactory.getLogger(CreateWalletService.class);
     private final AccountDao accountDao;
     private final WalletOperationsDao walletOperationsDao;
-    private final OutboxDao outboxDao;
+    private final OutboxDao<DepositCompletedEvent> outboxDao;
     private final WalletOperationService core;
     private final Clock clock;
 
     public CreateWalletService(final AccountDao accountDao,
                                final WalletOperationsDao walletOperationsDao,
-                               final OutboxDao outboxDao,
+                               final OutboxDao<DepositCompletedEvent> outboxDao,
                                final WalletOperationService core,
                                final Clock clock) {
         this.accountDao = accountDao;

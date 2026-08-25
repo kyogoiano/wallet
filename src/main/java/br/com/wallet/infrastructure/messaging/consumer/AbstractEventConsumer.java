@@ -11,22 +11,20 @@ import tools.jackson.databind.ObjectMapper;
 public abstract class AbstractEventConsumer<T extends DomainEvent> extends AbstractNatsConsumer {
     private final Logger log = LoggerFactory.getLogger(this.getClass());
     private final ObjectMapper objectMapper;
+    private final Class<T> eventClass;
 
-    public AbstractEventConsumer(String subject, Connection natsConnection, ObjectMapper objectMapper) {
+    public AbstractEventConsumer(String subject, Connection natsConnection, ObjectMapper objectMapper, Class<T> eventClass) {
         super(subject, natsConnection);
         this.objectMapper = objectMapper;
+        this.eventClass = eventClass;
     }
 
     @Override
     void processMessage(@NonNull final Message message) {
         try {
             log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders().toString());
-            final T event = objectMapper.readValue(
-                    message.getData(),
-                    objectMapper.getTypeFactory()
-                            .constructParametricType(DomainEvent.class,
-                                    Class.forName("br.com.wallet.core.api.event." + message.getHeaders().getFirst("type")))
-            );
+
+            final T event = objectMapper.readValue(message.getData(), eventClass);
 
             handle(event);
             message.ack();

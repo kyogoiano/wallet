@@ -1,5 +1,6 @@
 package br.com.wallet.ledger.api.event;
 
+import br.com.wallet.core.context.OperationOrigin;
 import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
@@ -8,23 +9,29 @@ import java.util.UUID;
 
 /**
  * Transfer funds completed event
- * Jackson is useful here to validate event contracts
  * @param from
  * @param to
  * @param amount
  * @param operationId
+ * @param origin
  */
 public record TransferCompletedEvent(
         @NonNull UUID from,
         @NonNull UUID to,
         @NonNull BigDecimal amount,
-        @NonNull UUID operationId
+        @NonNull UUID operationId,
+        @NonNull OperationOrigin origin
 ) implements DomainEvent {
     public TransferCompletedEvent {
         Objects.requireNonNull(from, "from cannot be null");
         Objects.requireNonNull(to, "to cannot be null");
         Objects.requireNonNull(amount, "amount cannot be null");
         Objects.requireNonNull(operationId, "operationId cannot be null");
+        Objects.requireNonNull(origin, "origin cannot be null");
+    }
+
+    public TransferCompletedEvent(@NonNull UUID from, @NonNull UUID to, @NonNull BigDecimal amount, @NonNull UUID operationId) {
+        this(from, to, amount, operationId, OperationOrigin.USER);
     }
 
     @Override
@@ -42,11 +49,6 @@ public record TransferCompletedEvent(
         return "WALLET_OPERATION";
     }
 
-    /**
-     * Partition by source wallet (from) to ensure debit ordering.
-     * Credit side may arrive out of order (acceptable trade-off).
-     * But dual events will increase complexity
-     */
     @Override
     public UUID partitionKey() { return from; }
 
@@ -58,6 +60,7 @@ public record TransferCompletedEvent(
                 ", to=" + to +
                 ", amount=" + amount +
                 ", operationId=" + operationId +
+                ", origin=" + origin +
                 '}';
     }
 }

@@ -109,6 +109,7 @@ dependencies {
 	implementation 'org.springframework.modulith:spring-modulith-starter-core'
 	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
 	testImplementation 'org.springframework.modulith:spring-modulith-docs'
+	implementation 'org.springframework.modulith:spring-modulith-events-api'
 
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'

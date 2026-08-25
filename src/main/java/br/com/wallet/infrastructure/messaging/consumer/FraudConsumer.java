@@ -31,7 +31,7 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
                          @Autowired final ObjectMapper objectMapper,
                          final RedisAsyncCommands<String, String> commands,
                          final FraudProjectionEnricher fraudStateProjectionService) {
-        super(subject, connection, objectMapper);
+        super(subject, connection, objectMapper, FraudEvent.class);
         this.commands = commands;
         this.fraudStateProjectionService = fraudStateProjectionService;
     }
@@ -68,18 +68,22 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
 
             case BLOCK -> fraudStateProjectionService.processBlockEvent(event);
 
-            case ALLOW -> commands.zadd(
-                    "user:" + event.from() + ":tx_timeline",
-                    event.timestamp().toEpochMilli(),
-                    event.operationId()
-            );    // learning: behavioral memory enrichment
+            case ALLOW -> {
+                final String timelineKey = "user:" + event.from() + ":tx_timeline";
+                commands.zadd(
+                        timelineKey,
+                        (double) event.timestamp().toEpochMilli(),
+                        event.operationId().toString()
+                ); // learning: behavioral memory enrichment
+                commands.expire(timelineKey, 86400 * 30);
+            }
 
             default -> {
                 commands.hset(
                     "tx:" + event.operationId(),
                     Map.of(
                             "amount", event.amount().toString(),
-                            "recipient", event.to().toString(),
+                            "recipient", event.to() != null ? event.to().toString() : "",
                             "decision", event.decision().name(),
                             "risk", String.valueOf(event.riskScore())
                     )

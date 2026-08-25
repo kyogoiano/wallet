@@ -115,9 +115,10 @@ class FraudIT extends DockerProperties {
         var body = """
             {
               "walletId": "%s",
+              "userId": "%s",
               "amount": 100
             }
-        """.formatted(from);
+        """.formatted(from, fromUserId);
 
         webTestClient.post()
                 .uri("/operations/deposit")
@@ -146,9 +147,10 @@ class FraudIT extends DockerProperties {
         var body = """
             {
               "walletId": "%s",
+              "userId": "%s",
               "amount": 50
             }
-        """.formatted(from);
+        """.formatted(from, fromUserId);
 
         webTestClient.post()
                 .uri("/operations/withdraw")

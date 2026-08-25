@@ -1,0 +1,645 @@
+Está **muito bom**. O `TASKS-001` agora tem uma sequência de implementação coerente com SDD/TDD e, principalmente, a matriz de rastreabilidade cobre praticamente todos os requisitos e invariantes.
+
+Eu faria uma revisão antes de começar a implementar. Meu veredito seria:
+
+# 🟢 `TASKS-001 — APPROVED WITH MINOR REFINEMENTS`
+
+Não vejo motivo para voltar ao `PLAN-001`. Mas há alguns ajustes que eu faria **antes do primeiro `./gradlew test`**.
+
+---
+
+## 1. O maior ponto: `TASK-1.4` mistura regras de eventos diferentes
+
+Hoje:
+
+```text
+Percentage → Threshold → Round-Up
+```
+
+como ordem global.
+
+Mas, conceitualmente:
+
+```text
+DepositCompletedEvent
+        │
+        ├── Percentage
+        └── Threshold
+
+TransferCompletedEvent
+        │
+        └── Round-Up
+```
+
+Portanto, eu não modelaria o engine como:
+
+```java
+evaluate(allRules, event)
+```
+
+com uma ordem:
+
+```text
+Percentage → Threshold → Round-Up
+```
+
+para todos os eventos.
+
+Eu definiria:
+
+### Deposit flow
+
+```text
+Percentage → Threshold
+```
+
+### Transfer flow
+
+```text
+Round-Up
+```
+
+Então ajustaria o `TASK-1.4` para:
+
+> Deterministic evaluation order SHALL be event-specific:
+>
+> * `DepositCompletedEvent`: Percentage → Threshold
+> * `TransferCompletedEvent`: Round-Up only
+
+Isso evita um `SavingsRuleEngine` excessivamente genérico e cheio de `if`.
+
+---
+
+# 2. `TASK-1.5` precisa vir antes dos testes de integração, mas talvez também antes do listener
+
+A ordem está boa, porém eu separaria a mudança no Ledger como um pequeno **contract task**.
+
+Hoje:
+
+```text
+TASK-1.5
+OperationOrigin
++ DepositCompletedEvent
++ TransferCompletedEvent
++ Transfer context
+```
+
+Esse task altera o contrato público do `ledger`.
+
+Eu criaria:
+
+```text
+TASK-1.5A — Ledger Operation Origin Contract
+```
+
+ou simplesmente dividiria:
+
+```text
+TASK-1.5
+OperationOrigin + context propagation
+
+TASK-1.6
+SavingsExecutionService
+```
+
+A razão é que precisamos garantir:
+
+```text
+HTTP/API command
+       │
+       ▼
+Transfer Context
+       │
+       ▼
+Ledger operation
+       │
+       ▼
+TransferCompletedEvent
+```
+
+com o `origin` preservado.
+
+Eu adicionaria explicitamente um teste:
+
+```java
+TransferOriginPropagationTest
+```
+
+ou equivalente.
+
+Porque o risco não está apenas em:
+
+```java
+event.origin()
+```
+
+existir.
+
+O risco é:
+
+```text
+USER command
+    │
+    ▼
+TransferContext(origin = USER)
+    │
+    ▼
+ledger
+    │
+    ▼
+TransferCompletedEvent(origin = SYSTEM) ❌
+```
+
+Precisamos testar a propagação end-to-end.
+
+---
+
+# 3. O algoritmo de `TASK-1.4` precisa considerar o refresh após Percentage
+
+Este é um ponto sutil.
+
+Se temos:
+
+```text
+Balance = 10,000
+Percentage = 10%
+Threshold = 8,000
+```
+
+O Percentage calcula:
+
+```text
+Sweep = 1,000
+```
+
+Mas, depois que esse sweep é executado, o Threshold não deveria continuar assumindo:
+
+```text
+Balance = 10,000
+```
+
+senão:
+
+```text
+Percentage → 1,000
+Threshold → 2,000
+```
+
+resultaria em:
+
+```text
+Total = 3,000
+```
+
+quando o saldo após Percentage seria `9,000`.
+
+Por isso precisamos definir onde acontece a composição.
+
+Minha recomendação:
+
+### O Rule Engine calcula intenções, não executa
+
+```text
+Current Balance
+      │
+      ▼
+Percentage Calculation
+      │
+      ▼
+Projected Balance
+      │
+      ▼
+Threshold Calculation
+```
+
+Exemplo:
+
+```text
+Initial balance = 10,000
+Min retained = 0
+
+Percentage sweep = 1,000
+Projected balance = 9,000
+
+Threshold = 8,000
+Threshold sweep = 1,000
+
+Total intended sweep = 2,000
+```
+
+Ou seja:
+
+```java
+projectedBalance =
+    currentBalance.subtract(percentageSweep);
+
+thresholdSweep =
+    thresholdCalculator.calculate(
+        projectedBalance,
+        threshold
+    );
+```
+
+Isso mantém o cálculo determinístico sem exigir que o Savings execute uma transferência antes de calcular a próxima.
+
+Eu deixaria isso explícito no `TASK-1.4`.
+
+---
+
+# 4. Atenção: uma única transferência ou várias?
+
+Depois do item acima, precisamos decidir.
+
+Se Percentage e Threshold produzem:
+
+```text
+Percentage = R$ 1.000
+Threshold  = R$ 1.000
+```
+
+fazemos:
+
+### Opção A
+
+```text
+Transfer 1 → R$ 1.000
+Transfer 2 → R$ 1.000
+```
+
+### Opção B
+
+```text
+Transfer → R$ 2.000
+```
+
+Para V1, eu escolheria **Opção A**.
+
+Porque cada regra possui:
+
+```text
+ruleId
+sourceOperationId
+deterministic operationId
+execution history
+```
+
+Então:
+
+```text
+sourceOp + ruleA
+```
+
+é uma execução.
+
+```text
+sourceOp + ruleB
+```
+
+é outra.
+
+Isso melhora:
+
+* auditabilidade;
+* idempotência;
+* métricas por regra;
+* debugging;
+* retries independentes.
+
+---
+
+# 5. `TASK-1.6`: cuidado com `InsufficientFundsException`
+
+Concordo que:
+
+```text
+InsufficientFundsException
+FraudBlockedException
+```
+
+devem ser tratadas.
+
+Mas eu não colocaria essas duas classes diretamente como a única estratégia.
+
+O ideal seria classificar o resultado:
+
+```java
+public enum SavingsExecutionStatus {
+
+    EXECUTED,
+
+    SKIPPED_INSUFFICIENT_FUNDS,
+
+    REJECTED_BY_FRAUD,
+
+    FAILED_RETRYABLE,
+
+    FAILED_PERMANENT
+}
+```
+
+Então o serviço:
+
+```text
+TransferFundsUseCase
+       │
+       ├── success
+       │      ↓
+       │   EXECUTED
+       │
+       ├── known business rejection
+       │      ↓
+       │   SKIPPED / REJECTED
+       │
+       └── infrastructure failure
+              ↓
+          retryable?
+```
+
+Isso vai casar muito bem com a `savings_execution_history`.
+
+Eu adicionaria isso ao `TASK-1.6`.
+
+---
+
+# 6. `SavingsExecutionHistory` deveria ajudar na deduplicação
+
+Hoje ela aparece como audit/history.
+
+Mas temos uma oportunidade muito boa.
+
+Eu faria:
+
+```text
+UNIQUE (
+    source_operation_id,
+    rule_id
+)
+```
+
+ou:
+
+```text
+UNIQUE (
+    savings_operation_id
+)
+```
+
+Idealmente:
+
+```text
+savings_operation_id UNIQUE
+```
+
+Assim temos duas camadas:
+
+```text
+Layer 1
+Savings execution history
+       │
+       └── prevents duplicate processing
+
+Layer 2
+Ledger operation_id
+       │
+       └── financial idempotency
+```
+
+Isso é especialmente útil se:
+
+```text
+ApplicationModuleListener
+       │
+       ├── executes sweep
+       │
+       ├── process crashes
+       │
+       └── event retries
+```
+
+O Ledger continua protegido, mas o Savings também mantém um lifecycle explícito.
+
+Eu colocaria isso no:
+
+```text
+TASK-1.7
+```
+
+---
+
+# 7. Eu moveria `TASK-1.10` um pouco para frente
+
+Hoje:
+
+```text
+Phase 4
+TASK-1.10
+```
+
+Mas a arquitetura deveria falhar **antes de termos implementado tudo**.
+
+Eu faria:
+
+```text
+Phase 0 — Module Skeleton
+```
+
+```text
+TASK-1.0
+Create br.com.wallet.savings module skeleton
+```
+
+Incluindo:
+
+```text
+package-info.java
+@NamedInterface("api")
+ModulithArchitectureTest
+```
+
+E já verificar:
+
+```bash
+./gradlew test --tests ModulithArchitectureTest
+```
+
+Depois:
+
+```text
+TASK-1.1
+RoundUp
+
+TASK-1.2
+Percentage
+
+...
+```
+
+Isso é muito mais alinhado com TDD arquitetural.
+
+---
+
+# Minha sequência recomendada
+
+Eu reorganizaria levemente:
+
+## Phase 0 — Architectural Skeleton
+
+```text
+TASK-1.0
+Savings Modulith boundary
+```
+
+## Phase 1 — Ledger Contract Extension
+
+```text
+TASK-1.1
+OperationOrigin propagation
+```
+
+## Phase 2 — Pure Domain Logic
+
+```text
+TASK-1.2
+RoundUpCalculator
+
+TASK-1.3
+PercentageCalculator
+
+TASK-1.4
+ThresholdCalculator
+
+TASK-1.5
+SavingsRuleEngine
+```
+
+## Phase 3 — Persistence
+
+```text
+TASK-1.6
+Schema + DAOs
+```
+
+## Phase 4 — Execution
+
+```text
+TASK-1.7
+SavingsExecutionService
+```
+
+## Phase 5 — Event Integration
+
+```text
+TASK-1.8
+SavingsEventListener
+```
+
+## Phase 6 — Public API
+
+```text
+TASK-1.9
+SavingsPlanService
+
+TASK-1.10
+SavingsQueryService
+```
+
+## Phase 7 — Integration & Convergence
+
+```text
+TASK-1.11
+SavingsScenarioIT
+
+TASK-1.12
+Coverage + Summary
+```
+
+---
+
+# Um detalhe sobre `allowedDependencies`
+
+Você colocou:
+
+```java
+allowedDependencies = {
+    "ledger::api",
+    "core::api",
+    "core"
+}
+```
+
+Eu ainda tentaria reduzir para:
+
+```java
+allowedDependencies = {
+    "ledger::api"
+}
+```
+
+E só adicionaria `core` se o Modulith exigir por causa da estrutura atual.
+
+E o core é um shared foundation, lembrando que ainda não temos um core::api
+
+A regra deveria ser:
+
+> **Comece negando. Abra apenas quando um caso concreto exigir.**
+
+Não permitiria `ledger` inteiro.
+
+---
+
+## Minha conclusão
+
+O `TASKS-001` está **bom o suficiente para começar**, mas eu faria esses ajustes antes:
+
+### Obrigatórios
+
+1. separar a ordem das regras por tipo de evento;
+2. testar propagação real de `OperationOrigin`;
+3. definir a semântica do saldo projetado entre Percentage e Threshold;
+4. definir o lifecycle/status da `SavingsExecution`;
+5. adicionar unicidade/deduplicação em `SavingsExecutionHistory`;
+6. criar o boundary Modulith logo no início.
+
+### Opcionais, mas recomendados
+
+7. dividir `SavingsPlanService` e `SavingsQueryService` em tasks separadas;
+8. usar duas transferências independentes quando múltiplas regras forem aplicáveis.
+
+Com esses refinamentos, o fluxo fica muito sólido:
+
+```text
+                 ARCHITECTURE
+                      │
+                      ▼
+              Modulith Boundary
+                      │
+                      ▼
+                LEDGER CONTRACT
+              OperationOrigin
+                      │
+                      ▼
+               PURE CALCULATORS
+                      │
+                      ▼
+               RULE EVALUATION
+                      │
+                      ▼
+                 PERSISTENCE
+                      │
+                      ▼
+                 EXECUTION
+                      │
+                      ▼
+                   EVENTS
+                      │
+                      ▼
+                PUBLIC API
+                      │
+                      ▼
+                INTEGRATION
+                      │
+                      ▼
+                  CONVERGE
+```
+
+**Eu aprovaria o Gate 3 após esses pequenos ajustes e partiria para a implementação TDD.**

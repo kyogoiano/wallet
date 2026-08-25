@@ -37,7 +37,7 @@ public class NatsCommandPublisher implements JetStreamConfig {
                                 final ObjectMapper objectMapper)
             throws IOException, JetStreamApiException {
         this.connection = connection;
-        this.commandWriter = objectMapper.writerFor(CommandEnvelope.class);
+        this.commandWriter = objectMapper.writer();
 
         final var jsm = this.connection.jetStreamManagement();
         ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
@@ -59,7 +59,7 @@ public class NatsCommandPublisher implements JetStreamConfig {
                     command
             );
 
-            final var payload = commandWriter.writeValueAsBytes(envelope);
+            final var payload = commandWriter.writeValueAsBytes(command);
 
             final var headers = new Headers();
             headers.add("operation_id", operationId.toString());

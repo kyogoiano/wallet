@@ -28,7 +28,7 @@ public class DepositCommandConsumer extends AbstractCommandsConsumer<Deposit> {
                                   @Autowired final ObjectMapper objectMapper,
                                   @Autowired final DepositFundsUseCase depositFundsUseCase,
                                   @Autowired final DlqPublisher dlqPublisher) {
-        super(subject, dlqSubject, natsConnection, objectMapper, depositFundsUseCase, dlqPublisher);
+        super(subject, dlqSubject, natsConnection, objectMapper, depositFundsUseCase, dlqPublisher, Deposit.class);
     }
 
     @Override

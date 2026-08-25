@@ -147,7 +147,7 @@ gantt
 
 ### 🔹 Phase 1: Smart Savings & Programmable Money
 **Spec Identifier**: [`SPEC-001-smart-savings-automation`](file:///.spec/SPEC-001-smart-savings-automation.md)  
-**Status**: 🟡 **Ready for Planning**  
+**Status**: 🟢 **Completed & Verified**  
 **Core Abstraction**: `Savings Plan & Rules (br.com.wallet.savings)`
 
 - **Intent**: First production business capability module reacting to `DepositCompletedEvent` and `TransferCompletedEvent` to trigger automated, deterministic savings actions via `ledger.api.TransferFundsUseCase`.
@@ -156,9 +156,30 @@ gantt
   - **Fixed Percentage Rule**: Automatic allocation of $X\%$ on incoming deposits.
   - **Balance Ceiling Sweep**: Automatic sweeping of funds exceeding target liquidity limits.
 - **Spec Kit Artifacts**:
-  - [`.spec/SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md)
-  - [`.spec/PLAN-001-smart-savings-automation.md`](file:///.spec/PLAN-001-smart-savings-automation.md) (Next)
-  - [`.spec/TASKS-001-smart-savings-automation.md`](file:///.spec/TASKS-001-smart-savings-automation.md)
+  - [`.spec/SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md) (Ratified)
+  - [`.spec/PLAN-001-smart-savings-automation.md`](file:///.spec/PLAN-001-smart-savings-automation.md) (Approved)
+  - [`.spec/TASKS-001-smart-savings-automation.md`](file:///.spec/TASKS-001-smart-savings-automation.md) (Completed)
+  - [`.spec/summaries/SUMMARY-001-smart-savings-automation.md`](file:///.spec/summaries/SUMMARY-001-smart-savings-automation.md) (Verified)
+
+---
+
+### 🔹 Phase 1.1: Account Lifecycle State & Persistent Fraud Blocking
+**Spec Identifier**: [`SPEC-001.1-account-lifecycle-state-and-fraud-blocking`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Account Lifecycle & Dual-Store Sync (ledger.api / fraud)`
+
+- **Intent**: Close the architectural gap where fraud detection decisions only rejected transient operations without mutating the underlying account state in PostgreSQL.
+- **Capabilities Included**:
+  - **Account Status**: `ACTIVE`, `BLOCKED`, `SUSPENDED`, `FROZEN` on `accounts` table.
+  - **AccountBlockedException**: Shared foundation exception in `core.exceptions`.
+  - **Pre-Execution Gate**: Mandatory status check during `SELECT FOR UPDATE` queries.
+  - **Dual-Store Sync**: Automated PostgreSQL $\leftrightarrow$ Redis user block state synchronization.
+  - **Administrative Management**: `AccountStateUseCase` (`blockAccount`, `unblockAccount`, `getAccountStatus`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md) (Ratified)
+  - [`.spec/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md) (Approved)
+  - [`.spec/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md) (Completed)
+  - [`.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md) (Verified)
 
 ---
 

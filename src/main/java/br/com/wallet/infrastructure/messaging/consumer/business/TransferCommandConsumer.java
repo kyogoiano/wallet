@@ -28,7 +28,7 @@ public class TransferCommandConsumer extends AbstractCommandsConsumer<Transfer> 
                                    @Autowired final ObjectMapper objectMapper,
                                    @Autowired final TransferFundsUseCase transferUseCase,
                                    @Autowired final DlqPublisher dlqPublisher) {
-        super(subject, dlqSubject, natsConnection, objectMapper, transferUseCase, dlqPublisher);
+        super(subject, dlqSubject, natsConnection, objectMapper, transferUseCase, dlqPublisher, Transfer.class);
     }
 
     @Override

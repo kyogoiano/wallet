@@ -37,34 +37,35 @@ When implementing capability logic, map every action to one of the 5 categories:
 
 ### ❌ Strictly Forbidden Patterns (Fails Modulith Verification)
 ```java
-// VIOLATION: Accessing core.internal from an application module
-import br.com.wallet.core.internal.ledger.LedgerRepository;
+// VIOLATION: Accessing ledger.internal from an application module
+import br.com.wallet.ledger.internal.persistence.AccountDao;
 
 @Service
 public class BadSavingsService {
     @Autowired
-    private LedgerRepository ledgerRepository; // FORBIDDEN!
+    private AccountDao accountDao; // FORBIDDEN!
 }
 ```
 
 ### ✅ Standard Compliant Pattern
 ```java
-// COMPLIANT: Calling core.api interface
+// COMPLIANT: Calling ledger.api interface
 package br.com.wallet.savings;
 
-import br.com.wallet.core.api.TransferFunds;
-import br.com.wallet.core.api.TransferCommand;
+import br.com.wallet.ledger.api.TransferFundsUseCase;
+import br.com.wallet.ledger.api.context.Transfer;
+import br.com.wallet.core.context.OperationOrigin;
 
 @Service
 public class SavingsService {
-    private final TransferFunds transferFunds;
+    private final TransferFundsUseCase transferFundsUseCase;
 
-    public SavingsService(TransferFunds transferFunds) {
-        this.transferFunds = transferFunds;
+    public SavingsService(TransferFundsUseCase transferFundsUseCase) {
+        this.transferFundsUseCase = transferFundsUseCase;
     }
 
-    public void applySavingsSweep(UUID from, UUID toSavings, BigDecimal amount, String opId) {
-        transferFunds.execute(new TransferCommand(from, toSavings, amount, opId));
+    public void applySavingsSweep(UUID from, UUID toSavings, BigDecimal amount, UUID opId) {
+        transferFundsUseCase.handle(new Transfer(opId, from, toSavings, amount, OperationOrigin.SAVINGS_AUTOMATION));
     }
 }
 ```
@@ -74,23 +75,25 @@ public class SavingsService {
 ## 5. Event Observation Pattern
 
 ```java
-package br.com.wallet.savings;
+package br.com.wallet.savings.internal.listener;
 
 import org.springframework.modulith.events.ApplicationModuleListener;
-import br.com.wallet.core.api.WalletEvents.MoneyReceivedEvent;
+import br.com.wallet.ledger.api.event.DepositCompletedEvent;
+import br.com.wallet.core.context.OperationOrigin;
 
 @Component
 public class SavingsEventListener {
 
-    private final SavingsService savingsService;
+    private final SavingsExecutionService savingsExecutionService;
 
-    public SavingsEventListener(SavingsService savingsService) {
-        this.savingsService = savingsService;
+    public SavingsEventListener(SavingsExecutionService savingsExecutionService) {
+        this.savingsExecutionService = savingsExecutionService;
     }
 
     @ApplicationModuleListener
-    public void onMoneyReceived(MoneyReceivedEvent event) {
-        savingsService.processDeposit(event);
+    public void onDeposit(DepositCompletedEvent event) {
+        if (event.origin() != OperationOrigin.USER) return;
+        savingsExecutionService.processDeposit(event);
     }
 }
 ```

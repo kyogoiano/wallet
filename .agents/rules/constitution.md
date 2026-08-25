@@ -18,6 +18,7 @@ These core invariants and architectural principles are **non-negotiable** and mu
 - **`I-BALANCE-001` (Strong Mathematical Consistency)**: The balance stored in `accounts` is a projection. It must always equal the aggregate sum of all credit and debit ledger entries for that wallet:
   $$\text{Balance}(\text{walletId}) = \sum \text{Credits} - \sum \text{Debits}$$
 - **`I-BALANCE-002` (Non-Negative Balances)**: An account balance can never drop below zero unless overdraft protection is explicitly defined. Withdrawals and transfer debits must be rejected if funds are insufficient.
+- **`I-ACCOUNT-001` (Account Lifecycle Gate)**: Any monetary operation (`Transfer`, `Deposit`, `Withdraw`, `Savings Sweep`) involving a participating account whose status is not `ACTIVE` (e.g. `BLOCKED`, `SUSPENDED`, `FROZEN`) MUST be rejected immediately with `AccountBlockedException`.
 - **`I-ATOMICITY-001` (Single Transaction Boundary)**: All mutations involving account balances, ledger entries, and outbox events must execute inside a single atomic database transaction (`SELECT FOR UPDATE` on participating accounts).
 
 ---

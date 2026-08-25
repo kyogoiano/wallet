@@ -1,6 +1,6 @@
 # 📋 Specification: SPEC-001 — Smart Savings Automation (br.com.wallet.savings)
 
-- **Status**: Ratified / Approved (Gate 1 Passed)
+- **Status**: Completed / Verified
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-22
 - **Target Release / Milestone**: Wallet Service V4 — Phase 1 (First Business Capability Module)
@@ -246,11 +246,11 @@ public class SavingsEventListener {
 
 ## 10. Acceptance Criteria
 
-- [ ] `br.com.wallet.savings` created with `package-info.java` defining allowed dependencies on `ledger::api` and `core::api`.
-- [ ] `SavingsPlanUseCase` and `SavingsQueryUseCase` exposed under `savings.api`.
-- [ ] `OperationOrigin` enum introduced and integrated into event evaluation.
-- [ ] Round-Up, Percentage, and Threshold calculators implemented with `HALF_EVEN` monetary rounding.
-- [ ] Liquidity intent protection and ordered rule evaluation implemented (`REQ-SAV-009`).
-- [ ] Non-re-entrant loop prevention (`I-SAVINGS-001`) verified with unit and integration tests.
-- [ ] `ModulithArchitectureTest.verifyArchitecture()` passes with 0 violations.
-- [ ] JaCoCo test coverage meets $\ge 85\%$ for `savings` domain and rule engine.
+- [x] `br.com.wallet.savings` created with `package-info.java` defining allowed dependencies on `ledger::api` and `core::api`.
+- [x] `SavingsPlanUseCase` and `SavingsQueryUseCase` exposed under `savings.api`.
+- [x] `OperationOrigin` enum introduced and integrated into event evaluation.
+- [x] Round-Up, Percentage, and Threshold calculators implemented with `HALF_EVEN` monetary rounding.
+- [x] Liquidity intent protection and ordered rule evaluation implemented (`REQ-SAV-009`).
+- [x] Non-re-entrant loop prevention (`I-SAVINGS-001`) verified with unit and integration tests.
+- [x] `ModulithArchitectureTest.verifyArchitecture()` passes with 0 violations.
+- [x] JaCoCo test coverage meets $\ge 85\%$ for `savings` domain and rule engine.

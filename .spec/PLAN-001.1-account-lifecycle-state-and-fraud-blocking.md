@@ -1,7 +1,7 @@
 # 🏗️ Architecture Plan: PLAN-001.1 — Account Lifecycle State & Persistent Fraud Blocking Engine
 
 - **Associated Spec**: [`SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md)
-- **Status**: Draft / Approved (Gate 2 Passed)
+- **Status**: Approved / Implemented
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-23
 - **Modules Involved**: `:core`, `:fraud`, `br.com.wallet.ledger`, `br.com.wallet.infrastructure`

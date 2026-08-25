@@ -29,23 +29,23 @@
 ### Phase 1: Gradle & Modulith Dependencies Setup
 - [x] `TASK-0.1` Configure Spring Modulith dependencies (`spring-modulith-starter-core`, `spring-modulith-starter-test`, `spring-modulith-docs`) and JaCoCo in `build.gradle`.
 
-### Phase 2: Core Domain Module Reorganization (`br.com.wallet.wallet`)
-- [x] `TASK-0.2` Structure `br.com.wallet.wallet.api` package:
+### Phase 2: Core Domain Module Reorganization (`br.com.wallet.ledger`)
+- [x] `TASK-0.2` Structure `br.com.wallet.ledger.api` package:
   - Migrate use case contracts: `TransferFundsUseCase`, `DepositFundsUseCase`, `WithdrawFundsUseCase`, `BalanceUseCase`, `ValidateLedgerUseCase`, `ReplayWalletUseCase`, `CreateWalletUseCase`.
   - Migrate published domain events: `TransferCompletedEvent`, `DepositCompletedEvent`, `WithdrawCompletedEvent`, `FraudEvent`, `EventPublisher`.
   - Migrate published models & guards: `AccountBalance`, `LedgerValidationResult`, `FraudCheckHelper`, `CommandEnvelope`.
-- [x] `TASK-0.3` Structure `br.com.wallet.wallet.internal` package:
-  - `wallet.internal.service`: `TransferFundsService`, `DepositFundsService`, `WithdrawFundsService`, `BalanceService`, `LedgerService`, `CreateWalletService`, `ReplayWalletService`, `ValidateLedgerService`.
-  - `wallet.internal.persistence`: `AccountDao`, `LedgerDao`, `OutboxDao`, `WalletOperationsDao`.
-  - `wallet.internal.outbox`: `OutboxRelay`, `OutboxEvent`, `OutboxStatus`.
-  - `wallet.internal.operation`: `Operation`, `OperationStatus`.
+- [x] `TASK-0.3` Structure `br.com.wallet.ledger.internal` package:
+  - `ledger.internal.service`: `TransferFundsService`, `DepositFundsService`, `WithdrawFundsService`, `BalanceService`, `LedgerService`, `CreateWalletService`, `ReplayWalletService`, `ValidateLedgerService`.
+  - `ledger.internal.persistence`: `AccountDao`, `LedgerDao`, `OutboxDao`, `WalletOperationsDao`.
+  - `ledger.internal.outbox`: `OutboxRelay`, `OutboxEvent`, `OutboxStatus`.
+  - `ledger.internal.operation`: `Operation`, `OperationStatus`.
 
 ### Phase 3: Infrastructure Adapters Reorganization (`br.com.wallet.infrastructure`)
 - [x] `TASK-0.4` Fix typo `infrasctructure` $\rightarrow$ `infrastructure`.
 - [x] `TASK-0.5` Migrate REST adapters into `br.com.wallet.infrastructure.rest`:
   - Controllers: `OperationsController`, `WalletController`.
   - DTOs, mappers, exception handlers (`ApiExceptionHandler`).
-  - Ensure controllers strictly inject and call `wallet.api` interfaces.
+  - Ensure controllers strictly inject and call `ledger.api` interfaces.
 - [x] `TASK-0.6` Migrate Messaging adapters into `br.com.wallet.infrastructure.messaging`:
   - NATS JetStream consumers: `TransferCommandConsumer`, `WithdrawCommandConsumer`, `DepositCommandConsumer`, `CreateWalletCommandConsumer`.
   - DLQ persistence (`DlqOperationsDao`), publisher, enrichers.
@@ -56,7 +56,7 @@
   - Test `verifyArchitecture()` enforcing zero illegal package coupling.
   - Test `generateDocumentation()` generating PlantUML component diagrams.
 - [x] `TASK-0.8` Author isolated unit tests and run full test suite with JaCoCo:
-  - Unit tests across `wallet` services, `fraud` rules, and `infrastructure`.
+  - Unit tests across `ledger` services, `fraud` rules, and `infrastructure`.
   - Testcontainers integration tests (PostgreSQL, Redis, NATS).
 - [x] `TASK-0.9` Generate SDD Execution Summary in `.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`.
 

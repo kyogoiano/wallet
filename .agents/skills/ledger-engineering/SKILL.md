@@ -46,15 +46,16 @@ $$\text{hash} = \text{SHA256}(\text{previous\_hash} + \text{wallet\_id} + \text{
 ---
 
 ## 4. Atomic Double-Entry Transfers
-
+ 
 Transfers between two wallets (Wallet A $\rightarrow$ Wallet B) must:
 1. Lock both wallets in alphabetical UUID order (`SELECT ... FOR UPDATE`).
-2. Verify Wallet A has $\text{Balance}(A) \ge \text{amount}$.
-3. Deduct from `accounts` for A and add to `accounts` for B.
-4. Insert `DEBIT` entry on ledger for A with next sequence and chained hash.
-5. Insert `CREDIT` entry on ledger for B with next sequence and chained hash.
-6. Insert domain event into `outbox`.
-7. Commit in a single transaction.
+2. Verify both accounts have `status == AccountStatus.ACTIVE` (throw `AccountBlockedException` if `BLOCKED`, `SUSPENDED`, or `FROZEN`, per `I-ACCOUNT-001`).
+3. Verify Wallet A has $\text{Balance}(A) \ge \text{amount}$ (throw `InsufficientFundsException` if negative, per `I-BALANCE-002`).
+4. Deduct from `accounts` for A and add to `accounts` for B.
+5. Insert `DEBIT` entry on ledger for A with next sequence and chained hash.
+6. Insert `CREDIT` entry on ledger for B with next sequence and chained hash.
+7. Insert domain event into `outbox`.
+8. Commit in a single atomic database transaction (`I-ATOMICITY-001`).
 
 ---
 

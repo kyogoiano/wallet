@@ -44,11 +44,13 @@ flowchart LR
 ### Rules ([`.agents/rules/`](file:///.agents/rules/))
 - [`constitution.md`](file:///.agents/rules/constitution.md) — Absolute financial invariants & core non-negotiable rules.
 - [`project-context.md`](file:///.agents/rules/project-context.md) — Architecture overview, tech stack, and module boundaries.
+- [`capability-boundaries.md`](file:///.agents/rules/capability-boundaries.md) — Architectural mantra, Spring Modulith boundaries, and capability rules.
 - [`coding-standards.md`](file:///.agents/rules/coding-standards.md) — Modern Java 26 patterns, immutability, zero boilerplate.
 - [`testing-standards.md`](file:///.agents/rules/testing-standards.md) — TDD methodology, Testcontainers, resilience, and ledger validation.
 
 ### Skills ([`.agents/skills/`](file:///.agents/skills/))
 - [`spec-driven-development`](file:///.agents/skills/spec-driven-development/SKILL.md) — Spec Kit orchestration, templates, and verification.
+- [`capability-driven-development`](file:///.agents/skills/capability-driven-development/SKILL.md) — Spring Modulith capability building, action lifecycle, and boundaries.
 - [`ledger-engineering`](file:///.agents/skills/ledger-engineering/SKILL.md) — Hash-chained tamper detection, atomic transfers, ledger reconstruction.
 - [`antifraud-engineering`](file:///.agents/skills/antifraud-engineering/SKILL.md) — Multi-tier fraud detection, sliding windows, Lua scripts, Caffeine/Redis caching.
 - [`outbox-messaging`](file:///.agents/skills/outbox-messaging/SKILL.md) — Transactional outbox pattern, NATS JetStream, deduplication, retry exponential backoff.

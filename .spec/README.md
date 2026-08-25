@@ -9,9 +9,9 @@ This directory contains feature specifications, architectural plans, and task br
 Each initiative uses a numeric prefix:
 
 - **Roadmap**: [`ROADMAP.md`](file:///.spec/ROADMAP.md) — 6-Phase Feature Evolution & Capability Architecture
-- **Specification**: `SPEC-XXX-<name>.md` (e.g. `SPEC-001-wallet-capability-platform.md`)
-- **Architecture Plan**: `PLAN-XXX-<name>.md` (e.g. `PLAN-001-wallet-capability-platform.md`)
-- **Task Tracker**: `TASKS-XXX-<name>.md` (e.g. `TASKS-001-wallet-capability-platform.md`)
+- **Specification**: `SPEC-XXX-<name>.md` (e.g. `SPEC-001-smart-savings-automation.md`)
+- **Architecture Plan**: `PLAN-XXX-<name>.md` (e.g. `PLAN-001-smart-savings-automation.md`)
+- **Task Tracker**: `TASKS-XXX-<name>.md` (e.g. `TASKS-001-smart-savings-automation.md`)
 - **Execution Summary**: `summaries/SUMMARY-XXX-<name>.md` (e.g. `summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`)
 
 ---
@@ -21,7 +21,8 @@ Each initiative uses a numeric prefix:
 | Phase | Spec | Title | Status | Execution Summary |
 | :--- | :--- | :--- | :--- | :--- |
 | **0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟢 Completed & Reconciled | [`SUMMARY-000`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md) |
-| **1** | [`SPEC-001`](file:///.spec/SPEC-001-smart-savings-automation.md) | Smart Savings Automation (`br.com.wallet.savings`) | 🟡 Ready for Planning | — |
+| **1** | [`SPEC-001`](file:///.spec/SPEC-001-smart-savings-automation.md) | Smart Savings Automation (`br.com.wallet.savings`) | 🟢 Completed & Reconciled | [`SUMMARY-001`](file:///.spec/summaries/SUMMARY-001-smart-savings-automation.md) |
+| **1.1** | [`SPEC-001.1`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md) | Account Lifecycle State & Fraud Blocking (`br.com.wallet.ledger`) | 🟢 Completed & Reconciled | [`SUMMARY-001.1`](file:///.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md) |
 | **2** | `SPEC-002` | Financial Goal & Cashflow Engine (`br.com.wallet.goals`) | ⚪ Planned | — |
 | **3** | `SPEC-003` | Subscription & Spending Intelligence (`br.com.wallet.intelligence`) | ⚪ Planned | — |
 | **4** | `SPEC-004` | AI Financial Copilot & MCP Gateway (`br.com.wallet.copilot`) | ⚪ Planned | — |

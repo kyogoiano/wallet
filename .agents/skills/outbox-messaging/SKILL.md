@@ -33,9 +33,12 @@ flowchart LR
 | Column | Type | Description |
 | :--- | :--- | :--- |
 | `id` | `UUID` | Unique outbox event identifier |
-| `event_type` | `VARCHAR(50)` | E.g., `TRANSFER_COMPLETED`, `DEPOSIT_COMPLETED` |
-| `payload` | `TEXT / JSON` | Serialized domain event payload |
-| `status` | `VARCHAR(20)` | `PENDING`, `PROCESSED`, `FAILED`, `DEAD` |
+| `aggregate_type` | `VARCHAR(50)` | E.g. `WALLET_OPERATION` |
+| `aggregate_id` | `UUID` | Root aggregate identifier (e.g. `operationId`) |
+| `event_type` | `VARCHAR(50)` | E.g., `TRANSFER_COMPLETED`, `DEPOSIT_COMPLETED`, `WITHDRAW_COMPLETED`, `FRAUD` |
+| `payload` | `JSONB` | Serialized domain event payload |
+| `partition_key` | `UUID` | Routing partition key (e.g. `walletId` / `userId`) |
+| `status` | `VARCHAR(20)` | `PENDING`, `PROCESSING`, `PROCESSED`, `FAILED`, `DEAD` |
 | `retry_count` | `INTEGER` | Number of failed attempts |
 | `next_retry_at`| `TIMESTAMP` | Timestamp for next allowable retry |
 | `created_at` | `TIMESTAMP` | Record creation timestamp |

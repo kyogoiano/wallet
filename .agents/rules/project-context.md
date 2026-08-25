@@ -31,9 +31,10 @@ The Wallet Service follows **Modular Monolith (Spring Modulith)** and **Clean Ar
 ```
 
 ### Module Structure
-- **`:core` (`br.com.wallet.core`)**: Shared foundational types: `TraceContext`, `FraudContext` (implements `TraceContext`), `Traceable`, `TracingAspect`, `IdempotencyException`. Zero outgoing dependencies.
+- **`:core` (`br.com.wallet.core`)**: Shared foundational types: `TraceContext`, `FraudContext` (implements `TraceContext`), `OperationOrigin`, `Traceable`, `TracingAspect`, `IdempotencyException`, `AccountBlockedException`. Zero outgoing dependencies.
 - **`:fraud` (`br.com.wallet.fraud`)**: Anti-fraud & risk scoring engine, sliding windows, rules (`UserBlockRule`, `GlobalVelocityRule`), and state stores (Caffeine + Redis).
-- **`br.com.wallet.ledger` (in root)**: Transactional ledger & core banking domain (`TransferFundsUseCase`, `DepositFundsUseCase`, `WithdrawFundsUseCase`, `BalanceUseCase`, `ValidateLedgerUseCase`), `AccountDao`, `LedgerDao`, `OutboxDao`, and `FraudCheckHelper`.
+- **`br.com.wallet.ledger` (in root)**: Transactional ledger & core banking domain (`TransferFundsUseCase`, `DepositFundsUseCase`, `WithdrawFundsUseCase`, `BalanceUseCase`, `ValidateLedgerUseCase`, `AccountStateUseCase`), `AccountDao`, `LedgerDao`, `OutboxDao`, and `FraudCheckHelper`.
+- **`br.com.wallet.savings` (in root)**: Smart Savings capability module (`SavingsPlanUseCase`, `SavingsQueryUseCase`, `SavingsRuleEngine`, `SavingsEventListener`) reacting to banking events via `@ApplicationModuleListener`.
 - **`br.com.wallet.infrastructure` (in root)**: REST controllers, NATS JetStream workers, DLQ persistence (`DlqOperationsDao`), and Spring configuration.
 
 ---

@@ -32,8 +32,9 @@ This skill guides the design, implementation, and maintenance of the **Fraud & R
 - **Mechanism**: Redis Sorted Set (`zadd NX` / `zremrangebyscore` / `zcard`) via atomic Lua script in `RedisVelocityStore.java`.
 
 ### 3. User Blocklist (`UserBlockRule`)
-- **Signal**: User marked as blocked in Redis (`user:{userId}:blocked`).
+- **Signal**: User marked as blocked in Redis (`user:{userId}:blocked`) or PostgreSQL `accounts.status = 'BLOCKED'`.
 - **Optimization**: Negative caching in Caffeine with differential TTLs (10 min if blocked, 30s if unblocked) via `RedisUserStore.java`.
+- **Dual-Store Sync**: When a transaction is blocked with `FraudDecision.BLOCK`, `FraudCheckHelper` updates PostgreSQL `accounts.status = 'BLOCKED'` and synchronizes Redis cache immediately (`I-ACCOUNT-001`, `I-ACCOUNT-002`).
 
 ---
 

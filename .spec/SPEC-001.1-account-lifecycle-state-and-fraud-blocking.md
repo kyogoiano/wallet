@@ -1,6 +1,6 @@
 # 📋 Specification: SPEC-001.1 — Account Lifecycle State & Persistent Fraud Blocking Engine
 
-- **Status**: Ratified / Approved (Gate 1 Passed)
+- **Status**: Completed / Verified
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-23
 - **Target Release / Milestone**: Wallet Service V4 — Phase 1.1 (Resilience & Fraud Integrity Patch)
@@ -177,10 +177,10 @@ public interface AccountStateUseCase {
 
 ## 7. Acceptance Criteria
 
-- [ ] `accounts` table migration adds `status`, `blocked_at`, `blocked_reason`.
-- [ ] `AccountBlockedException` added to `br.com.wallet.core.exceptions`.
-- [ ] `Account` and `AccountBalance` models include `AccountStatus`.
-- [ ] `AccountDao` checks account status during `SELECT FOR UPDATE` and enforces `I-ACCOUNT-001`.
-- [ ] `FraudCheckHelper` updates account status to `BLOCKED` on `FraudDecision.BLOCK`.
-- [ ] `AccountStateUseCase` implemented with `blockAccount` and `unblockAccount`.
-- [ ] Unit & integration tests verify end-to-end blocking, transfer rejection, and unblocking.
+- [x] `accounts` table migration adds `status`, `blocked_at`, `blocked_reason`.
+- [x] `AccountBlockedException` added to `br.com.wallet.core.exceptions`.
+- [x] `Account` and `AccountBalance` models include `AccountStatus`.
+- [x] `AccountDao` checks account status during `SELECT FOR UPDATE` and enforces `I-ACCOUNT-001`.
+- [x] `FraudCheckHelper` updates account status to `BLOCKED` on `FraudDecision.BLOCK`.
+- [x] `AccountStateUseCase` implemented with `blockAccount` and `unblockAccount`.
+- [x] Unit & integration tests verify end-to-end blocking, transfer rejection, and unblocking.

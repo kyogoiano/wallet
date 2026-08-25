@@ -28,7 +28,7 @@ flowchart TD
     Infra -->|allowed: core::api| Core
     Infra -->|allowed: savings::api| Savings
 
-    Savings -->|allowed: ledger::api (STRICT)| Ledger
+    Savings -->|allowed: ledger::api| Ledger
     Savings -->|allowed: core::api| Core
 
     Ledger -->|allowed: fraud::api| Fraud

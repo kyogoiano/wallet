@@ -2,7 +2,6 @@ package br.com.wallet.ledger.internal.service;
 
 import br.com.wallet.core.exceptions.AccountBlockedException;
 import br.com.wallet.ledger.api.domain.Account;
-import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.ledger.api.context.Deposit;
 import br.com.wallet.core.exceptions.IdempotencyException;

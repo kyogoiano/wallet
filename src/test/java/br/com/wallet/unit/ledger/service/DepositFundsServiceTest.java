@@ -8,7 +8,6 @@ import br.com.wallet.ledger.api.domain.AccountStatus;
 import br.com.wallet.ledger.api.domain.LedgerType;
 import br.com.wallet.ledger.api.event.DepositCompletedEvent;
 import br.com.wallet.ledger.api.exceptions.AccountNotFoundException;
-import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.ledger.internal.persistence.AccountDao;
 import br.com.wallet.ledger.internal.persistence.OutboxDao;
 import br.com.wallet.ledger.internal.persistence.WalletOperationsDao;
@@ -43,7 +42,7 @@ class DepositFundsServiceTest {
     @Mock
     private WalletOperationsDao operationsDao;
     @Mock
-    private OutboxDao outboxDao;
+    private OutboxDao<DepositCompletedEvent> outboxDao;
     @Mock
     private AccountDao accountDao;
     @Mock

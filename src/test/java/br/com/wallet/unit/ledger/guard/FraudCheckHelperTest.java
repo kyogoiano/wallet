@@ -38,7 +38,7 @@ class FraudCheckHelperTest {
     @Mock
     private FraudService fraudService;
     @Mock
-    private OutboxDao outboxDao;
+    private OutboxDao<FraudEvent> outboxDao;
     @Mock
     private AccountDao accountDao;
     @Mock

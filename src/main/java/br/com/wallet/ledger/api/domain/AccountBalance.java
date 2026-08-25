@@ -14,7 +14,7 @@ public record AccountBalance(
     public AccountBalance {
         Objects.requireNonNull(userId, "userId cannot be null");
         Objects.requireNonNull(balance, "balance cannot be null");
-        status = status != null ? status : AccountStatus.ACTIVE;
+        Objects.requireNonNull(status, "status cannot be null");
     }
 
     public AccountBalance(UUID userId, BigDecimal balance) {

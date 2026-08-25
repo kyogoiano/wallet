@@ -39,7 +39,7 @@ class TransferFundsServiceTest {
     @Mock
     private WalletOperationService core;
     @Mock
-    private OutboxDao outboxDao;
+    private OutboxDao<TransferCompletedEvent> outboxDao;
     @Mock
     private WalletOperationsDao operationsDao;
     @Mock

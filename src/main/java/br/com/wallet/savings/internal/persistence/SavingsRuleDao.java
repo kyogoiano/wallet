@@ -58,6 +58,25 @@ public class SavingsRuleDao {
         """, rowMapper, planId);
     }
 
+    public java.util.Optional<SavingsRule> findById(@NonNull final UUID id) {
+        Objects.requireNonNull(id, "id cannot be null");
+        return jdbc.query("""
+            SELECT id, plan_id, rule_type, step_amount, percentage_rate, ceiling_threshold, is_active
+            FROM savings_rules
+            WHERE id = ?
+        """, rs -> rs.next() ? java.util.Optional.of(rowMapper.mapRow(rs, 1)) : java.util.Optional.empty(), id);
+    }
+
+    public void updateActive(@NonNull final UUID id, final boolean isActive) {
+        Objects.requireNonNull(id, "id cannot be null");
+        jdbc.update("UPDATE savings_rules SET is_active = ? WHERE id = ?", isActive, id);
+    }
+
+    public void deleteById(@NonNull final UUID id) {
+        Objects.requireNonNull(id, "id cannot be null");
+        jdbc.update("DELETE FROM savings_rules WHERE id = ?", id);
+    }
+
     public void deleteByPlanId(@NonNull final UUID planId) {
         Objects.requireNonNull(planId, "planId cannot be null");
         jdbc.update("DELETE FROM savings_rules WHERE plan_id = ?", planId);

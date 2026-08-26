@@ -8,13 +8,16 @@ import br.com.wallet.savings.api.model.SavingsRuleDto;
 import br.com.wallet.savings.internal.domain.SavingsPlan;
 import br.com.wallet.savings.internal.domain.SavingsRule;
 import br.com.wallet.savings.internal.persistence.SavingsPlanDao;
+import br.com.wallet.savings.internal.persistence.SavingsRuleDao;
 import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -22,9 +25,14 @@ import java.util.UUID;
 public class SavingsPlanService implements SavingsPlanUseCase {
 
     private final SavingsPlanDao savingsPlanDao;
+    private final SavingsRuleDao savingsRuleDao;
 
-    public SavingsPlanService(@NonNull final SavingsPlanDao savingsPlanDao) {
+    public SavingsPlanService(
+            @NonNull final SavingsPlanDao savingsPlanDao,
+            @NonNull final SavingsRuleDao savingsRuleDao
+    ) {
         this.savingsPlanDao = Objects.requireNonNull(savingsPlanDao, "savingsPlanDao cannot be null");
+        this.savingsRuleDao = Objects.requireNonNull(savingsRuleDao, "savingsRuleDao cannot be null");
     }
 
     @Override
@@ -42,6 +50,7 @@ public class SavingsPlanService implements SavingsPlanUseCase {
         List<SavingsRule> domainRules = new ArrayList<>();
         if (command.rules() != null) {
             for (CreateSavingsRuleCommand ruleCmd : command.rules()) {
+                validateRuleCommand(ruleCmd);
                 domainRules.add(new SavingsRule(
                         UUID.randomUUID(),
                         planId,
@@ -58,7 +67,7 @@ public class SavingsPlanService implements SavingsPlanUseCase {
                 planId,
                 command.sourceWalletId(),
                 command.targetWalletId(),
-                command.minimumRetainedBalance() != null ? command.minimumRetainedBalance() : java.math.BigDecimal.ZERO,
+                command.minimumRetainedBalance() != null ? command.minimumRetainedBalance() : BigDecimal.ZERO,
                 "ACTIVE",
                 domainRules,
                 now,
@@ -68,6 +77,14 @@ public class SavingsPlanService implements SavingsPlanUseCase {
         savingsPlanDao.insert(plan);
 
         return toDto(plan);
+    }
+
+    @Override
+    public SavingsPlanDto getPlan(@NonNull final UUID planId) {
+        Objects.requireNonNull(planId, "planId cannot be null");
+        return savingsPlanDao.findById(planId)
+                .map(this::toDto)
+                .orElseThrow(() -> new NoSuchElementException("Savings plan not found: " + planId));
     }
 
     @Override
@@ -99,17 +116,105 @@ public class SavingsPlanService implements SavingsPlanUseCase {
                 .toList();
     }
 
+    @Override
+    @Transactional
+    public SavingsRuleDto addRule(@NonNull final UUID planId, @NonNull final CreateSavingsRuleCommand command) {
+        Objects.requireNonNull(planId, "planId cannot be null");
+        Objects.requireNonNull(command, "command cannot be null");
+
+        savingsPlanDao.findById(planId)
+                .orElseThrow(() -> new NoSuchElementException("Savings plan not found: " + planId));
+
+        validateRuleCommand(command);
+
+        UUID ruleId = UUID.randomUUID();
+        SavingsRule rule = new SavingsRule(
+                ruleId,
+                planId,
+                command.ruleType(),
+                command.stepAmount(),
+                command.percentageRate(),
+                command.ceilingThreshold(),
+                true
+        );
+
+        savingsRuleDao.insert(rule);
+        savingsPlanDao.touchUpdatedAt(planId);
+
+        return toRuleDto(rule);
+    }
+
+    @Override
+    @Transactional
+    public void removeRule(@NonNull final UUID ruleId) {
+        Objects.requireNonNull(ruleId, "ruleId cannot be null");
+        SavingsRule rule = savingsRuleDao.findById(ruleId)
+                .orElseThrow(() -> new NoSuchElementException("Savings rule not found: " + ruleId));
+        savingsRuleDao.deleteById(ruleId);
+        savingsPlanDao.touchUpdatedAt(rule.planId());
+    }
+
+    @Override
+    @Transactional
+    public void toggleRule(@NonNull final UUID ruleId, final boolean isActive) {
+        Objects.requireNonNull(ruleId, "ruleId cannot be null");
+        SavingsRule rule = savingsRuleDao.findById(ruleId)
+                .orElseThrow(() -> new NoSuchElementException("Savings rule not found: " + ruleId));
+        savingsRuleDao.updateActive(ruleId, isActive);
+        savingsPlanDao.touchUpdatedAt(rule.planId());
+    }
+
+    @Override
+    public List<SavingsRuleDto> getRulesForPlan(@NonNull final UUID planId) {
+        Objects.requireNonNull(planId, "planId cannot be null");
+        if (savingsPlanDao.findById(planId).isEmpty()) {
+            throw new NoSuchElementException("Savings plan not found: " + planId);
+        }
+        return savingsRuleDao.findByPlanId(planId).stream()
+                .map(this::toRuleDto)
+                .toList();
+    }
+
+    private void validateRuleCommand(CreateSavingsRuleCommand command) {
+        if (command.ruleType() == null) {
+            throw new IllegalArgumentException("Rule type cannot be null");
+        }
+        switch (command.ruleType()) {
+            case ROUND_UP -> {
+                if (command.stepAmount() == null || command.stepAmount().compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new IllegalArgumentException("Round-up step amount must be greater than zero");
+                }
+            }
+            case PERCENTAGE -> {
+                if (command.percentageRate() == null
+                        || command.percentageRate().compareTo(BigDecimal.ZERO) <= 0
+                        || command.percentageRate().compareTo(new BigDecimal("100.00")) > 0) {
+                    throw new IllegalArgumentException("Percentage rate must be between 0 and 100");
+                }
+            }
+            case THRESHOLD -> {
+                if (command.ceilingThreshold() == null || command.ceilingThreshold().compareTo(BigDecimal.ZERO) <= 0) {
+                    throw new IllegalArgumentException("Threshold ceiling must be greater than zero");
+                }
+            }
+        }
+    }
+
+    private SavingsRuleDto toRuleDto(SavingsRule r) {
+        return new SavingsRuleDto(
+                r.id(),
+                r.planId(),
+                r.ruleType(),
+                r.stepAmount(),
+                r.percentageRate(),
+                r.ceilingThreshold(),
+                r.isActive()
+        );
+    }
+
     private SavingsPlanDto toDto(SavingsPlan plan) {
         List<SavingsRuleDto> ruleDtos = plan.rules().stream()
-                .map(r -> new SavingsRuleDto(
-                        r.id(),
-                        r.planId(),
-                        r.ruleType(),
-                        r.stepAmount(),
-                        r.percentageRate(),
-                        r.ceilingThreshold(),
-                        r.isActive()
-                ))
+                .map(this::toRuleDto)
                 .toList();
 
         return new SavingsPlanDto(
@@ -124,3 +229,4 @@ public class SavingsPlanService implements SavingsPlanUseCase {
         );
     }
 }
+

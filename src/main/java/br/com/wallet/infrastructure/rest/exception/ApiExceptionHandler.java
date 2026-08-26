@@ -32,6 +32,13 @@ public class ApiExceptionHandler {
                 .body(new ApiError(ErrorCode.BAD_REQUEST, ex.getMessage()));
     }
 
+    @ExceptionHandler(java.util.NoSuchElementException.class)
+    public ResponseEntity<ApiError> handleNotFound(java.util.NoSuchElementException ex) {
+        log.warn("Resource not found: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiError(ErrorCode.NOT_FOUND, ex.getMessage()));
+    }
+
     @ExceptionHandler(InsufficientFundsException.class)
     public ResponseEntity<ApiError> handleInsufficientFunds(InsufficientFundsException ex) {
         log.warn("Insufficient funds: {}", ex.getMessage());

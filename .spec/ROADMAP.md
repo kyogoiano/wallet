@@ -183,6 +183,25 @@ gantt
 
 ---
 
+### 🔹 Phase 1.2: Savings Plans & Dynamic Rules Management
+**Spec Identifier**: [`SPEC-001.2-savings-plans-and-rules-management`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Dynamic Savings Management & REST API (br.com.wallet.savings / rest)`
+
+- **Intent**: Enable dynamic lifecycle management for Savings Plans and Savings Rules via REST API (`/savings/*`) and Use Case interfaces, enabling rule addition to existing plans at any time.
+- **Capabilities Included**:
+  - **Dynamic Rule Provisioning**: Add rules (`ROUND_UP`, `PERCENTAGE`, `THRESHOLD`) to existing plans.
+  - **Rule Lifecycle**: Enable, disable, query, and delete individual savings rules.
+  - **REST Controller (`SavingsController`) & API**: OpenAPI-documented endpoints under `/savings`.
+  - **Savings Metrics**: Query aggregated savings metrics and breakdown by rule type.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-001.2-savings-plans-and-rules-management.md`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md) (Ratified)
+  - [`.spec/PLAN-001.2-savings-plans-and-rules-management.md`](file:///.spec/PLAN-001.2-savings-plans-and-rules-management.md) (Approved)
+  - [`.spec/TASKS-001.2-savings-plans-and-rules-management.md`](file:///.spec/TASKS-001.2-savings-plans-and-rules-management.md) (Completed)
+  - [`.spec/summaries/SUMMARY-001.2-savings-plans-and-rules-management.md`](file:///.spec/summaries/SUMMARY-001.2-savings-plans-and-rules-management.md) (Verified)
+
+---
+
 ### 🔹 Phase 2: Financial Goal & Cashflow Strategy Engine
 **Spec Identifier**: `SPEC-002-financial-goal-engine`  
 **Status**: ⚪ Planned  

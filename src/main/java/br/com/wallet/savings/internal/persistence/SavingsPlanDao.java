@@ -116,6 +116,11 @@ public class SavingsPlanDao {
         """, status, id);
     }
 
+    public void touchUpdatedAt(@NonNull final UUID id) {
+        Objects.requireNonNull(id, "id cannot be null");
+        jdbc.update("UPDATE savings_plans SET updated_at = NOW() WHERE id = ?", id);
+    }
+
     public void delete(@NonNull final UUID id) {
         Objects.requireNonNull(id, "id cannot be null");
         jdbc.update("DELETE FROM savings_plans WHERE id = ?", id);

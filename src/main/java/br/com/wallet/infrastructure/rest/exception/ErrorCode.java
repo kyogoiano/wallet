@@ -2,6 +2,7 @@ package br.com.wallet.infrastructure.rest.exception;
 
 public enum ErrorCode {
     BAD_REQUEST("wallet.bad_request"),
+    NOT_FOUND("wallet.not_found"),
     INTERNAL_ERROR("wallet.internal_error"),
     INSUFFICIENT_FUNDS("wallet.insufficient_funds"),
     INVALID_AMOUNT("wallet.invalid_amount"),

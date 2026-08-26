@@ -62,6 +62,7 @@ flowchart TD
 - **`savings_plans`**: Links `source_wallet_id` $\rightarrow$ `target_wallet_id` with `minimum_retained_balance` and status.
 - **`savings_rules`**: Stores rule configurations (`ROUND_UP`, `PERCENTAGE`, `THRESHOLD`).
 - **`savings_execution_history`**: Audit trail and Layer 1 deduplication with `UNIQUE(operation_id)`.
+- **Seed Data (`docker/init/schema.sql`)**: Seeded sample accounts, initial savings plan (`d1111111-1111-1111-1111-111111111111`), and 3 active savings rules (Round-Up, Percentage, Threshold) for immediate local docker testing.
 
 ---
 

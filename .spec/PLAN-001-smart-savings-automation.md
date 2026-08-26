@@ -227,6 +227,14 @@ CREATE INDEX IF NOT EXISTS idx_savings_hist_plan ON savings_execution_history(pl
   - *Positive*: `savings` is physically and logically forbidden by Spring Modulith from importing any class under `br.com.wallet.ledger.internal.*`.
   - *Positive*: Enforces `I-MODULITH-001` and `I-MODULITH-002` at compile/test time.
 
+### 🏛️ ADR-001-6: Savings Rule Independence & Plan Association Topology
+- **Context**: Currently, `savings_rules` has a direct foreign key `plan_id REFERENCES savings_plans(id) ON DELETE CASCADE`. If a savings plan is deleted, all rule configurations are cascaded and deleted. In advanced financial settings, rule definitions (e.g. "Save 10%", "5 Reais Round-Up") represent reusable user strategies that could exist independently of specific source/target wallet associations.
+- **Decision**:
+  - *Current Implementation (1-to-N Parent-Child Aggregate)*: `SavingsPlan` is the DDD Aggregate Root, and rules are child entities scoped to the plan. Deleting a plan deletes its rules.
+  - *Evolutionary Path (Many-to-Many via `savings_plan_rules`)*: In Phase 2/3, introduce a join table `savings_plan_rules(plan_id, rule_id, priority)` where `savings_rules` becomes an independent catalog of strategies (`user_id`, `rule_type`, `parameters`). Plans reference rules without owning their lifecycle.
+- **Consequences**:
+  - *Positive*: Preserves backwards compatibility with current baseline while charting the clean path toward rule reusability across multiple target savings goals (`br.com.wallet.goals`).
+
 ---
 
 ## 5. Sequence Diagrams

@@ -1,4 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
 CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY,
     balance NUMERIC(19,2) NOT NULL CHECK (balance >= 0),
@@ -29,7 +30,7 @@ CREATE TABLE IF NOT EXISTS ledger (
     -- tamper-proof fields
     sequence BIGINT NOT NULL,
     hash VARCHAR(128) NOT NULL,
-    previous_hash VARCHAR(128), -- correctness depends on ordering
+    previous_hash VARCHAR(128),
 
     CONSTRAINT ledger_wallet_fk
         FOREIGN KEY (wallet_id) REFERENCES accounts(id),
@@ -69,8 +70,8 @@ CREATE INDEX IF NOT EXISTS idx_ledger_wallet_sequence_desc
 -- Outbox for event publishing
 CREATE TABLE IF NOT EXISTS outbox (
     id UUID PRIMARY KEY,
-    aggregate_type VARCHAR(50) NOT NULL, -- wallet operation
-    aggregate_id UUID NOT NULL, -- operation id
+    aggregate_type VARCHAR(50) NOT NULL,
+    aggregate_id UUID NOT NULL,
     event_type VARCHAR(50) NOT NULL,
     payload JSONB NOT NULL,
     partition_key UUID NOT NULL,
@@ -81,7 +82,7 @@ CREATE TABLE IF NOT EXISTS outbox (
     next_retry_at TIMESTAMPTZ NULL,
     CONSTRAINT outbox_status_chk
         CHECK (status IN ('PENDING', 'FAILED', 'PROCESSING', 'PROCESSED', 'DEAD')),
-    CONSTRAINT outbox_event_type_chk -- might be removed for flexibility
+    CONSTRAINT outbox_event_type_chk
         CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED', 'FRAUD'))
 );
 
@@ -98,27 +99,27 @@ CREATE TABLE IF NOT EXISTS wallet_operations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING',
     CONSTRAINT wallet_operations_status_chk
-    CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
+        CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
 );
 
 CREATE TABLE IF NOT EXISTS dlq_operations (
-    id UUID,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    operation_id UUID NOT NULL,
-    user_id UUID,
-    subject VARCHAR(20) NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-    error TEXT,
-    payload JSONB NOT NULL,
-    retry_count INT NOT NULL DEFAULT 0,
-    next_retry_at TIMESTAMPTZ,
-    processed_at TIMESTAMPTZ,
-    failure_type TEXT NOT NULL,
-    event_type VARCHAR(50) NOT NULL
-        CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
-    CONSTRAINT dlq_status_chk
-          CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED')),
-    CONSTRAINT dlq_operations_pkey PRIMARY KEY (id, created_at)
+  id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  operation_id UUID NOT NULL,
+  user_id UUID,
+  subject VARCHAR(20) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  error TEXT,
+  payload JSONB NOT NULL,
+  retry_count INT NOT NULL DEFAULT 0,
+  next_retry_at TIMESTAMPTZ,
+  processed_at TIMESTAMPTZ,
+  failure_type TEXT NOT NULL,
+  event_type VARCHAR(50) NOT NULL
+      CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
+  CONSTRAINT dlq_status_chk
+      CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED')),
+  CONSTRAINT dlq_operations_pkey PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_dlq_retry
@@ -170,7 +171,7 @@ CREATE INDEX IF NOT EXISTS idx_savings_plans_target ON savings_plans(target_wall
 CREATE TABLE IF NOT EXISTS savings_rules (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     plan_id UUID NOT NULL REFERENCES savings_plans(id) ON DELETE CASCADE,
-    rule_type VARCHAR(32) NOT NULL, -- ROUND_UP, PERCENTAGE, THRESHOLD
+    rule_type VARCHAR(32) NOT NULL,
     step_amount NUMERIC(19, 2),
     percentage_rate NUMERIC(7, 4),
     ceiling_threshold NUMERIC(19, 2),
@@ -187,7 +188,7 @@ CREATE INDEX IF NOT EXISTS idx_savings_rules_plan ON savings_rules(plan_id) WHER
 
 CREATE TABLE IF NOT EXISTS savings_execution_history (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    operation_id UUID NOT NULL UNIQUE, -- Layer 1 Deduplication Key
+    operation_id UUID NOT NULL UNIQUE,
     plan_id UUID NOT NULL REFERENCES savings_plans(id),
     rule_id UUID NOT NULL REFERENCES savings_rules(id),
     source_operation_id UUID NOT NULL,

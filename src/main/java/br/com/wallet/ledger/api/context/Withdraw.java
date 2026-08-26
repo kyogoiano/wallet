@@ -1,5 +1,6 @@
 package br.com.wallet.ledger.api.context;
 
+import br.com.wallet.core.context.OperationOrigin;
 import br.com.wallet.core.tracing.TraceContext;
 import br.com.wallet.ledger.api.domain.FraudCheckable;
 import org.jspecify.annotations.NonNull;
@@ -10,20 +11,25 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.UUID;
 
-public final class Withdraw implements TraceContext, FraudCheckable {
-    private final @NonNull UUID walletId;
-    private @Nullable UUID userId;
-    private final @NonNull BigDecimal amount;
-    private final @NonNull UUID operationId;
+public record Withdraw(
+        @NonNull UUID walletId,
+        @Nullable UUID userId,
+        @NonNull BigDecimal amount,
+        @NonNull UUID operationId,
+        @NonNull OperationOrigin origin
+) implements TraceContext, FraudCheckable {
 
-    public Withdraw(@NonNull UUID walletId,
-                    @Nullable UUID userId,
-                    @NonNull BigDecimal amount,
-                    @NonNull UUID operationId) {
-        this.walletId = walletId;
-        this.userId = userId;
-        this.amount = amount;
-        this.operationId = operationId;
+    public Withdraw {
+        Objects.requireNonNull(walletId, "walletId cannot be null");
+        Objects.requireNonNull(amount, "amount cannot be null");
+        Objects.requireNonNull(operationId, "operationId cannot be null");
+        if (origin == null) {
+            origin = OperationOrigin.USER;
+        }
+    }
+
+    public Withdraw(@NonNull UUID walletId, @Nullable UUID userId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
+        this(walletId, userId, amount, operationId, OperationOrigin.USER);
     }
 
     @Override
@@ -32,9 +38,15 @@ public final class Withdraw implements TraceContext, FraudCheckable {
     }
 
     @Override
+    public UUID userId() {
+        return this.userId;
+    }
+
+    @Override
     public Map<String, String> traceTags() {
         return Map.of(
-                "wallet.id", walletId.toString()
+                "wallet.id", walletId.toString(),
+                "operation.origin", origin.name()
         );
     }
 
@@ -47,48 +59,4 @@ public final class Withdraw implements TraceContext, FraudCheckable {
     public UUID getTargetUserIdForFraudCheck() {
         return null; // Withdrawals don't have a target user
     }
-
-    public @NonNull UUID walletId() {
-        return walletId;
-    }
-
-    @Override
-    public @Nullable UUID userId() {
-        return userId;
-    }
-
-    public void setUserId(@NonNull UUID userId) {
-        this.userId = userId;
-    }
-
-    @Override
-    public @NonNull BigDecimal amount() {
-        return amount;
-    }
-
-    @Override
-    public boolean equals(Object obj) {
-        if (obj == this) return true;
-        if (obj == null || obj.getClass() != this.getClass()) return false;
-        var that = (Withdraw) obj;
-        return Objects.equals(this.walletId, that.walletId) &&
-                Objects.equals(this.userId, that.userId) &&
-                Objects.equals(this.amount, that.amount) &&
-                Objects.equals(this.operationId, that.operationId);
-    }
-
-    @Override
-    public int hashCode() {
-        return Objects.hash(walletId, userId, amount, operationId);
-    }
-
-    @Override
-    public String toString() {
-        return "Withdraw[" +
-                "walletId=" + walletId + ", " +
-                "userId=" + userId + ", " +
-                "amount=" + amount + ", " +
-                "operationId=" + operationId + ']';
-    }
-
 }

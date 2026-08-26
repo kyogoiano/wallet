@@ -125,8 +125,8 @@ class SavingsPlanServiceTest {
     }
 
     @Test
-    @DisplayName("Should get plans for wallet")
-    void shouldGetPlansForWallet() {
+    @DisplayName("Should get plans by source wallet")
+    void shouldGetPlansBySourceWallet() {
         SavingsPlan plan = new SavingsPlan(
                 planId, sourceWallet, targetWallet, BigDecimal.ZERO, "ACTIVE",
                 List.of(SavingsRule.percentage(ruleId, planId, new BigDecimal("10.00"))),
@@ -134,10 +134,60 @@ class SavingsPlanServiceTest {
         );
         when(savingsPlanDao.findBySourceWalletId(sourceWallet)).thenReturn(List.of(plan));
 
+        List<SavingsPlanDto> plans = savingsPlanService.getPlansBySourceWallet(sourceWallet);
+
+        assertThat(plans).hasSize(1);
+        assertThat(plans.getFirst().id()).isEqualTo(planId);
+        verify(savingsPlanDao).findBySourceWalletId(sourceWallet);
+    }
+
+    @Test
+    @DisplayName("Should get plans by target wallet")
+    void shouldGetPlansByTargetWallet() {
+        SavingsPlan plan = new SavingsPlan(
+                planId, sourceWallet, targetWallet, BigDecimal.ZERO, "ACTIVE",
+                List.of(SavingsRule.percentage(ruleId, planId, new BigDecimal("10.00"))),
+                Instant.now(), Instant.now()
+        );
+        when(savingsPlanDao.findByTargetWalletId(targetWallet)).thenReturn(List.of(plan));
+
+        List<SavingsPlanDto> plans = savingsPlanService.getPlansByTargetWallet(targetWallet);
+
+        assertThat(plans).hasSize(1);
+        assertThat(plans.getFirst().id()).isEqualTo(planId);
+        verify(savingsPlanDao).findByTargetWalletId(targetWallet);
+    }
+
+    @Test
+    @DisplayName("Should list all plans with pagination")
+    void shouldListPlansWithPagination() {
+        SavingsPlan plan = new SavingsPlan(
+                planId, sourceWallet, targetWallet, BigDecimal.ZERO, "ACTIVE",
+                List.of(), Instant.now(), Instant.now()
+        );
+        when(savingsPlanDao.findAll(50, 10)).thenReturn(List.of(plan));
+
+        List<SavingsPlanDto> plans = savingsPlanService.listPlans(50, 10);
+
+        assertThat(plans).hasSize(1);
+        assertThat(plans.getFirst().id()).isEqualTo(planId);
+        verify(savingsPlanDao).findAll(50, 10);
+    }
+
+    @Test
+    @DisplayName("Should get all plans for wallet (source or target)")
+    void shouldGetPlansForWallet() {
+        SavingsPlan plan1 = new SavingsPlan(
+                planId, sourceWallet, targetWallet, BigDecimal.ZERO, "ACTIVE",
+                List.of(), Instant.now(), Instant.now()
+        );
+        when(savingsPlanDao.findByWalletId(sourceWallet)).thenReturn(List.of(plan1));
+
         List<SavingsPlanDto> plans = savingsPlanService.getPlansForWallet(sourceWallet);
 
         assertThat(plans).hasSize(1);
         assertThat(plans.getFirst().id()).isEqualTo(planId);
+        verify(savingsPlanDao).findByWalletId(sourceWallet);
     }
 
     @Test

@@ -97,11 +97,61 @@ class SavingsControllerTest {
 
         mockMvc.perform(get("/savings/plans/{planId}", planId))
                 .andExpect(status().isNotFound())
-                .andExpect(jsonPath("$.code").value("wallet.not_found"));
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 
     @Test
-    @DisplayName("Should get all savings plans for a wallet (200 OK)")
+    @DisplayName("Should list all savings plans with pagination (200 OK)")
+    void shouldListAllPlansWithPagination() throws Exception {
+        SavingsPlanDto responseDto = new SavingsPlanDto(
+                planId, sourceWallet, targetWallet, new BigDecimal("100.00"), "ACTIVE",
+                List.of(), Instant.now(), Instant.now()
+        );
+        when(savingsPlanUseCase.listPlans(50, 0)).thenReturn(List.of(responseDto));
+
+        mockMvc.perform(get("/savings/plans")
+                        .param("limit", "50")
+                        .param("offset", "0"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(planId.toString()))
+                .andExpect(jsonPath("$[0].sourceWalletId").value(sourceWallet.toString()));
+        verify(savingsPlanUseCase).listPlans(50, 0);
+    }
+
+    @Test
+    @DisplayName("Should get savings plans by source wallet (200 OK)")
+    void shouldGetPlansBySourceWallet() throws Exception {
+        SavingsPlanDto responseDto = new SavingsPlanDto(
+                planId, sourceWallet, targetWallet, BigDecimal.ZERO, "ACTIVE",
+                List.of(), Instant.now(), Instant.now()
+        );
+        when(savingsPlanUseCase.getPlansBySourceWallet(sourceWallet)).thenReturn(List.of(responseDto));
+
+        mockMvc.perform(get("/savings/plans/source/{sourceWalletId}", sourceWallet))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(planId.toString()))
+                .andExpect(jsonPath("$[0].sourceWalletId").value(sourceWallet.toString()));
+        verify(savingsPlanUseCase).getPlansBySourceWallet(sourceWallet);
+    }
+
+    @Test
+    @DisplayName("Should get savings plans by target wallet (200 OK)")
+    void shouldGetPlansByTargetWallet() throws Exception {
+        SavingsPlanDto responseDto = new SavingsPlanDto(
+                planId, sourceWallet, targetWallet, BigDecimal.ZERO, "ACTIVE",
+                List.of(), Instant.now(), Instant.now()
+        );
+        when(savingsPlanUseCase.getPlansByTargetWallet(targetWallet)).thenReturn(List.of(responseDto));
+
+        mockMvc.perform(get("/savings/plans/target/{targetWalletId}", targetWallet))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(planId.toString()))
+                .andExpect(jsonPath("$[0].targetWalletId").value(targetWallet.toString()));
+        verify(savingsPlanUseCase).getPlansByTargetWallet(targetWallet);
+    }
+
+    @Test
+    @DisplayName("Should get all savings plans for a wallet (source or target) (200 OK)")
     void shouldGetPlansForWallet() throws Exception {
         SavingsPlanDto responseDto = new SavingsPlanDto(
                 planId, sourceWallet, targetWallet, BigDecimal.ZERO, "ACTIVE",
@@ -112,6 +162,7 @@ class SavingsControllerTest {
         mockMvc.perform(get("/savings/plans/wallet/{walletId}", sourceWallet))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].id").value(planId.toString()));
+        verify(savingsPlanUseCase).getPlansForWallet(sourceWallet);
     }
 
     @Test

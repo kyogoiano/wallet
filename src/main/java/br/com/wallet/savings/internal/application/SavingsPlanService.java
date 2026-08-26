@@ -10,6 +10,8 @@ import br.com.wallet.savings.internal.domain.SavingsRule;
 import br.com.wallet.savings.internal.persistence.SavingsPlanDao;
 import br.com.wallet.savings.internal.persistence.SavingsRuleDao;
 import org.jspecify.annotations.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -24,6 +26,7 @@ import java.util.UUID;
 @Service
 public class SavingsPlanService implements SavingsPlanUseCase {
 
+    private static final Logger log = LoggerFactory.getLogger(SavingsPlanService.class);
     private final SavingsPlanDao savingsPlanDao;
     private final SavingsRuleDao savingsRuleDao;
 
@@ -88,6 +91,15 @@ public class SavingsPlanService implements SavingsPlanUseCase {
     }
 
     @Override
+    public List<SavingsPlanDto> listPlans(final Integer limit, final Integer offset) {
+        int effectiveLimit = (limit != null && limit > 0) ? Math.min(limit, 100) : 100;
+        int effectiveOffset = (offset != null && offset >= 0) ? offset : 0;
+        return savingsPlanDao.findAll(effectiveLimit, effectiveOffset).stream()
+                .map(this::toDto)
+                .toList();
+    }
+
+    @Override
     @Transactional
     public void pausePlan(@NonNull final UUID planId) {
         Objects.requireNonNull(planId, "planId cannot be null");
@@ -109,9 +121,27 @@ public class SavingsPlanService implements SavingsPlanUseCase {
     }
 
     @Override
+    public List<SavingsPlanDto> getPlansBySourceWallet(@NonNull final UUID sourceWalletId) {
+        Objects.requireNonNull(sourceWalletId, "sourceWalletId cannot be null");
+        return savingsPlanDao.findBySourceWalletId(sourceWalletId).stream()
+                .map(this::toDto)
+                .toList();
+    }
+
+    @Override
+    public List<SavingsPlanDto> getPlansByTargetWallet(@NonNull final UUID targetWalletId) {
+        Objects.requireNonNull(targetWalletId, "targetWalletId cannot be null");
+        return savingsPlanDao.findByTargetWalletId(targetWalletId).stream()
+                .map(this::toDto)
+                .toList();
+    }
+
+    @Override
     public List<SavingsPlanDto> getPlansForWallet(@NonNull final UUID walletId) {
         Objects.requireNonNull(walletId, "walletId cannot be null");
-        return savingsPlanDao.findBySourceWalletId(walletId).stream()
+        var plans = savingsPlanDao.findByWalletId(walletId);
+        log.info("Found {} savings plans for wallet requested", plans.size());
+        return plans.stream()
                 .map(this::toDto)
                 .toList();
     }

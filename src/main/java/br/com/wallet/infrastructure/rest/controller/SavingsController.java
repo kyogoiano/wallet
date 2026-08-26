@@ -51,9 +51,34 @@ public class SavingsController implements SavingsApi {
         return ResponseEntity.ok(savingsPlanUseCase.getPlan(planId));
     }
 
+    @GetMapping("/plans")
+    @Override
+    public ResponseEntity<List<SavingsPlanDto>> listPlans(
+            @RequestParam(defaultValue = "100") final Integer limit,
+            @RequestParam(defaultValue = "0") final Integer offset
+    ) {
+        log.debug("List all savings plans requested. limit={}, offset={}", limit, offset);
+        return ResponseEntity.ok(savingsPlanUseCase.listPlans(limit, offset));
+    }
+
+    @GetMapping("/plans/source/{sourceWalletId}")
+    @Override
+    public ResponseEntity<List<SavingsPlanDto>> getPlansBySourceWallet(@PathVariable final UUID sourceWalletId) {
+        log.debug("Get savings plans by source wallet requested. sourceWalletId={}", sourceWalletId);
+        return ResponseEntity.ok(savingsPlanUseCase.getPlansBySourceWallet(sourceWalletId));
+    }
+
+    @GetMapping("/plans/target/{targetWalletId}")
+    @Override
+    public ResponseEntity<List<SavingsPlanDto>> getPlansByTargetWallet(@PathVariable final UUID targetWalletId) {
+        log.debug("Get savings plans by target wallet requested. targetWalletId={}", targetWalletId);
+        return ResponseEntity.ok(savingsPlanUseCase.getPlansByTargetWallet(targetWalletId));
+    }
+
     @GetMapping("/plans/wallet/{walletId}")
     @Override
     public ResponseEntity<List<SavingsPlanDto>> getPlansForWallet(@PathVariable final UUID walletId) {
+        log.debug("Get all savings plans for wallet requested. walletId={}", walletId);
         return ResponseEntity.ok(savingsPlanUseCase.getPlansForWallet(walletId));
     }
 

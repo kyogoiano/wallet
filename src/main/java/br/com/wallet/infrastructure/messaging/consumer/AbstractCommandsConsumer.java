@@ -9,14 +9,15 @@ import io.nats.client.Message;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * This will be responsible for all commands message processing
- * * By default all commands messages carries on a Trace context, so this will improve traceability and ease generic behaviors
+ * By default all commands messages carry a Trace context, improving traceability and enabling generic behaviors
  * @param <T> trace context of the message
  */
-public abstract class AbstractCommandsConsumer <T extends TraceContext> extends AbstractNatsConsumer{
+public abstract class AbstractCommandsConsumer<T extends TraceContext> extends AbstractNatsConsumer {
     private final Logger log = LoggerFactory.getLogger(this.getClass());
 
     private final ObjectMapper objectMapper;
@@ -37,8 +38,8 @@ public abstract class AbstractCommandsConsumer <T extends TraceContext> extends 
     void processMessage(@NonNull final Message message) {
         final T command;
         try {
-            log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders().toString());
-            command = objectMapper.readValue(message.getData(), commandClass);
+            log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders());
+            command = deserializePayload(message.getData());
         } catch (Exception e) {
             log.error("Poison message detected: subject={}", message.getSubject(), e);
             dlqPublisher.handleDlqMessage(dlqSubject, natsConnection, message, e);
@@ -78,8 +79,15 @@ public abstract class AbstractCommandsConsumer <T extends TraceContext> extends 
             // 🔁 retry via JetStream
             log.warn("Transient failure, will retry: {}", e.getMessage());
             message.nakWithDelay(retryDelay(deliveries));
-
         }
+    }
+
+    protected T deserializePayload(byte[] data) {
+        JsonNode node = objectMapper.readTree(data);
+        if (node.isString()) {
+            return objectMapper.readValue(node.asString(), commandClass);
+        }
+        return objectMapper.treeToValue(node, commandClass);
     }
 
     protected void beforeHandle(CommandEnvelope<T> envelope, Message message) {}
@@ -87,6 +95,4 @@ public abstract class AbstractCommandsConsumer <T extends TraceContext> extends 
     protected void afterHandle(CommandEnvelope<T> envelope, Message message) {}
 
     protected void onFailure(Exception e, CommandEnvelope<T> envelope, Message message) {}
-
-
 }

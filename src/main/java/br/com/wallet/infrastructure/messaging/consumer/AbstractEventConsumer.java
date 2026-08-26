@@ -6,6 +6,7 @@ import io.nats.client.Message;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 public abstract class AbstractEventConsumer<T extends DomainEvent> extends AbstractNatsConsumer {
@@ -22,9 +23,9 @@ public abstract class AbstractEventConsumer<T extends DomainEvent> extends Abstr
     @Override
     void processMessage(@NonNull final Message message) {
         try {
-            log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders().toString());
+            log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders());
 
-            final T event = objectMapper.readValue(message.getData(), eventClass);
+            final T event = deserializeEvent(message.getData());
 
             handle(event);
             message.ack();
@@ -32,6 +33,14 @@ public abstract class AbstractEventConsumer<T extends DomainEvent> extends Abstr
             log.error("Error processing event", e);
             handleError(e, message);
         }
+    }
+
+    protected T deserializeEvent(byte[] data) {
+        JsonNode node = objectMapper.readTree(data);
+        if (node.isString()) {
+            return objectMapper.readValue(node.asString(), eventClass);
+        }
+        return objectMapper.treeToValue(node, eventClass);
     }
 
     abstract void handle(T event);

@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
+import java.util.UUID;
 
 @Service
 public class WithdrawFundsService implements WithdrawFundsUseCase {
@@ -67,17 +68,14 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
         operationsDao.completeOperation(withdraw.operationId());
     }
 
-    protected void execute(@NonNull Withdraw withdraw) {
+    protected void execute(@NonNull final Withdraw withdraw) {
 
         final var userBalance = accountDao.findWalletBalanceForUpdate(withdraw.walletId())
                 .orElseThrow(AccountNotFoundException::new);
 
-        if (withdraw.userId() == null) {
-            withdraw.setUserId(userBalance.userId());
-        } else {
-            if(!withdraw.userId().equals(userBalance.userId())) {
-                throw new UserNotAllowedException(withdraw.userId(), userBalance.userId());
-            }
+        final UUID effectiveUserId = withdraw.userId() != null ? withdraw.userId() : userBalance.userId();
+        if (!effectiveUserId.equals(userBalance.userId())) {
+            throw new UserNotAllowedException(withdraw.userId(), userBalance.userId());
         }
 
         if (userBalance.balance().compareTo(withdraw.amount()) < 0) {
@@ -88,7 +86,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
 
         final var now = clock.instant();
 
-        core.applyTransaction(withdraw.walletId(), withdraw.amount(), LedgerType.DEBIT, withdraw.operationId(), userBalance.userId(), now);
+        core.applyTransaction(withdraw.walletId(), withdraw.amount(), LedgerType.DEBIT, withdraw.operationId(), effectiveUserId, now);
 
     }
 }

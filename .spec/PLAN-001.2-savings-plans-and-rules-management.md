@@ -19,7 +19,7 @@ flowchart TD
     end
 
     subgraph SavingsAPI [br.com.wallet.savings.api]
-        SavingsPlanUseCase["SavingsPlanUseCase\n(create, get, pause, resume, delete, addRule, removeRule, toggleRule)"]
+        SavingsPlanUseCase["SavingsPlanUseCase\n(create, get, listPlans, pause, resume, delete, addRule, removeRule, toggleRule,\ngetPlansBySourceWallet, getPlansByTargetWallet, getPlansForWallet)"]
         SavingsQueryUseCase["SavingsQueryUseCase\n(getMetrics)"]
     end
 
@@ -53,10 +53,17 @@ flowchart TD
 - `POST /savings/plans`
   - Body: `CreateSavingsPlanCommand` (sourceWalletId, targetWalletId, minimumRetainedBalance, rules)
   - Returns: `201 Created` with `SavingsPlanDto`
+- `GET /savings/plans`
+  - Query Params: `limit` (default: 100, max: 100), `offset` (default: 0)
+  - Returns: `200 OK` with `List<SavingsPlanDto>` (paginated list of all savings plans)
 - `GET /savings/plans/{planId}`
   - Returns: `200 OK` with `SavingsPlanDto` or `404 Not Found`
+- `GET /savings/plans/source/{sourceWalletId}`
+  - Returns: `200 OK` with `List<SavingsPlanDto>` (specifically filtered by source wallet)
+- `GET /savings/plans/target/{targetWalletId}`
+  - Returns: `200 OK` with `List<SavingsPlanDto>` (specifically filtered by target wallet)
 - `GET /savings/plans/wallet/{walletId}`
-  - Returns: `200 OK` with `List<SavingsPlanDto>`
+  - Returns: `200 OK` with `List<SavingsPlanDto>` (filtered by either source or target)
 - `POST /savings/plans/{planId}/pause`
   - Returns: `204 No Content`
 - `POST /savings/plans/{planId}/resume`
@@ -89,21 +96,10 @@ flowchart TD
 - `void deleteById(UUID id)`
 
 ### `SavingsPlanDao`
-- Existing `findById(UUID id)` already queries plan and its rules.
-- Existing `updateStatus(UUID id, String status)` updates plan status.
-
----
-
-## 4. Error Handling Strategy
-
-- When a plan or rule is not found, throw `NoSuchElementException("Plan not found: " + planId)` / `NoSuchElementException("Rule not found: " + ruleId)`.
-- Register `NoSuchElementException` in `ApiExceptionHandler` returning `404 Not Found` with `ErrorCode.NOT_FOUND`.
-- Rule validation errors throw `IllegalArgumentException` returning `400 Bad Request`.
-
----
-
-## 5. Security, Fraud & Modulith Boundaries
-
-- Zero direct imports of `br.com.wallet.savings.internal.*` outside `br.com.wallet.savings`.
-- Zero direct database access to `ledger` or `accounts` tables from savings domain.
-- `infrastructure` interacts with `savings` strictly via `SavingsPlanUseCase` and `SavingsQueryUseCase`.
+- `List<SavingsPlan> findAll(int limit, int offset)` (paginated query of all plans)
+- `findBySourceWalletId(UUID sourceWalletId)` (filters strictly on `source_wallet_id = ?`)
+- `findByTargetWalletId(UUID targetWalletId)` (filters strictly on `target_wallet_id = ?`)
+- `findByWalletId(UUID walletId)` (filters on `source_wallet_id = ? OR target_wallet_id = ?`)
+- `findActiveBySourceWalletId(UUID sourceWalletId)`
+- `findActiveByTargetWalletId(UUID targetWalletId)`
+- `touchUpdatedAt(UUID id)`

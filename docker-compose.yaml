@@ -48,30 +48,37 @@ services:
     networks:
       - wallet-net
 
-  redis:
-    image: redis:8.10.1-alpine
-    container_name: redis
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1
+    container_name: dragonfly
     restart: unless-stopped
     ports:
       - "6379:6379"
 
-    command: >
-      sh -c "mkdir -p /var/run/redis && chmod 777 /var/run/redis && exec redis-server
-      --save ''
-      --appendonly no
-      --protected-mode no
-      --unixsocket /var/run/redis/redis.sock
-      --unixsocketperm 777
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --maxmemory-samples 5"
+    command:
+      - "--logtostderr"
+      - "--proactor_threads=2"
+      - "--unixsocket=/var/run/redis/redis.sock"
+      - "--unixsocketperm=777"
+      - "--maxmemory=512mb"
+      - "--cache_mode=true"
 
     volumes:
-      - redis-data:/data
+      - dragonfly-data:/data
       - redis-socket:/var/run/redis
 
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/redis/redis.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 1s
+
     networks:
-      - wallet-net
+      wallet-net:
+        aliases:
+          - redis
+          - dragonfly
 
 
   openobserve:
@@ -106,15 +113,15 @@ services:
         condition: service_healthy
       otel-collector:
         condition: service_started
-      redis:
-        condition: service_started
+      dragonfly:
+        condition: service_healthy
     volumes:
       - redis-socket:/var/run/redis
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet
       SPRING_DATASOURCE_USERNAME: wallet
       SPRING_DATASOURCE_PASSWORD: wallet
-      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_HOST: dragonfly
       SPRING_DATA_REDIS_PORT: 6379
       REDIS_SOCKET_ENABLED: "true"
       REDIS_SOCKET_PATH: /var/run/redis/redis.sock
@@ -130,7 +137,7 @@ services:
 volumes:
   postgres_data:
   openobserve-data:
-  redis-data:
+  dragonfly-data:
   redis-socket:
 
 networks:

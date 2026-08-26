@@ -112,14 +112,16 @@ Before introducing new business capabilities (Smart Savings, Goal Engine, Subscr
 gantt
     title Wallet Service Evolution Roadmap
     dateFormat  YYYY-MM-DD
-    section Phase 0: Baseline Refactor
+    section Phase 0: Baseline & Infrastructure
     SPEC-000 Architecture Alignment     :done, p00_1, 2026-08-22, 2d
     TASKS-000 & Modulith Baseline       :done, p00_2, after p00_1, 2d
+    SPEC-000.1 DragonflyDB Migration    :active, p00_3, 2026-08-26, 2d
     section Phase 1: Programmable Money
-    SPEC-001 Smart Savings Module       :active, p1_1, after p00_2, 3d
-    TASKS-001 & TDD Implementation      :p1_2, after p1_1, 4d
+    SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
+    SPEC-001.1 Account Lifecycle        :done, p1_2, 2026-08-24, 2d
+    SPEC-001.2 Savings Plans & Rules    :done, p1_3, 2026-08-26, 2d
     section Phase 2: Goal Engine
-    SPEC-002 Financial Goal Engine      :p2_1, after p1_2, 3d
+    SPEC-002 Financial Goal Engine      :p2_1, after p1_3, 3d
     TASKS-002 & Strategy Engine         :p2_2, after p2_1, 4d
     section Phase 3: Intelligence
     SPEC-003 Subscription & Spend Intel :p3_1, after p2_2, 3d
@@ -142,6 +144,24 @@ gantt
   - [`.spec/PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/PLAN-000-architecture-alignment-modulith-baseline.md)
   - [`.spec/TASKS-000-architecture-alignment-modulith-baseline.md`](file:///.spec/TASKS-000-architecture-alignment-modulith-baseline.md)
   - [`.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md)
+
+---
+
+### 🔹 Phase 0.1: In-Memory Store Migration: Redis to DragonflyDB
+**Spec Identifier**: [`SPEC-000.1-migrate-redis-to-dragonflydb`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `High-Throughput In-Memory Engine (br.com.wallet.fraud / infrastructure)`
+
+- **Intent**: Migrate the distributed in-memory caching and velocity layer from Redis to multi-threaded **DragonflyDB** (`docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1`), verifying full Lettuce RESP3 / Unix Domain Socket (UDS) compatibility and atomic Lua script execution (`REVIEW_COUNT_PROTECTED_SCRIPT`, `BLOCK_PROTECTED_SCRIPT`).
+- **Capabilities Included**:
+  - **DragonflyDB Deployment**: Docker Compose with UDS (`/var/run/redis/redis.sock`) and TCP (`6379`) support.
+  - **Lua Multi-Key Atomicity**: Verified lock management across Dragonfly worker threads for all `KEYS[1..N]` pre-declared scripts.
+  - **Testcontainers Upgrade**: Upgraded integration test infrastructure in `IntegrationTestBase.java`.
+  - **Dedicated Test Suite**: `DragonflyLuaCompatibilityIT` testing replay detection and threshold blocking under concurrency.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md) (Ratified)
+  - [`.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md) (Approved)
+  - [`.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md) (Ready for TDD)
 
 ---
 

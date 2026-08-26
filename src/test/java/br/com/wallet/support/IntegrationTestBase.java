@@ -1,6 +1,5 @@
 package br.com.wallet.support;
 
-
 import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
 import br.com.wallet.ledger.api.event.EventPublisher;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -12,7 +11,6 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.ObjectMapper;
-
 
 @TestConfiguration(proxyBeanMethods = false)
 public class IntegrationTestBase {
@@ -36,8 +34,6 @@ public class IntegrationTestBase {
     @ServiceConnection
     public PostgreSQLContainer postgresContainer() {
         return new PostgreSQLContainer(POSTGRES_FSYNC_OFF_IMAGE)
-                //.withCommand("postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "full_page_writes=off")
-                //.withTmpFs(Map.of("/var/lib/postgresql/data", "rw"))
                 .withReuse(true)
                 .withDatabaseName("wallet")
                 .withUsername("test")
@@ -47,7 +43,6 @@ public class IntegrationTestBase {
 
     private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.14.5-alpine");
 
-    // Definimos como static para que ele inicie antes do Contexto do Spring
     public static final GenericContainer<?> NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
             .withExposedPorts(4222, 8222)
             .withCommand("-js", "-sd", "/tmp", "--auth", "dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n", "-m", "8222")
@@ -57,9 +52,12 @@ public class IntegrationTestBase {
                             .forStatusCode(200)
             );
 
-    private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:8.6-alpine");
-    public static final GenericContainer<?> REDIS = new GenericContainer<>(REDIS_IMAGE).withExposedPorts(6379);
-
+    private static final DockerImageName DRAGONFLY_IMAGE = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1");
+    public static final GenericContainer<?> REDIS = new GenericContainer<>(DRAGONFLY_IMAGE)
+            .withExposedPorts(6379)
+            .withCommand("--logtostderr", "--proactor_threads=2")
+            .waitingFor(Wait.forListeningPort());
+    public static final GenericContainer<?> DRAGONFLY = REDIS;
 
     static {
         NATS_CONTAINER.start();
@@ -76,6 +74,4 @@ public class IntegrationTestBase {
     public EventPublisher eventPublisher() {
         return new FailingEventPublisher();
     }
-
-
 }

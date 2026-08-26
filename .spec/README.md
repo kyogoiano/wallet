@@ -21,8 +21,10 @@ Each initiative uses a numeric prefix:
 | Phase | Spec | Title | Status | Execution Summary |
 | :--- | :--- | :--- | :--- | :--- |
 | **0** | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | Architecture Alignment & Modulith Baseline (Refactor) | 🟢 Completed & Reconciled | [`SUMMARY-000`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md) |
+| **0.1** | [`SPEC-000.1`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md) | In-Memory Store Migration: Redis to DragonflyDB | 🟢 Completed & Reconciled | [`SUMMARY-000.1`](file:///.spec/summaries/SUMMARY-000.1-migrate-redis-to-dragonflydb.md) |
 | **1** | [`SPEC-001`](file:///.spec/SPEC-001-smart-savings-automation.md) | Smart Savings Automation (`br.com.wallet.savings`) | 🟢 Completed & Reconciled | [`SUMMARY-001`](file:///.spec/summaries/SUMMARY-001-smart-savings-automation.md) |
 | **1.1** | [`SPEC-001.1`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md) | Account Lifecycle State & Fraud Blocking (`br.com.wallet.ledger`) | 🟢 Completed & Reconciled | [`SUMMARY-001.1`](file:///.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md) |
+| **1.2** | [`SPEC-001.2`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md) | Savings Plans & Rules Dynamic Management (`br.com.wallet.savings`) | 🟢 Completed & Reconciled | [`SUMMARY-001.2`](file:///.spec/summaries/SUMMARY-001.2-savings-plans-and-rules-management.md) |
 | **2** | `SPEC-002` | Financial Goal & Cashflow Engine (`br.com.wallet.goals`) | ⚪ Planned | — |
 | **3** | `SPEC-003` | Subscription & Spending Intelligence (`br.com.wallet.intelligence`) | ⚪ Planned | — |
 | **4** | `SPEC-004` | AI Financial Copilot & MCP Gateway (`br.com.wallet.copilot`) | ⚪ Planned | — |

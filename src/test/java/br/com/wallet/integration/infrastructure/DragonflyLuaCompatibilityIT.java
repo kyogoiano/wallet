@@ -106,7 +106,7 @@ public class DragonflyLuaCompatibilityIT extends DockerProperties {
                 keys,
                 args
         );
-        assertThat(result1.get(0)).isEqualTo(1L);
+        assertThat(result1.getFirst()).isEqualTo(1L);
 
         // Replay attempt with same opId -> Replay detected
         List<Object> result2 = redisCommands.eval(
@@ -250,7 +250,7 @@ public class DragonflyLuaCompatibilityIT extends DockerProperties {
                             keys,
                             args
                     );
-                    if (res != null && res.get(0).equals(1L)) {
+                    if (res != null && res.getFirst().equals(1L)) {
                         successCount++;
                     }
                 }

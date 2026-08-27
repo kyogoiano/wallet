@@ -7,8 +7,10 @@ import br.com.wallet.ledger.api.context.Wallet;
 import br.com.wallet.ledger.api.context.Withdraw;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -18,12 +20,18 @@ import static org.assertj.core.api.Assertions.assertThat;
 @DisplayName("Command Context Serialization & Deserialization Unit Tests")
 class CommandSerializationTest {
 
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ObjectMapper objectMapper = JsonMapper.builder()
+            .disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .build();
 
     private <T> T deserializePayload(byte[] data, Class<T> clazz) {
         JsonNode node = objectMapper.readTree(data);
-        if (node.isString()) {
-            return objectMapper.readValue(node.asString(), clazz);
+        while (node != null && node.isString()) {
+            try {
+                node = objectMapper.readTree(node.asString());
+            } catch (Exception e) {
+                break;
+            }
         }
         return objectMapper.treeToValue(node, clazz);
     }
@@ -55,13 +63,32 @@ class CommandSerializationTest {
     }
 
     @Test
+    @DisplayName("Should deserialize string-wrapped and unknown-field Withdraw command from DLQ replay")
+    void shouldDeserializeStringWrappedWithdrawCommand() {
+        String innerJson = """
+                {"walletId":"0a35fb14-75ee-4125-943b-500893c30d33","userId":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","amount":50,"operationId":"0a35fb14-75ee-4125-943b-500893c30d39","origin":"USER","sourceUserIdForFraudCheck":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","targetUserIdForFraudCheck":null}
+                """.trim();
+
+        // Simulate string wrapping (e.g. from JSON serialization of String payload)
+        byte[] stringWrappedPayload = objectMapper.writeValueAsBytes(innerJson);
+
+        Withdraw deserialized = deserializePayload(stringWrappedPayload, Withdraw.class);
+
+        assertThat(deserialized).isNotNull();
+        assertThat(deserialized.walletId()).isEqualTo(UUID.fromString("0a35fb14-75ee-4125-943b-500893c30d33"));
+        assertThat(deserialized.userId()).isEqualTo(UUID.fromString("2d0b175d-ee1c-41ab-9dda-a050ef29dfa8"));
+        assertThat(deserialized.amount()).isEqualByComparingTo(new BigDecimal("50"));
+        assertThat(deserialized.operationId()).isEqualTo(UUID.fromString("0a35fb14-75ee-4125-943b-500893c30d39"));
+        assertThat(deserialized.origin()).isEqualTo(OperationOrigin.USER);
+    }
+
+    @Test
     @DisplayName("Should deserialize double-encoded JSON String payload for Deposit command")
     void shouldDeserializeDoubleEncodedDepositCommand() {
         String innerJson = """
                 {"walletId":"0a35fb14-75ee-4125-943b-500893c30d33","userId":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","amount":100000,"operationId":"0a35fb14-75ee-4125-943b-500893c30d32","origin":"USER","sourceUserIdForFraudCheck":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","targetUserIdForFraudCheck":null}
                 """.trim();
 
-        // Simulate double-encoding as a JSON string (e.g. "{\"walletId\":...}")
         byte[] stringWrappedPayload = objectMapper.writeValueAsBytes(innerJson);
 
         Deposit deserialized = deserializePayload(stringWrappedPayload, Deposit.class);

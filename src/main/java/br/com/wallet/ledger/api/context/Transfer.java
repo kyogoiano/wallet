@@ -15,7 +15,7 @@ public record Transfer(
         @NonNull UUID to,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
-        @NonNull OperationOrigin origin
+        OperationOrigin origin
 ) implements TraceContext, FraudCheckable {
 
     public Transfer {
@@ -23,7 +23,9 @@ public record Transfer(
         Objects.requireNonNull(to, "to cannot be null");
         Objects.requireNonNull(amount, "amount cannot be null");
         Objects.requireNonNull(operationId, "operationId cannot be null");
-        Objects.requireNonNull(origin, "origin cannot be null");
+        if (origin == null) {
+            origin = OperationOrigin.USER;
+        }
     }
 
     public Transfer(@NonNull UUID from, @NonNull UUID to, @NonNull BigDecimal amount, @NonNull UUID operationId) {
@@ -50,12 +52,12 @@ public record Transfer(
     }
 
     @Override
-    public UUID getSourceUserIdForFraudCheck() {
+    public UUID sourceUserIdForFraudCheck() {
         return this.from;
     }
 
     @Override
-    public UUID getTargetUserIdForFraudCheck() {
+    public UUID targetUserIdForFraudCheck() {
         return this.to;
     }
 }

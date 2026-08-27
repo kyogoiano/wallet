@@ -41,8 +41,8 @@ public class FraudCheckHelper {
     public void performFraudCheck(@NonNull final FraudCheckable operation) {
         final Instant now = clock.instant();
         final FraudContext fraudContext = new FraudContext(
-                operation.getSourceUserIdForFraudCheck(),
-                operation.getTargetUserIdForFraudCheck(),
+                operation.sourceUserIdForFraudCheck(),
+                operation.targetUserIdForFraudCheck(),
                 operation.operationId(),
                 FraudContext.toCents(operation.amount()),
                 now
@@ -62,7 +62,7 @@ public class FraudCheckHelper {
         ));
 
         if (fraudResponse.fraudDecision().equals(FraudDecision.BLOCK)) {
-            log.warn("Operation blocked by fraud rules: operationId={}, userId={}", operation.operationId(), operation.getSourceUserIdForFraudCheck());
+            log.warn("Operation blocked by fraud rules: operationId={}, userId={}", operation.operationId(), operation.sourceUserIdForFraudCheck());
 
             // 1. Persistent block in PostgreSQL accounts table (I-ACCOUNT-001)
             String reason = "Fraud risk score: " + fraudResponse.riskScore() + ", rules: " + fraudResponse.triggeredRules();

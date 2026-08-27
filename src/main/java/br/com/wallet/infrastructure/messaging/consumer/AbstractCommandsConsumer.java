@@ -84,8 +84,12 @@ public abstract class AbstractCommandsConsumer<T extends TraceContext> extends A
 
     protected T deserializePayload(byte[] data) {
         JsonNode node = objectMapper.readTree(data);
-        if (node.isString()) {
-            return objectMapper.readValue(node.asString(), commandClass);
+        while (node != null && node.isString()) {
+            try {
+                node = objectMapper.readTree(node.asString());
+            } catch (Exception e) {
+                break;
+            }
         }
         return objectMapper.treeToValue(node, commandClass);
     }

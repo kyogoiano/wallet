@@ -10,15 +10,10 @@ import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
-import tools.jackson.databind.ObjectMapper;
 
 @TestConfiguration(proxyBeanMethods = false)
 public class IntegrationTestBase {
 
-    @Bean
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
-    }
 
     private static final DockerImageName POSTGRES_FSYNC_OFF_IMAGE = DockerImageName.parse("postgres:18.3-alpine");
 

@@ -23,12 +23,12 @@ public record Wallet(@NonNull UUID id,
     }
 
     @Override
-    public UUID getSourceUserIdForFraudCheck() {
+    public UUID sourceUserIdForFraudCheck() {
         return this.userId;
     }
 
     @Override
-    public UUID getTargetUserIdForFraudCheck() {
+    public UUID targetUserIdForFraudCheck() {
         return null;
     }
 

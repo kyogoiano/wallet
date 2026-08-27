@@ -37,8 +37,12 @@ public abstract class AbstractEventConsumer<T extends DomainEvent> extends Abstr
 
     protected T deserializeEvent(byte[] data) {
         JsonNode node = objectMapper.readTree(data);
-        if (node.isString()) {
-            return objectMapper.readValue(node.asString(), eventClass);
+        while (node != null && node.isString()) {
+            try {
+                node = objectMapper.readTree(node.asString());
+            } catch (Exception e) {
+                break;
+            }
         }
         return objectMapper.treeToValue(node, eventClass);
     }

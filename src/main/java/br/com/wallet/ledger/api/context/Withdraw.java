@@ -16,7 +16,7 @@ public record Withdraw(
         @Nullable UUID userId,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
-        @NonNull OperationOrigin origin
+        OperationOrigin origin
 ) implements TraceContext, FraudCheckable {
 
     public Withdraw {
@@ -51,12 +51,12 @@ public record Withdraw(
     }
 
     @Override
-    public UUID getSourceUserIdForFraudCheck() {
+    public UUID sourceUserIdForFraudCheck() {
         return this.userId;
     }
 
     @Override
-    public UUID getTargetUserIdForFraudCheck() {
+    public UUID targetUserIdForFraudCheck() {
         return null; // Withdrawals don't have a target user
     }
 }

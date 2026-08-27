@@ -16,14 +16,16 @@ public record Deposit(
         @Nullable UUID userId,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
-        @NonNull OperationOrigin origin
+        OperationOrigin origin
 ) implements TraceContext, FraudCheckable {
 
     public Deposit {
         Objects.requireNonNull(walletId, "walletId cannot be null");
         Objects.requireNonNull(amount, "amount cannot be null");
         Objects.requireNonNull(operationId, "operationId cannot be null");
-        Objects.requireNonNull(origin, "origin cannot be null");
+        if (origin == null) {
+            origin = OperationOrigin.USER;
+        }
     }
 
     public Deposit(@NonNull UUID walletId, @Nullable UUID userId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
@@ -49,12 +51,12 @@ public record Deposit(
     }
 
     @Override
-    public UUID getSourceUserIdForFraudCheck() {
+    public UUID sourceUserIdForFraudCheck() {
         return this.userId;
     }
 
     @Override
-    public UUID getTargetUserIdForFraudCheck() {
+    public UUID targetUserIdForFraudCheck() {
         return null; // Deposits don't have a target user
     }
 }

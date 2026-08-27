@@ -65,8 +65,8 @@ class FraudCheckHelperTest {
         FraudCheckable operation = mock(FraudCheckable.class);
         when(operation.operationId()).thenReturn(operationId);
         when(operation.amount()).thenReturn(amount);
-        when(operation.getSourceUserIdForFraudCheck()).thenReturn(sourceUserId);
-        when(operation.getTargetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+        when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.ALLOW, 0, List.of());
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);
@@ -96,8 +96,8 @@ class FraudCheckHelperTest {
         FraudCheckable operation = mock(FraudCheckable.class);
         when(operation.operationId()).thenReturn(operationId);
         when(operation.amount()).thenReturn(amount);
-        when(operation.getSourceUserIdForFraudCheck()).thenReturn(sourceUserId);
-        when(operation.getTargetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+        when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.REVIEW, 50, List.of(RuleType.GLOBAL_VELOCITY));
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);
@@ -124,8 +124,8 @@ class FraudCheckHelperTest {
         FraudCheckable operation = mock(FraudCheckable.class);
         when(operation.operationId()).thenReturn(operationId);
         when(operation.amount()).thenReturn(amount);
-        when(operation.getSourceUserIdForFraudCheck()).thenReturn(sourceUserId);
-        when(operation.getTargetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+        when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.BLOCK, 100, List.of(RuleType.SLIDING_WINDOW));
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);
@@ -150,8 +150,8 @@ class FraudCheckHelperTest {
         FraudCheckable operation = mock(FraudCheckable.class);
         when(operation.operationId()).thenReturn(operationId);
         when(operation.amount()).thenReturn(new BigDecimal("123.45"));
-        when(operation.getSourceUserIdForFraudCheck()).thenReturn(sourceUserId);
-        when(operation.getTargetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+        when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.ALLOW, 0, List.of());
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);

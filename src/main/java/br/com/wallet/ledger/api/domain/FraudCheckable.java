@@ -6,6 +6,6 @@ import java.util.UUID;
 public interface FraudCheckable {
     UUID operationId();
     BigDecimal amount();
-    UUID getSourceUserIdForFraudCheck(); // e.g., walletId for Deposit/Withdraw, 'from' for Transfer
-    UUID getTargetUserIdForFraudCheck(); // e.g., 'to' for Transfer, null for Deposit/Withdraw
+    UUID sourceUserIdForFraudCheck(); // e.g., walletId for Deposit/Withdraw, 'from' for Transfer
+    UUID targetUserIdForFraudCheck(); // e.g., 'to' for Transfer, null for Deposit/Withdraw
 }

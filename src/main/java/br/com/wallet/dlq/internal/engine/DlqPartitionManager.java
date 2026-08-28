@@ -1,6 +1,7 @@
-package br.com.wallet.infrastructure.messaging.dlq;
+package br.com.wallet.dlq.internal.engine;
 
-import br.com.wallet.infrastructure.persistence.DlqOperationsDao;
+import br.com.wallet.dlq.internal.persistence.DlqOperationsDao;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -9,6 +10,7 @@ import org.springframework.stereotype.Component;
 import java.time.Clock;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Objects;
 
 @Component
 public class DlqPartitionManager {
@@ -17,11 +19,10 @@ public class DlqPartitionManager {
     private final DlqOperationsDao dlqOperationsDao;
     private final Clock clock;
 
-    public DlqPartitionManager(DlqOperationsDao dlqOperationsDao, Clock clock) {
-        this.dlqOperationsDao = dlqOperationsDao;
-        this.clock = clock;
+    public DlqPartitionManager(@NonNull final DlqOperationsDao dlqOperationsDao, @NonNull final Clock clock) {
+        this.dlqOperationsDao = Objects.requireNonNull(dlqOperationsDao, "dlqOperationsDao cannot be null");
+        this.clock = Objects.requireNonNull(clock, "clock cannot be null");
     }
-
 
     // runs weekly
     @Scheduled(cron = "0 0 0 * * MON")
@@ -40,5 +41,4 @@ public class DlqPartitionManager {
 
         log.info("Dlq operations partition dropped! count={}, at={}", droppedPartitions, now.atOffset(ZoneOffset.UTC));
     }
-
 }

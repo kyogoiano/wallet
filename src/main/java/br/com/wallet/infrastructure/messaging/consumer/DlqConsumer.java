@@ -1,9 +1,9 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
-import br.com.wallet.infrastructure.messaging.dlq.DlqEvent;
-import br.com.wallet.infrastructure.messaging.dlq.DlqFailureType;
-import br.com.wallet.infrastructure.messaging.dlq.DlqStatus;
-import br.com.wallet.infrastructure.persistence.DlqOperationsDao;
+import br.com.wallet.dlq.api.DlqManagementUseCase;
+import br.com.wallet.dlq.api.model.DlqEvent;
+import br.com.wallet.dlq.api.model.DlqFailureType;
+import br.com.wallet.dlq.api.model.DlqStatus;
 import io.nats.client.Connection;
 import io.nats.client.Message;
 import io.nats.client.impl.Headers;
@@ -26,12 +26,12 @@ public class DlqConsumer extends AbstractNatsConsumer {
     private static final String durableConsumerName = "dlq-consumer"; // Durable consumer name for JetStream
     private static final Logger log = LoggerFactory.getLogger(DlqConsumer.class);
 
-    private final DlqOperationsDao dlqOperationsDao;
+    private final DlqManagementUseCase dlqManagementUseCase;
 
     public DlqConsumer(@Autowired final Connection natsConnection,
-                       final DlqOperationsDao dlqOperationsDao) {
+                       @Autowired final DlqManagementUseCase dlqManagementUseCase) {
         super(subject, natsConnection);
-        this.dlqOperationsDao = dlqOperationsDao;
+        this.dlqManagementUseCase = Objects.requireNonNull(dlqManagementUseCase, "dlqManagementUseCase cannot be null");
     }
 
     @Override
@@ -51,7 +51,7 @@ public class DlqConsumer extends AbstractNatsConsumer {
 
             var event = mapToDlqEvent(message, headers);
 
-            dlqOperationsDao.insert(event);
+            dlqManagementUseCase.recordDlqEvent(event);
 
             message.ack();
 
@@ -67,7 +67,7 @@ public class DlqConsumer extends AbstractNatsConsumer {
         return new DlqEvent(
                 UUID.randomUUID(),
                 UUID.fromString(Objects.requireNonNull(headers.getFirst("operation_id"))),
-                UUID.fromString(Objects.requireNonNull(headers.getFirst("userId"))),
+                headers.getFirst("userId") != null ? UUID.fromString(headers.getFirst("userId")) : null,
                 headers.getFirst("original_subject"),
                 DlqStatus.PENDING,
                 headers.getFirst("error_message"),

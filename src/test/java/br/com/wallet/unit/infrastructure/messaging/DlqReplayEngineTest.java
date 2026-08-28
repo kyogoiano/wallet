@@ -1,10 +1,10 @@
 package br.com.wallet.unit.infrastructure.messaging;
 
-import br.com.wallet.infrastructure.messaging.dlq.DlqEvent;
-import br.com.wallet.infrastructure.messaging.dlq.DlqFailureType;
-import br.com.wallet.infrastructure.messaging.dlq.DlqReplayEngine;
-import br.com.wallet.infrastructure.messaging.dlq.DlqStatus;
-import br.com.wallet.infrastructure.persistence.DlqOperationsDao;
+import br.com.wallet.dlq.api.model.DlqEvent;
+import br.com.wallet.dlq.api.model.DlqFailureType;
+import br.com.wallet.dlq.api.model.DlqStatus;
+import br.com.wallet.dlq.internal.engine.DlqReplayEngine;
+import br.com.wallet.dlq.internal.persistence.DlqOperationsDao;
 import br.com.wallet.ledger.api.exceptions.TransientException;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;

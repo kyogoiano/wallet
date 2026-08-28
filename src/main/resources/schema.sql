@@ -118,13 +118,17 @@ CREATE TABLE IF NOT EXISTS dlq_operations (
   event_type VARCHAR(50) NOT NULL
       CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
   CONSTRAINT dlq_status_chk
-      CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED')),
+    CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED', 'EXHAUSTED', 'DISCARDED')),
   CONSTRAINT dlq_operations_pkey PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_dlq_retry
     ON dlq_operations (next_retry_at)
     WHERE status IN ('PENDING', 'FAILED');
+
+CREATE INDEX IF NOT EXISTS idx_dlq_exhausted
+    ON dlq_operations (status, created_at)
+    WHERE status = 'EXHAUSTED';
 
 CREATE INDEX IF NOT EXISTS idx_dlq_processing
     ON dlq_operations (status, created_at)

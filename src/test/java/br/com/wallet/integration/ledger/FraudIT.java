@@ -55,7 +55,7 @@ class FraudIT extends DockerProperties {
     private FraudService fraudService;
 
     @MockitoBean
-    private OutboxDao outboxDao;
+    private OutboxDao<FraudEvent> outboxDao;
 
     @BeforeEach
     void setUp() {

@@ -1,0 +1,382 @@
+Yes — **I implicitly removed Spring Modulith Moments from the proposal**, and that was not necessarily the right choice.
+
+For `SPEC-002`, I actually think **Moments fit very well**, perhaps better than in `savings`.
+
+The key is that Goals is fundamentally **time-aware**:
+
+```text
+Goal
+ ├── target amount
+ ├── target date
+ ├── current progress
+ ├── periodic contribution
+ └── strategy changes over time
+```
+
+So I would bring Moments back as a first-class architectural mechanism.
+
+## Where Moments fit
+
+I would model the architecture like this:
+
+```text
+                    ┌──────────────────────┐
+                    │   Spring Modulith    │
+                    │       Moments        │
+                    └──────────┬───────────┘
+                               │
+                     Day / Week / Month
+                               │
+                               ▼
+┌──────────────────────────────────────────────────────┐
+│                 Goals Module                         │
+│                                                      │
+│  FinancialGoal                                       │
+│  CashflowProfile                                     │
+│                                                      │
+│  GoalStrategyEngine                                  │
+│       │                                              │
+│       ├── calculate required contribution            │
+│       ├── evaluate progress                          │
+│       ├── detect deadline risk                       │
+│       └── recalculate strategy                       │
+│                                                      │
+└───────────────────────────┬──────────────────────────┘
+                            │
+                            ▼
+                     Strategy Result
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+           Query        Notification    Future AI
+```
+
+This is cleaner than inventing our own scheduler.
+
+---
+
+# I would add a temporal listener
+
+For example:
+
+```java
+@ApplicationModuleListener
+public class GoalMomentListener {
+
+    private final GoalStrategyUseCase strategyUseCase;
+
+    public GoalMomentListener(
+            GoalStrategyUseCase strategyUseCase) {
+        this.strategyUseCase = strategyUseCase;
+    }
+
+    @ApplicationModuleListener
+    public void on(@NonNull DayHasPassed event) {
+        strategyUseCase.recalculateActiveGoals();
+    }
+}
+```
+
+Or perhaps more selectively:
+
+```java
+@ApplicationModuleListener
+public void on(@NonNull MonthHasPassed event) {
+    strategyUseCase.recalculateActiveGoals();
+}
+```
+
+For the Goal Engine, **monthly is probably the natural business cadence**.
+
+We don't need to recalculate a "buy a house in 24 months" strategy every second.
+
+---
+
+# The interesting part: Moments + Domain Events
+
+I think `goals` should react to **two dimensions of change**.
+
+## 1. Financial state changed
+
+For example:
+
+```text
+DepositCompletedEvent
+TransferCompletedEvent
+SavingsSweepCompletedEvent
+```
+
+These mean:
+
+> "Something changed in the user's financial state."
+
+Potentially:
+
+```java
+@ApplicationModuleListener
+void on(DepositCompletedEvent event) {
+    strategyService.markForRecalculation(event.walletId());
+}
+```
+
+## 2. Time changed
+
+Spring Modulith Moments provides:
+
+```text
+DayHasPassed
+WeekHasPassed
+MonthHasPassed
+QuarterHasPassed
+YearHasPassed
+```
+
+These mean:
+
+> "The financial context changed because time passed."
+
+Example:
+
+```java
+@ApplicationModuleListener
+void on(MonthHasPassed event) {
+    strategyService.recalculateActiveGoals();
+}
+```
+
+This is extremely relevant because:
+
+```text
+Target: R$100,000
+Deadline: Dec 2028
+```
+
+Today:
+
+```text
+Remaining months = 28
+Required = R$3,571/month
+```
+
+One month later:
+
+```text
+Remaining months = 27
+Required = R$3,704/month
+```
+
+Even if the user's balance did not change, the strategy changed.
+
+That is exactly the kind of domain problem Moments solve elegantly.
+
+---
+
+# I would introduce a Goal Evaluation lifecycle
+
+Instead of just calculating strategies on demand, we can distinguish:
+
+```text
+┌─────────────────────────────────┐
+│         Goal Evaluation          │
+├─────────────────────────────────┤
+│                                 │
+│ Trigger                         │
+│   │                             │
+│   ├── User request              │
+│   ├── Financial event           │
+│   └── Time moment               │
+│                                 │
+│            ▼                    │
+│                                 │
+│ Financial Snapshot              │
+│            │                    │
+│            ▼                    │
+│ GoalStrategyEngine              │
+│            │                    │
+│            ▼                    │
+│ GoalEvaluationResult            │
+│                                 │
+└─────────────────────────────────┘
+```
+
+The result could contain:
+
+```java
+public record GoalEvaluationResult(
+        UUID goalId,
+        BigDecimal remainingAmount,
+        int remainingPeriods,
+        BigDecimal requiredContribution,
+        BigDecimal safeContributionCapacity,
+        BigDecimal recommendedContribution,
+        GoalFeasibility feasibility,
+        Instant evaluatedAt
+) {}
+```
+
+This is useful because it gives you a persistent historical picture later:
+
+```text
+September
+  ON_TRACK
+
+October
+  ON_TRACK
+
+November
+  AT_RISK
+
+December
+  UNACHIEVABLE
+```
+
+That becomes very valuable for the future AI Copilot.
+
+---
+
+# I would add a new invariant
+
+### `I-GOAL-004 — Temporal Determinism`
+
+For the same:
+
+```text
+Goal
+CashflowProfile
+FinancialState
+EvaluationMoment
+```
+
+the engine must produce the same result:
+
+```text
+Strategy =
+f(
+    Goal,
+    FinancialState,
+    CashflowProfile,
+    EvaluationMoment
+)
+```
+
+The important part is that the engine should receive the moment explicitly.
+
+For example:
+
+```java
+GoalStrategy evaluate(
+        FinancialGoal goal,
+        FinancialSnapshot snapshot,
+        CashflowProfile profile,
+        LocalDate evaluationDate
+);
+```
+
+This is excellent for testing.
+
+You don't want:
+
+```java
+LocalDate.now()
+```
+
+hidden inside the engine.
+
+Instead:
+
+```text
+Spring Modulith Moment
+        │
+        ▼
+Listener
+        │
+        ▼
+Clock / explicit evaluation date
+        │
+        ▼
+Deterministic engine
+```
+
+---
+
+# Proposed module structure
+
+I would now revise my earlier topology to:
+
+```text
+br.com.wallet.goals
+│
+├── package-info.java
+│
+├── api
+│   ├── FinancialGoalUseCase.java
+│   ├── GoalStrategyUseCase.java
+│   ├── GoalQueryUseCase.java
+│   │
+│   ├── domain
+│   │   ├── FinancialGoal.java
+│   │   ├── CashflowProfile.java
+│   │   ├── FinancialSnapshot.java
+│   │   ├── GoalStrategy.java
+│   │   ├── GoalEvaluationResult.java
+│   │   ├── GoalPriority.java
+│   │   ├── GoalStatus.java
+│   │   └── GoalFeasibility.java
+│   │
+│   └── dto
+│
+└── internal
+    │
+    ├── listener
+    │   ├── GoalFinancialEventListener.java
+    │   └── GoalMomentListener.java
+    │
+    ├── engine
+    │   ├── ContributionCalculator.java
+    │   ├── CashflowCapacityCalculator.java
+    │   └── GoalStrategyEngine.java
+    │
+    ├── service
+    │   ├── FinancialGoalService.java
+    │   ├── GoalEvaluationService.java
+    │   └── GoalQueryService.java
+    │
+    └── persistence
+        ├── FinancialGoalDao.java
+        ├── CashflowProfileDao.java
+        └── GoalEvaluationHistoryDao.java
+```
+
+## My revised opinion
+
+So, no, I would **not remove Spring Modulith Moments**.
+
+I think the architecture should be:
+
+```text
+                 ┌─────────────────────┐
+                 │   Financial Events   │
+                 │                     │
+                 │ DepositCompleted     │
+                 │ TransferCompleted    │
+                 └──────────┬──────────┘
+                            │
+                            ▼
+                    Goals Module
+                            ▲
+                            │
+                 ┌──────────┴──────────┐
+                 │ Spring Modulith      │
+                 │ Moments              │
+                 │                      │
+                 │ MonthHasPassed       │
+                 └─────────────────────┘
+```
+
+The nice thing is that **Savings is event-driven**, while **Goals becomes both event-driven and time-driven**.
+
+That gives `br.com.wallet.goals` a distinct architectural identity:
+
+> **Savings reacts to transactions. Goals reacts to transactions and the passage of time.**
+
+I would make Spring Modulith Moments an explicit part of `SPEC-002`, including its own invariant, requirements, failure modes, and acceptance criteria.

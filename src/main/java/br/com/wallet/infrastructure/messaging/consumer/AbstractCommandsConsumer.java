@@ -70,7 +70,7 @@ public abstract class AbstractCommandsConsumer<T extends TraceContext> extends A
                     return;
                 }
                 case ACK -> {
-                    log.error("Permanent/Business error for operationId={}, finishing with ACK", operationId);
+                    log.info("Non-retriable/Business condition for operationId={}, finishing with ACK. reason={}", operationId, e.getMessage());
                     message.ack();
                     return;
                 }

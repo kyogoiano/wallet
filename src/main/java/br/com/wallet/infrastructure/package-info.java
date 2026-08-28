@@ -1,5 +1,5 @@
 @org.springframework.modulith.ApplicationModule(
     displayName = "Wallet Infrastructure Adapters",
-    allowedDependencies = {"ledger::api", "ledger", "fraud::api", "fraud", "core::api", "core", "savings::api", "savings"}
+    allowedDependencies = {"ledger::api", "ledger", "fraud::api", "fraud", "core::api", "core", "savings::api", "savings", "goals::api", "goals"}
 )
 package br.com.wallet.infrastructure;

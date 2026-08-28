@@ -201,3 +201,38 @@ CREATE TABLE IF NOT EXISTS savings_execution_history (
 
 CREATE INDEX IF NOT EXISTS idx_savings_hist_source_op ON savings_execution_history(source_operation_id);
 CREATE INDEX IF NOT EXISTS idx_savings_hist_plan ON savings_execution_history(plan_id, created_at DESC);
+
+-- =========================================================================
+-- Financial Goals Capability Module Tables (SPEC-002 / PLAN-002)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS goals (
+                                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    wallet_id UUID NOT NULL REFERENCES accounts(id),
+    target_wallet_id UUID NULL REFERENCES accounts(id),
+    name VARCHAR(128) NOT NULL,
+    target_amount NUMERIC(19, 2) NOT NULL CHECK (target_amount > 0),
+    target_date DATE NOT NULL,
+    priority VARCHAR(16) NOT NULL DEFAULT 'MEDIUM',
+    status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT chk_goal_priority CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
+    CONSTRAINT chk_goal_status CHECK (status IN ('ACTIVE', 'PAUSED', 'ACHIEVED', 'CANCELLED'))
+    );
+
+CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
+CREATE INDEX IF NOT EXISTS idx_goals_wallet_status ON goals(wallet_id, status);
+
+CREATE TABLE IF NOT EXISTS cashflow_profiles (
+                                                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL,
+    wallet_id UUID NOT NULL UNIQUE REFERENCES accounts(id),
+    monthly_income NUMERIC(19, 2) NOT NULL DEFAULT 0.00 CHECK (monthly_income >= 0),
+    monthly_committed_expenses NUMERIC(19, 2) NOT NULL DEFAULT 0.00 CHECK (monthly_committed_expenses >= 0),
+    minimum_safety_buffer NUMERIC(19, 2) NOT NULL DEFAULT 0.00 CHECK (minimum_safety_buffer >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+CREATE INDEX IF NOT EXISTS idx_cashflow_wallet ON cashflow_profiles(wallet_id);

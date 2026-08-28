@@ -14,13 +14,13 @@ The **Dead Letter Queue (DLQ) & Operational Recovery** capability is promoted fr
 ```mermaid
 flowchart TD
     subgraph Infrastructure [br.com.wallet.infrastructure]
-        DlqController[DlqController (/dlq/operations)]
-        DlqConsumer[DlqConsumer (commands.dlq.*)]
+        DlqController[DlqController dlq operations]
+        DlqConsumer[DlqConsumer commands.dlq.*]
         DlqPublisher[DlqPublisher]
     end
 
-    subgraph DLQ_Module [br.com.wallet.dlq (Spring Modulith)]
-        subgraph Published_API [br.com.wallet.dlq.api (@NamedInterface api)]
+    subgraph DLQ_Module [br.com.wallet.dlq Spring Modulith]
+        subgraph Published_API [br.com.wallet.dlq.api NamedInterface api]
             DlqManagementUseCase
             DlqQueryUseCase
             DlqEvent
@@ -31,7 +31,7 @@ flowchart TD
         subgraph Internal_Domain [br.com.wallet.dlq.internal]
             DlqManagementService
             DlqQueryService
-            DlqReplayEngine[DlqReplayEngine (Scheduler)]
+            DlqReplayEngine[DlqReplayEngine Scheduler]
             DlqOperationsDao
         end
     end

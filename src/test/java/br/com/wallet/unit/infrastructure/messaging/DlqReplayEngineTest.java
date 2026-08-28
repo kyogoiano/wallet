@@ -46,7 +46,7 @@ class DlqReplayEngineTest {
     private final Instant now = Instant.parse("2026-08-28T12:00:00Z");
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         clock = Clock.fixed(now, ZoneId.of("UTC"));
         replayEngine = new DlqReplayEngine(clock, dlqDao, connection);
     }

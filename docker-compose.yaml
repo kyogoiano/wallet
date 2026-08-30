@@ -54,6 +54,16 @@ services:
     restart: unless-stopped
     ports:
       - "6379:6379"
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        mkdir -p /var/run/redis
+        chown -R 999:999 /var/run/redis 2>/dev/null || chown -R dfly:dfly /var/run/redis 2>/dev/null || true
+        chmod 777 /var/run/redis
+        rm -f /var/run/redis/redis.sock
+        exec entrypoint.sh "$$@"
+      - "--"
 
     command:
       - "--logtostderr"

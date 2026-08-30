@@ -3,6 +3,7 @@ package br.com.wallet.infrastructure.rest.api;
 import br.com.wallet.infrastructure.rest.dto.DepositCommand;
 import br.com.wallet.infrastructure.rest.dto.TransferCommand;
 import br.com.wallet.infrastructure.rest.dto.WithdrawCommand;
+import br.com.wallet.ledger.api.dto.OperationStatusResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -39,4 +40,11 @@ public interface OperationsApi {
             @ApiResponse(responseCode = "422", description = "Insufficient funds")
     })
     CompletableFuture<Void> withdraw(UUID operationId, WithdrawCommand request);
+
+    @Operation(summary = "Get operation status and failure diagnostics")
+    @ApiResponses({
+            @ApiResponse(responseCode = "200", description = "Operation status retrieved"),
+            @ApiResponse(responseCode = "404", description = "Operation not found")
+    })
+    OperationStatusResponse getOperationStatus(UUID operationId);
 }

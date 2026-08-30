@@ -165,6 +165,19 @@ gantt
 
 ---
 
+### 🔹 Phase 0.3: Asynchronous Command Exception Handling & Operation Status Tracking
+**Spec Identifier**: [`SPEC-000.3-async-command-exception-handling`](file:///.spec/SPEC-000.3-async-command-exception-handling.md)  
+**Status**: 🟢 **Active / In Execution**  
+**Core Abstraction**: `Operation Lifecycle & Consumer Resilience (br.com.wallet.ledger / messaging / rest)`
+
+- **Intent**: Capture background consumer business exceptions, persist `FAILED` operation state with diagnostic error messages in PostgreSQL, expose `GET /operations/{operationId}` query API, and preserve `202 ACCEPTED` contracts for command endpoints.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md) (Ratified)
+  - [`.spec/PLAN-000.3-async-command-exception-handling.md`](file:///.spec/PLAN-000.3-async-command-exception-handling.md) (Approved)
+  - [`.spec/TASKS-000.3-async-command-exception-handling.md`](file:///.spec/TASKS-000.3-async-command-exception-handling.md) (Ready for TDD)
+
+---
+
 ### 🔹 Phase 1: Smart Savings & Programmable Money
 **Spec Identifier**: [`SPEC-001-smart-savings-automation`](file:///.spec/SPEC-001-smart-savings-automation.md)  
 **Status**: 🟢 **Completed & Verified**  

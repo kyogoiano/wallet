@@ -37,12 +37,22 @@ class WalletOperationsDaoTest {
     }
 
     @Test
-    void shouldReturnFalseWhenDuplicateKeyOccurs() {
+    void shouldFailOperationSuccessfully() {
+        UUID opId = UUID.randomUUID();
+        when(jdbc.update(anyString(), any(), any(), any())).thenReturn(1);
 
-        when(jdbc.update(anyString(), Optional.ofNullable(any()))).thenReturn(0);
+        dao.failOperation(opId, "Insufficient funds", "BUSINESS");
 
-        var result = dao.startOperation(UUID.randomUUID());
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("Insufficient funds"), org.mockito.ArgumentMatchers.eq("BUSINESS"));
+    }
 
-        assertThat(result).isFalse();
+    @Test
+    void shouldCompleteOperationSuccessfully() {
+        UUID opId = UUID.randomUUID();
+        when(jdbc.update(anyString(), any(UUID.class))).thenReturn(1);
+
+        dao.completeOperation(opId);
+
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId));
     }
 }

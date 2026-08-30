@@ -35,8 +35,6 @@ public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
         this.clock = clock;
     }
 
-    
-
     @Override
     public void publish(@NonNull final DomainEventType eventType, final @NonNull String payload, UUID aggregateId) throws IOException {
         final var headers = new Headers();
@@ -44,7 +42,7 @@ public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
         headers.add("version", "v1"); // used for future extensions
         headers.add("created_at", clock.instant().toString());
 
-        // 🔥 importante para idempotência
+        // Log event data for traceability
         final var eventNode = objectReader.readTree(payload);
         log.info("Publishing event data: {}", eventNode.toString());
 
@@ -58,15 +56,15 @@ public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
         final var publishOptions = PublishOptions.builder()
                 .expectedStream("events")
                 .build();
-        final var jetStream = connection.jetStream();
-        jetStream.publishAsync(message, publishOptions).thenApply(ack -> {
-                    log.debug("Published event [{}] to subject [{}], seqNo={}",
-                            eventType, eventType.getSubject(), ack.getSeqno());
-                    return ack;
-                })
-                .exceptionally(ex -> {
-                    log.error("Failed to publish event to NATS: {}", ex.getMessage());
-                    throw new EventPublishException("Unable to process request at the moment", ex);
-                });
+
+        try {
+            final var jetStream = connection.jetStream();
+            final var ack = jetStream.publish(message, publishOptions);
+            log.debug("Published event [{}] to subject [{}], seqNo={}",
+                    eventType, eventType.getSubject(), ack.getSeqno());
+        } catch (Exception ex) {
+            log.error("Failed to publish event [{}] to NATS subject [{}]: {}", eventType, eventType.getSubject(), ex.getMessage());
+            throw new EventPublishException("Unable to publish event to NATS: " + eventType, ex);
+        }
     }
 }

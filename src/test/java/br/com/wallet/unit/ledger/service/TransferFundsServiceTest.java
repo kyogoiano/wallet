@@ -6,7 +6,7 @@ import br.com.wallet.ledger.api.domain.AccountBalance;
 import br.com.wallet.ledger.api.domain.LedgerType;
 import br.com.wallet.ledger.api.event.TransferCompletedEvent;
 import br.com.wallet.ledger.api.exceptions.InsufficientFundsException;
-import br.com.wallet.ledger.internal.operation.OperationStatus;
+import br.com.wallet.ledger.api.domain.OperationStatus;
 import br.com.wallet.ledger.internal.persistence.AccountDao;
 import br.com.wallet.ledger.internal.persistence.OutboxDao;
 import br.com.wallet.ledger.internal.persistence.WalletOperationsDao;

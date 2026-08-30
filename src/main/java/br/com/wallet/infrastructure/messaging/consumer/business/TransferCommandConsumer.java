@@ -1,5 +1,6 @@
 package br.com.wallet.infrastructure.messaging.consumer.business;
 
+import br.com.wallet.ledger.api.OperationStateUseCase;
 import br.com.wallet.ledger.api.TransferFundsUseCase;
 import br.com.wallet.ledger.api.context.Transfer;
 import br.com.wallet.infrastructure.messaging.consumer.AbstractCommandsConsumer;
@@ -27,8 +28,9 @@ public class TransferCommandConsumer extends AbstractCommandsConsumer<Transfer> 
     public TransferCommandConsumer(@Autowired final Connection natsConnection,
                                    @Autowired final ObjectMapper objectMapper,
                                    @Autowired final TransferFundsUseCase transferUseCase,
-                                   @Autowired final DlqPublisher dlqPublisher) {
-        super(subject, dlqSubject, natsConnection, objectMapper, transferUseCase, dlqPublisher, Transfer.class);
+                                   @Autowired final DlqPublisher dlqPublisher,
+                                   @Autowired final OperationStateUseCase operationStateUseCase) {
+        super(subject, dlqSubject, natsConnection, objectMapper, transferUseCase, dlqPublisher, operationStateUseCase, Transfer.class);
     }
 
     @Override

@@ -3,7 +3,7 @@ package br.com.wallet.ledger.internal.service;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.ledger.api.context.Transfer;
 import br.com.wallet.core.exceptions.IdempotencyException;
-import br.com.wallet.ledger.internal.operation.OperationStatus;
+import br.com.wallet.ledger.api.domain.OperationStatus;
 import br.com.wallet.ledger.internal.persistence.OutboxDao;
 import br.com.wallet.ledger.internal.persistence.WalletOperationsDao;
 import br.com.wallet.ledger.api.TransferFundsUseCase;

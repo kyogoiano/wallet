@@ -1,6 +1,7 @@
 package br.com.wallet.infrastructure.messaging.consumer.business;
 
 import br.com.wallet.ledger.api.DepositFundsUseCase;
+import br.com.wallet.ledger.api.OperationStateUseCase;
 import br.com.wallet.ledger.api.context.Deposit;
 import br.com.wallet.infrastructure.messaging.consumer.AbstractCommandsConsumer;
 import br.com.wallet.infrastructure.messaging.publisher.DlqPublisher;
@@ -27,8 +28,9 @@ public class DepositCommandConsumer extends AbstractCommandsConsumer<Deposit> {
     public DepositCommandConsumer(@Autowired final Connection natsConnection,
                                   @Autowired final ObjectMapper objectMapper,
                                   @Autowired final DepositFundsUseCase depositFundsUseCase,
-                                  @Autowired final DlqPublisher dlqPublisher) {
-        super(subject, dlqSubject, natsConnection, objectMapper, depositFundsUseCase, dlqPublisher, Deposit.class);
+                                  @Autowired final DlqPublisher dlqPublisher,
+                                  @Autowired final OperationStateUseCase operationStateUseCase) {
+        super(subject, dlqSubject, natsConnection, objectMapper, depositFundsUseCase, dlqPublisher, operationStateUseCase, Deposit.class);
     }
 
     @Override

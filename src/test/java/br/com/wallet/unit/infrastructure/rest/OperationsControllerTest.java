@@ -38,6 +38,9 @@ class OperationsControllerTest {
     @MockitoBean
     FraudCheckHelper fraudCheckHelper;
 
+    @MockitoBean
+    br.com.wallet.ledger.api.OperationQueryUseCase operationQueryUseCase;
+
     @BeforeEach
     void setup() {
         // By default, make the mock return a completed future to avoid NullPointerException in controller
@@ -252,5 +255,37 @@ class OperationsControllerTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
                 .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void shouldGetOperationStatusSuccessfully() throws Exception {
+        UUID opId = UUID.randomUUID();
+        java.time.Instant now = java.time.Instant.now();
+        var response = new br.com.wallet.ledger.api.dto.OperationStatusResponse(
+                opId,
+                br.com.wallet.ledger.api.domain.OperationStatus.FAILED,
+                "Insufficient funds",
+                "BUSINESS",
+                now,
+                now
+        );
+        when(operationQueryUseCase.getOperationStatus(opId)).thenReturn(java.util.Optional.of(response));
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/operations/{operationId}", opId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.operationId").value(opId.toString()))
+                .andExpect(jsonPath("$.status").value("FAILED"))
+                .andExpect(jsonPath("$.errorMessage").value("Insufficient funds"))
+                .andExpect(jsonPath("$.failureType").value("BUSINESS"));
+    }
+
+    @Test
+    void shouldReturn404WhenOperationNotFound() throws Exception {
+        UUID opId = UUID.randomUUID();
+        when(operationQueryUseCase.getOperationStatus(opId)).thenReturn(java.util.Optional.empty());
+
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/operations/{operationId}", opId))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.code").value("NOT_FOUND"));
     }
 }

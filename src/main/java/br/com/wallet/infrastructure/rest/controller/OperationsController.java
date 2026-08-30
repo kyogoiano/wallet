@@ -1,5 +1,7 @@
 package br.com.wallet.infrastructure.rest.controller;
 
+import br.com.wallet.ledger.api.OperationQueryUseCase;
+import br.com.wallet.ledger.api.dto.OperationStatusResponse;
 import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.ledger.api.context.Deposit;
 import br.com.wallet.ledger.api.context.Transfer;
@@ -25,11 +27,21 @@ public class OperationsController implements OperationsApi {
     private static final Logger log = LoggerFactory.getLogger(OperationsController.class);
     private final NatsCommandPublisher natsCommandPublisher;
     private final FraudCheckHelper fraudCheckHelper;
+    private final OperationQueryUseCase operationQueryUseCase;
 
     public OperationsController(final NatsCommandPublisher natsCommandPublisher,
-                                final FraudCheckHelper fraudCheckHelper) {
+                                final FraudCheckHelper fraudCheckHelper,
+                                final OperationQueryUseCase operationQueryUseCase) {
         this.natsCommandPublisher = natsCommandPublisher;
         this.fraudCheckHelper = fraudCheckHelper;
+        this.operationQueryUseCase = operationQueryUseCase;
+    }
+
+    @GetMapping("/{operationId}")
+    @Override
+    public OperationStatusResponse getOperationStatus(@PathVariable final UUID operationId) {
+        return operationQueryUseCase.getOperationStatus(operationId)
+                .orElseThrow(() -> new java.util.NoSuchElementException("Operation not found: " + operationId));
     }
 
     @PostMapping("/transfer")

@@ -1,6 +1,6 @@
 package br.com.wallet.ledger.internal.persistence;
 
-import br.com.wallet.ledger.internal.operation.OperationStatus;
+import br.com.wallet.ledger.api.domain.OperationStatus;
 import org.jspecify.annotations.NonNull;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -35,10 +35,40 @@ public class WalletOperationsDao {
 
     public void completeOperation(@NonNull final UUID operationId) {
         jdbc.update("""
-            UPDATE wallet_operations
-            SET status = 'COMPLETED'
-            WHERE operation_id = ?
+            INSERT INTO wallet_operations (operation_id, status, created_at, updated_at)
+            VALUES (?, 'COMPLETED', NOW(), NOW())
+            ON CONFLICT (operation_id) DO UPDATE
+            SET status = 'COMPLETED',
+                updated_at = NOW();
         """, operationId);
+    }
+
+    public void failOperation(@NonNull final UUID operationId, final String errorMessage, final String failureType) {
+        jdbc.update("""
+            INSERT INTO wallet_operations (operation_id, status, error_message, failure_type, created_at, updated_at)
+            VALUES (?, 'FAILED', ?, ?, NOW(), NOW())
+            ON CONFLICT (operation_id) DO UPDATE
+            SET status = 'FAILED',
+                error_message = EXCLUDED.error_message,
+                failure_type = EXCLUDED.failure_type,
+                updated_at = NOW();
+        """, operationId, errorMessage, failureType);
+    }
+
+    public java.util.Optional<br.com.wallet.ledger.internal.operation.Operation> findOperation(@NonNull final UUID operationId) {
+        String sql = """
+            SELECT operation_id, status, error_message, failure_type, created_at, updated_at
+            FROM wallet_operations
+            WHERE operation_id = ?
+        """;
+        return jdbc.query(sql, (rs, rowNum) -> new br.com.wallet.ledger.internal.operation.Operation(
+                UUID.fromString(rs.getString("operation_id")),
+                OperationStatus.valueOf(rs.getString("status")),
+                rs.getString("error_message"),
+                rs.getString("failure_type"),
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("updated_at").toInstant()
+        ), operationId).stream().findFirst();
     }
 
     private boolean isDuplicateKey(DataIntegrityViolationException e) {
@@ -54,6 +84,4 @@ public class WalletOperationsDao {
         String sql = "SELECT status FROM wallet_operations WHERE operation_id = ?";
         return jdbc.queryForObject(sql, OperationStatus.class, operationId);
     }
-
-
 }

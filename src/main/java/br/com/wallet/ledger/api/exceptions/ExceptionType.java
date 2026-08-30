@@ -16,7 +16,8 @@ public enum ExceptionType {
             case ReplayAttackException e -> PERMANENT;
             case PermanentException e -> PERMANENT;
             case TransientException e -> TRANSIENT;
-            case null, default -> UNKNOWN;
+            case null -> UNKNOWN;
+            default -> TRANSIENT;
         };
     }
 }

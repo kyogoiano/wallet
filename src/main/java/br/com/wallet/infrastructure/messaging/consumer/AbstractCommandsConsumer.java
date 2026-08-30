@@ -1,8 +1,10 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
+import br.com.wallet.ledger.api.OperationStateUseCase;
 import br.com.wallet.ledger.api.UseCase;
 import br.com.wallet.core.tracing.TraceContext;
 import br.com.wallet.ledger.api.envelope.CommandEnvelope;
+import br.com.wallet.ledger.api.exceptions.ExceptionType;
 import br.com.wallet.infrastructure.messaging.publisher.DlqPublisher;
 import io.nats.client.Connection;
 import io.nats.client.Message;
@@ -23,19 +25,33 @@ public abstract class AbstractCommandsConsumer<T extends TraceContext> extends A
     private final ObjectMapper objectMapper;
     private final UseCase<T> useCase;
     private final DlqPublisher dlqPublisher;
+    private final OperationStateUseCase operationStateUseCase;
     private final String dlqSubject;
     private final Class<T> commandClass;
 
-    public AbstractCommandsConsumer(String subject, String dlqSubject, Connection natsConnection, ObjectMapper objectMapper, UseCase<T> useCase, DlqPublisher dlqPublisher, Class<T> commandClass) {
+    public AbstractCommandsConsumer(String subject,
+                                    String dlqSubject,
+                                    Connection natsConnection,
+                                    ObjectMapper objectMapper,
+                                    UseCase<T> useCase,
+                                    DlqPublisher dlqPublisher,
+                                    OperationStateUseCase operationStateUseCase,
+                                    Class<T> commandClass) {
         super(subject, natsConnection);
         this.objectMapper = objectMapper;
         this.useCase = useCase;
         this.dlqPublisher = dlqPublisher;
+        this.operationStateUseCase = operationStateUseCase;
         this.dlqSubject = dlqSubject;
         this.commandClass = commandClass;
     }
 
-    void processMessage(@NonNull final Message message) {
+    /**
+     * **Made public due to tests**
+     * Commands Process message
+     * @param message nats message
+     */
+    public void processMessage(@NonNull final Message message) {
         final T command;
         try {
             log.debug("Message to be processed from subject: {}, with headers: {}", message.getSubject(), message.getHeaders());
@@ -65,12 +81,18 @@ public abstract class AbstractCommandsConsumer<T extends TraceContext> extends A
             switch (retryDecision) {
                 case DLQ -> {
                     log.error("Max delivery reached for operationId={}, sending to DLQ", operationId);
+                    if (operationId != null && operationStateUseCase != null) {
+                        operationStateUseCase.markOperationFailed(operationId, e.getMessage(), ExceptionType.parseException(e).name());
+                    }
                     dlqPublisher.handleDlqMessage(dlqSubject, natsConnection, message, e);
                     message.ack();
                     return;
                 }
                 case ACK -> {
                     log.info("Non-retriable/Business condition for operationId={}, finishing with ACK. reason={}", operationId, e.getMessage());
+                    if (operationId != null && operationStateUseCase != null) {
+                        operationStateUseCase.markOperationFailed(operationId, e.getMessage(), ExceptionType.parseException(e).name());
+                    }
                     message.ack();
                     return;
                 }

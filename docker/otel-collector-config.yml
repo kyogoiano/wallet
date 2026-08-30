@@ -3,13 +3,14 @@ receivers:
     protocols:
       http:
         endpoint: 0.0.0.0:4318
-
+      grpc:
+        endpoint: 0.0.0.0:4317
 
 exporters:
   debug:
     verbosity: basic
-  otlp_http/openobserve:
-    endpoint:  http://openobserve:5080/api/default
+  otlphttp/openobserve:
+    endpoint: http://openobserve:5080/api/default
     headers:
       # Base64 of leandro.ueg@gmail.com:Admin123!@#
       Authorization: Basic bGVhbmRyby51ZWdAZ21haWwuY29tOkFkbWluMTIzIUAj
@@ -20,36 +21,22 @@ exporters:
       enabled: true
 
 processors:
-  resource:
-    attributes:
-      - key: service.name
-        value: wallet-app
-        action: upsert
-  attributes:
-    actions:
-      - key: operation.id
-        from_attribute: baggage.operation.id
-        action: upsert
-  filter:
-    metrics:
-      include:
-        match_type: strict
-        metric_names:
-          - http.server.requests
-          - jvm.memory.used
   batch:
+    send_batch_size: 1024
+    timeout: 200ms
+    send_batch_max_size: 2048
 
 service:
   pipelines:
     metrics:
       receivers: [ otlp ]
       processors: [ batch ]
-      exporters: [ debug, otlp_http/openobserve ]
+      exporters: [ debug, otlphttp/openobserve ]
     traces:
       receivers: [ otlp ]
-      processors: [ resource, attributes, batch ]
-      exporters: [ debug, otlp_http/openobserve ]
+      processors: [ batch ]
+      exporters: [ debug, otlphttp/openobserve ]
     logs:
       receivers: [ otlp ]
-      processors: [ resource, attributes, batch ]
-      exporters: [ debug, otlp_http/openobserve ]
+      processors: [ batch ]
+      exporters: [ debug, otlphttp/openobserve ]

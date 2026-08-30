@@ -97,6 +97,7 @@ services:
     environment:
       - ZO_ROOT_USER_EMAIL=leandro.ueg@gmail.com
       - ZO_ROOT_USER_PASSWORD=Admin123!@#
+      - ZO_TELEMETRY=false
     ports:
       - "5080:5080"
     volumes:
@@ -106,14 +107,17 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector:latest
-    container_name:  otel-collector
+    container_name: otel-collector
     command: [ "--config=/etc/otel-collector-config.yml" ]
     volumes:
       - ./docker/otel-collector-config.yml:/etc/otel-collector-config.yml
     ports:
+      - "4317:4317" # gRPC
       - "4318:4318" # HTTP
     networks:
-      - wallet-net
+      wallet-net:
+        aliases:
+          - otel-collector
 
   app:
     build: .

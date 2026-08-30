@@ -19,6 +19,7 @@ public class TracingAspect {
 
     private static final Logger log = LoggerFactory.getLogger(TracingAspect.class);
     public static final String OPERATION_ID = "operation.id";
+    public static final String USER_ID = "user.id";
     private final Tracer tracer;
 
     public TracingAspect(final Tracer tracer) {
@@ -32,11 +33,15 @@ public class TracingAspect {
         final ScopedSpan span = tracer.startScopedSpan(traceable.value());
         
         String operationId = null;
+        String userId = null;
         for (final Object arg : pjp.getArgs()) {
             if (arg instanceof TraceContext ctx) {
                 ctx.traceTags().forEach(span::tag);
                 if (ctx.operationId() != null) {
                     operationId = ctx.operationId().toString();
+                }
+                if(ctx.userId() != null) {
+                    userId = ctx.userId().toString();
                 }
             }
             if (arg instanceof UUID uuid && operationId == null) {
@@ -44,34 +49,54 @@ public class TracingAspect {
             }
         }
 
-        // crates a baggage for cross-service propagation
+        // creates baggage for cross-service propagation
+        BaggageInScope opBaggage = null;
+        BaggageInScope userBaggage = null;
+
         if (operationId != null) {
             span.tag(OPERATION_ID, operationId); // normalized names ( attribute promotion easily observable)
+            opBaggage = tracer.createBaggageInScope(OPERATION_ID, operationId);
+            log.debug("Operation baggage attached: {}", opBaggage.get());
+        }
 
-            try (final BaggageInScope baggage = tracer.createBaggageInScope(OPERATION_ID, operationId)) {
-                log.info("Baggage: {}", baggage.get());
-                return pjp.proceed();
-            } catch (IdempotencyException ex) {
-                log.warn("IdempotencyException caught in aspect: {}", ex.getMessage());
-                span.tag("status", "IDEMPOTENT_IGNORE");
-                // Still re-throw so the Controller/Handler can catch it
-                throw ex;
-            } catch (RuntimeException ex) {
-                log.error("RuntimeException caught in aspect: {}", ex.getMessage());
-                span.error(ex);
-                span.tag("status", "FAILED");
-                throw ex;
-            } catch (Throwable ex) {
-                log.error("Throwable caught in aspect: {}", ex.getMessage());
-                span.error(ex);
-                span.tag("status", "FAILED");
-                throw ex;
-            } finally {
-                span.end();
-                log.debug("Aspect finished for: {}", traceable.value());
-            }
-        } else {
+        if (userId != null) {
+            span.tag(USER_ID, userId);
+            userBaggage = tracer.createBaggageInScope(USER_ID, userId);
+            log.debug("User baggage attached: {}", userBaggage.get());
+        }
+
+        try {
             return pjp.proceed();
+        } catch (IdempotencyException ex) {
+            log.warn("IdempotencyException caught in aspect: {}", ex.getMessage());
+            span.tag("status", "IDEMPOTENT_IGNORE");
+            // Still re-throw so the Controller/Handler can catch it
+            throw ex;
+        } catch (RuntimeException ex) {
+            log.error("RuntimeException caught in aspect: {}", ex.getMessage());
+            span.error(ex);
+            span.tag("status", "FAILED");
+            throw ex;
+        } catch (Throwable ex) {
+            log.error("Throwable caught in aspect: {}", ex.getMessage());
+            span.error(ex);
+            span.tag("status", "FAILED");
+            throw ex;
+        } finally {
+            if (userBaggage != null) {
+                try {
+                    userBaggage.close();
+                } catch (Exception ignored) {
+                }
+            }
+            if (opBaggage != null) {
+                try {
+                    opBaggage.close();
+                } catch (Exception ignored) {
+                }
+            }
+            span.end();
+            log.debug("Aspect finished for: {}", traceable.value());
         }
     }
 }

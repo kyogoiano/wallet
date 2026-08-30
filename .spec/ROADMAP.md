@@ -167,14 +167,28 @@ gantt
 
 ### 🔹 Phase 0.3: Asynchronous Command Exception Handling & Operation Status Tracking
 **Spec Identifier**: [`SPEC-000.3-async-command-exception-handling`](file:///.spec/SPEC-000.3-async-command-exception-handling.md)  
-**Status**: 🟢 **Active / In Execution**  
+**Status**: 🟢 **Completed & Verified**  
 **Core Abstraction**: `Operation Lifecycle & Consumer Resilience (br.com.wallet.ledger / messaging / rest)`
 
 - **Intent**: Capture background consumer business exceptions, persist `FAILED` operation state with diagnostic error messages in PostgreSQL, expose `GET /operations/{operationId}` query API, and preserve `202 ACCEPTED` contracts for command endpoints.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md) (Ratified)
   - [`.spec/PLAN-000.3-async-command-exception-handling.md`](file:///.spec/PLAN-000.3-async-command-exception-handling.md) (Approved)
-  - [`.spec/TASKS-000.3-async-command-exception-handling.md`](file:///.spec/TASKS-000.3-async-command-exception-handling.md) (Ready for TDD)
+  - [`.spec/TASKS-000.3-async-command-exception-handling.md`](file:///.spec/TASKS-000.3-async-command-exception-handling.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md`](file:///.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md) (Verified)
+
+---
+
+### 🔹 Phase 0.4: Outbox Observability & OpenObserve Pipeline Optimization
+**Spec Identifier**: [`SPEC-000.4-observability-outbox-and-openobserve-optimization`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)  
+**Status**: 🟡 **Draft / Ready for Review**  
+**Core Abstraction**: `Outbox Baggage Propagation, TracingAspect Lifecycle & OpenObserve Tuning`
+
+- **Intent**: Propagate `operationId` baggage in `OutboxRelay` background processing, eliminate span leak in `TracingAspect` for methods without context args, tune OTel Collector batching and attributes processor, and optimize OpenObserve container configuration.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md) (Draft)
+  - [`.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) (Draft)
+  - [`.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) (Draft)
 
 ---
 

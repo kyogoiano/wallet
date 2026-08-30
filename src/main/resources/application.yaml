@@ -37,8 +37,10 @@ management:
       correlation:
         fields:
           - operationId
+          - userId
       remote-fields:
         - operationId
+        - userId
     sampling:
       probability: 1.0
   opentelemetry:

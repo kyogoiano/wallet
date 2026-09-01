@@ -41,5 +41,6 @@ These core invariants and architectural principles are **non-negotiable** and mu
 ## 4. Engineering & Governance Invariants
 
 - **`I-SDD-001` (Specification First)**: Code implementation must not begin without an approved Specification (`.spec/SPEC-XXX.md`), Architecture Plan (`.spec/PLAN-XXX.md`), and Task List (`.spec/TASKS-XXX.md`).
+- **`I-SDD-002` (Practical Verification & Seed Data Gate)**: Every completed specification and summary (`SUMMARY-XXX.md`) MUST include a Practical Verification Guide with reproducible CLI/cURL commands, seed data fixtures, state validation queries, and expected outputs to facilitate immediate manual and automated testing.
 - **`I-TDD-001` (Test-Driven Verification)**: Tests must be written before implementation. Every functional requirement and invariant must map to at least one automated integration or unit test.
 - **`I-OBS-001` (End-to-End Traceability)**: Every request must maintain OpenTelemetry trace context, propagating `operation_id` across database, outbox, and messaging boundaries.

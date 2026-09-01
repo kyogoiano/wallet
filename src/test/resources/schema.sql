@@ -243,3 +243,53 @@ CREATE TABLE IF NOT EXISTS cashflow_profiles (
     );
 
 CREATE INDEX IF NOT EXISTS idx_cashflow_wallet ON cashflow_profiles(wallet_id);
+
+-- =========================================================================
+-- Hybrid Fraud Intelligence & Relational Graph Tables (SPEC-000.5 / PLAN-000.5)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS fraud_entities (
+                                              id UUID PRIMARY KEY,
+                                              entity_type VARCHAR(32) NOT NULL,
+    direct_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    graph_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    behavioral_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    propagated_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    final_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    metadata JSONB
+    );
+
+CREATE INDEX IF NOT EXISTS idx_fraud_entities_type ON fraud_entities(entity_type);
+
+CREATE TABLE IF NOT EXISTS fraud_relationships (
+                                                   source_id UUID NOT NULL,
+                                                   target_id UUID NOT NULL,
+                                                   relationship_type VARCHAR(32) NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    tx_count BIGINT NOT NULL DEFAULT 1,
+    total_amount NUMERIC(19, 4) NOT NULL DEFAULT 0.0000,
+    metadata JSONB,
+    PRIMARY KEY (source_id, target_id, relationship_type)
+    );
+
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_source ON fraud_relationships (source_id, relationship_type);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_target ON fraud_relationships (target_id, relationship_type);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_last_seen ON fraud_relationships (last_seen_at);
+
+CREATE TABLE IF NOT EXISTS fraud_relationship_events (
+                                                         id UUID PRIMARY KEY,
+                                                         source_id UUID NOT NULL,
+                                                         target_id UUID NOT NULL,
+                                                         relationship_type VARCHAR(32) NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    operation_id UUID,
+    amount NUMERIC(19, 4),
+    metadata JSONB
+    );
+
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_src_time ON fraud_relationship_events (source_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_tgt_time ON fraud_relationship_events (target_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_type_time ON fraud_relationship_events (relationship_type, occurred_at);

@@ -1,0 +1,31 @@
+O uso de **ONNX / ONNX Runtime** para esse sistema depende de **qual componente** estamos falando, pois a arquitetura possui duas cargas de trabalho completamente diferentes:
+
+---
+
+### 1. Para a Extração do Vetor Comportamental de 16 Dimensões: **SIM, excelente escolha**
+
+Se a extração dos 16 números envolver um modelo tabular/representacional treinado (como um autoencoder, TabNet, XGBoost para embeddings, ou uma rede neural densa pequena):
+
+* **Vantagens:** O ONNX Runtime (CPU ou GPU) entrega latências sub-milissegundo (< 2ms), consumo mínimo de RAM e facilidade de deploy em qualquer runtime (Go, Rust, Node.js, Python, Java).
+* **Veredito:** Ideal para rodar dentro de background workers assíncronos ou até no próprio serviço transacional sem dependências pesadas como PyTorch ou TensorFlow.
+
+---
+
+### 2. Para a LLM (Llama 3.1 / Síntese do Dossiê de Investigação): **NÃO é a melhor opção**
+
+Embora tecnicamente possível (via *ONNX Runtime GenAI*), rodar LLMs generativas autoregressivas como Llama 3.1 em ONNX puro traz desvantagens operacionais:
+
+* **Gerenciamento de KV Cache e Concorrência:** Motores especializados em LLM (como **vLLM**, **TGI** ou **Ollama / llama.cpp**) possuem otimizações nativas cruciais como *PagedAttention* e *Continuous Batching*. No ONNX Runtime, o throughput e a eficiência de memória para múltiplos dossiês simultâneos costumam ser inferiores.
+* **Geração Estruturada (JSON Mode / Outlines):** Para gerar o `FraudInvestigationDossier` em JSON estrito sem alucinações de sintaxe, engines como `vLLM` com `Outlines`/`Guidance` ou `llama.cpp` com Grammars (GBNF) são muito mais robustos e fáceis de integrar do que a pilha de inferência ONNX.
+
+---
+
+### Resumo da Recomendação de Stack
+
+| Componente | Ferramenta Recomendada | Papel de ONNX |
+| --- | --- | --- |
+| **Extração de Features (16-D Embeddings)** | **ONNX Runtime** (se ML) ou código nativo/SQL (se heurística determinística) | ⭐ **Ideal** (leve, determinístico e ultra-rápido). |
+| **Similaridade e Busca Vetorial** | **PostgreSQL + `pgvector**` (`vector_ip_ops`) | Não aplicável (executado direto no banco). |
+| **Síntese de Dossiê (Llama 3.1 / 3.2)** | **vLLM** (GPU) ou **llama.cpp / Ollama** (CPU/Apple Silicon) | ⚠️ **Evitar ONNX**; usar engines especializadas em text-generation e JSON grammar. |
+
+Se o cálculo das 16 dimensões na sua spec for uma **fórmula matemática determinística** (ex: contagem de transações, desvio padrão, razão noturna mapeada entre 0 e 1), você nem precisa de ONNX — basta calcular diretamente em código (Go/Python/SQL). ONNX entra se houver um encoder neural intermediário.

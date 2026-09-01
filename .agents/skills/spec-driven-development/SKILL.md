@@ -40,6 +40,7 @@ This skill implements the **GitHub Spec Kit** methodology adapted for financial 
 - Create `.spec/SPEC-XXX-<name>.md` using [`templates/spec-template.md`](file:///.agents/skills/spec-driven-development/templates/spec-template.md).
 - Formulate requirements with unique IDs (`REQ-XXX`).
 - Formulate mathematical system invariants (`I-XXX`).
+- Define practical verification scenarios and seed data prerequisites.
 - List non-goals and out-of-scope items explicitly.
 
 ### Stage 2: Clarify
@@ -51,19 +52,20 @@ This skill implements the **GitHub Spec Kit** methodology adapted for financial 
 - Create `.spec/PLAN-XXX-<name>.md` using [`templates/plan-template.md`](file:///.agents/skills/spec-driven-development/templates/plan-template.md).
 - Define technical architecture, module boundaries, and interfaces.
 - Reference applicable Architecture Decision Records (ADRs).
-- Detail data migrations, concurrency strategy, and failure handling.
+- Detail data migrations, seed data additions, concurrency strategy, and failure handling.
 
 ### Stage 4: Tasks
 - Create `.spec/TASKS-XXX-<name>.md` using [`templates/tasks-template.md`](file:///.agents/skills/spec-driven-development/templates/tasks-template.md).
 - Break implementation into small, atomic TDD tasks.
 - Every task must link to at least one requirement ID (`REQ-XXX`) or invariant (`I-XXX`).
+- Include explicit task for authoring the Practical Verification Guide & Seed Data in the summary.
 
 ### Stage 5: Analyze (Pre-Implementation Gate)
 Verify the following consistency rules:
 - Every `REQ-XXX` has corresponding tasks in `TASKS-XXX.md`.
 - Every `I-XXX` has explicit validation or test coverage planned.
 - No orphan tasks exist that lack specification backing.
-- Concurrency, locking, and error paths are planned.
+- Concurrency, locking, seed data, and error paths are planned.
 
 ### Stage 6: Implement (TDD Execution)
 - Follow the task list strictly in sequence.
@@ -76,4 +78,5 @@ Verify the following consistency rules:
 - **Architecture Verification**: Ensure `ModulithArchitectureTest.verifyArchitecture()` passes with 0 violations and 0 cycles.
 - **Coverage Check**: Verify line coverage meets minimum thresholds ($\ge 70\%$ overall, $\ge 85\%$ core services/fraud rules).
 - **Zero Spec-Drift Reconciliation**: Compare actual implemented code, package names, and interfaces against `SPEC-XXX` and `PLAN-XXX`. If technical realities or ADRs required adjustments, reconcile `SPEC-XXX` and `PLAN-XXX` immediately so that Spec, Plan, Tasks, and Code remain 100% congruent.
-- **Execution Summary**: Author `.spec/summaries/SUMMARY-XXX-<name>.md` using [`templates/summary-template.md`](file:///.agents/skills/spec-driven-development/templates/summary-template.md) recording metrics, code changes, and invariant verification evidence.
+- **Practical Verification Guide (`I-SDD-002`)**: Author complete, reproducible manual/CLI testing instructions with seed data fixtures, `curl` commands, NATS events, and SQL/Redis assertion queries.
+- **Execution Summary**: Author `.spec/summaries/SUMMARY-XXX-<name>.md` using [`templates/summary-template.md`](file:///.agents/skills/spec-driven-development/templates/summary-template.md) recording metrics, code changes, invariant verification evidence, and the Practical Verification Guide.

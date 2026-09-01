@@ -44,6 +44,10 @@
 
 - [ ] All unit tests pass: `./gradlew test`
 - [ ] All integration tests pass: Testcontainers suite green
+- [ ] Modulith architecture verification passes (`ModulithArchitectureTest.verifyArchitecture()`)
 - [ ] Zero compiler / linter warnings
 - [ ] OpenTelemetry traces verified in OpenObserve
+- [ ] Seed data added/updated in `docker/init/schema.sql` (if new tables/state introduced)
+- [ ] Author Practical Verification Guide & Seed Data in `SUMMARY-XXX.md` (`I-SDD-002`)
 - [ ] Traceability report generated: 100% of requirements verified
+

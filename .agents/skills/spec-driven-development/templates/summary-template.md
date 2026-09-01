@@ -54,7 +54,63 @@
 
 ---
 
-## 6. Next Steps & Follow-ups
+---
+
+## 6. Practical Verification Guide & Seed Data (`I-SDD-002`)
+
+### 6.1. Environment Setup & Prerequisites
+```bash
+# Start infrastructure containers
+docker compose up -d postgres dragonfly nats otel-collector openobserve
+
+# Verify service health
+docker compose ps
+```
+
+### 6.2. Deterministic Seed Data Fixtures
+```sql
+-- Seed accounts/rules/entities if not already present via docker/init/schema.sql
+INSERT INTO accounts (id, balance, version, user_id, status, created_at)
+VALUES ('0a35fb14-75ee-4125-943b-500893c30d33', 10000.00, 0, 'a1111111-1111-1111-1111-111111111111', 'ACTIVE', NOW())
+ON CONFLICT (id) DO NOTHING;
+```
+
+### 6.3. Step-by-Step Practical Verification Steps
+
+#### Step 1: Execute Primary Operation (cURL / NATS)
+```bash
+curl -X POST http://localhost:8080/wallets/transfer \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" \
+  -d '{
+    "sourceWalletId": "0a35fb14-75ee-4125-943b-500893c30d33",
+    "targetWalletId": "2c57ad36-97aa-6347-b65d-722015e52f55",
+    "amount": 150.00
+  }'
+```
+
+#### Step 2: Query State Assertions (SQL / Redis)
+```sql
+-- Verify ledger hash-chain and balance consistency
+SELECT id, wallet_id, amount, type, sequence, hash, previous_hash 
+FROM ledger 
+WHERE wallet_id = '0a35fb14-75ee-4125-943b-500893c30d33' 
+ORDER BY sequence DESC LIMIT 5;
+```
+
+```bash
+# Verify DragonflyDB / Redis hot state
+docker exec -it dragonfly redis-cli GET "user:a1111111-1111-1111-1111-111111111111:graph_risk"
+```
+
+### 6.4. Expected Results & Assertions
+- **HTTP Status**: `200 OK` / `202 ACCEPTED`
+- **Balance Equation**: $\Delta \text{Balance} = \text{Amount}$
+- **Telemetry**: OpenTelemetry trace emitted to OpenObserve (`http://localhost:5080`)
+
+---
+
+## 7. Next Steps & Follow-ups
 
 - [ ] Next phase initiative link
 - [ ] Any tech debt or follow-up items noted

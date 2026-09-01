@@ -181,14 +181,62 @@ gantt
 
 ### 🔹 Phase 0.4: Outbox Observability & OpenObserve Pipeline Optimization
 **Spec Identifier**: [`SPEC-000.4-observability-outbox-and-openobserve-optimization`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)  
-**Status**: 🟡 **Draft / Ready for Review**  
+**Status**: 🟢 **Completed & Verified**  
 **Core Abstraction**: `Outbox Baggage Propagation, TracingAspect Lifecycle & OpenObserve Tuning`
 
-- **Intent**: Propagate `operationId` baggage in `OutboxRelay` background processing, eliminate span leak in `TracingAspect` for methods without context args, tune OTel Collector batching and attributes processor, and optimize OpenObserve container configuration.
+- **Intent**: Propagate `operationId` baggage in `OutboxRelay` background processing, eliminate span leak in `TracingAspect`, optimize telemetry at the source (`MeterFilter`, `ObservationPredicate`), and tune OTel Collector batching and OpenObserve storage.
 - **Spec Kit Artifacts**:
-  - [`.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md) (Draft)
-  - [`.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) (Draft)
-  - [`.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) (Draft)
+  - [`.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md) (Ratified)
+  - [`.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) (Approved)
+  - [`.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md) (Verified)
+
+---
+
+### 🔹 Phase 0.5: Hybrid Fraud Intelligence & Relational Graph Projection
+**Spec Identifier**: [`SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Two-Tier Graph Ingestion, Topological Patterns & Dragonfly Hot Feature Feedback (br.com.wallet.fraud.intelligence)`
+
+- **Intent**: Capture entities (`USER`, `WALLET`, `DEVICE`, `IP`) and relationships asynchronously via NATS JetStream, project two-tier relational graph facts in PostgreSQL (`fraud_relationships` aggregate + `fraud_relationship_events` temporal evidence), detect circular flows ($A \to B \to C \to A$), fan-in/fan-out, and shared devices, and materialize computed `graph_risk` into DragonflyDB hot cache (`user:{id}:graph_risk`) for synchronous $O(1)$ gate consumption.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Ratified)
+  - [`.spec/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Approved)
+  - [`.spec/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Verified)
+
+---
+
+### 🔹 Phase 0.6: Fraud Risk Propagation & Temporal Decay Engine
+**Spec Identifier**: [`SPEC-000.6-fraud-risk-propagation-and-temporal-decay`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md)  
+**Status**: 🟢 **Reviewed & Ratified**  
+**Core Abstraction**: `Path-Influence Risk Propagation, Exponential Temporal Decay & Bounded Traversal (br.com.wallet.fraud.propagation)`
+
+- **Intent**: Propagate risk scores across connected graph paths using temporal evidence from `fraud_relationship_events` and exponential decay ($I(p, t) = R_{\text{source}}(v) \cdot \prod w(e) \cdot \prod e^{-\lambda \Delta t_e}$), resolve multi-path convergence via probabilistic union without double-counting, enforce bounded traversal limits, and publish `EntityRiskPropagationDetectedEvent`.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md) (Ratified)
+
+---
+
+### 🔹 Phase 0.7: Fraud Behavioral Embeddings & Investigation Intelligence (pgvector)
+**Spec Identifier**: [`SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)  
+**Status**: 🟢 **Reviewed & Ratified**  
+**Core Abstraction**: `Behavioral Profile Vectors, Cosine Anomaly Search & Investigation Context Synthesizer (br.com.wallet.fraud.embeddings)`
+
+- **Intent**: Store $L_2$-normalized behavioral feature vectors in PostgreSQL using `pgvector` HNSW indexing, detect anomaly clusters via cosine distance to known fraud archetypes, and synthesize comprehensive investigation dossiers (GraphRAG-ready) for analysts.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
+
+---
+
+### 🔹 Phase 0.8: Fraud Signal Fusion & Micro-ML Risk Engine
+**Spec Identifier**: [`SPEC-000.8-fraud-signal-fusion-and-micro-ml`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)  
+**Status**: 🟢 **Reviewed & Ratified**  
+**Core Abstraction**: `Multi-Signal Probabilistic Fusion, Micro-ML Shadow Scoring & Fraud Gate V4 (br.com.wallet.fraud.fusion)`
+
+- **Intent**: Fuse deterministic rules, graph topology, temporal risk propagation, behavioral vector anomalies, and micro-ML shadow scores into an explainable final risk score ($R_{\text{final}}$), materializing hot risk state into DragonflyDB for sub-millisecond $O(1)$ Fraud Gate V4 execution.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md) (Ratified)
 
 ---
 

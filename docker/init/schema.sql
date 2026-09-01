@@ -284,4 +284,86 @@ CREATE TABLE IF NOT EXISTS cashflow_profiles (
 
 CREATE INDEX IF NOT EXISTS idx_cashflow_wallet ON cashflow_profiles(wallet_id);
 
+-- =========================================================================
+-- Hybrid Fraud Intelligence & Relational Graph Tables (SPEC-000.5 / PLAN-000.5)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS fraud_entities (
+    id UUID PRIMARY KEY,
+    entity_type VARCHAR(32) NOT NULL,
+    direct_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    graph_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    behavioral_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    propagated_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    final_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    metadata JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_entities_type ON fraud_entities(entity_type);
+
+CREATE TABLE IF NOT EXISTS fraud_relationships (
+    source_id UUID NOT NULL,
+    target_id UUID NOT NULL,
+    relationship_type VARCHAR(32) NOT NULL,
+    first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    tx_count BIGINT NOT NULL DEFAULT 1,
+    total_amount NUMERIC(19, 4) NOT NULL DEFAULT 0.0000,
+    metadata JSONB,
+    PRIMARY KEY (source_id, target_id, relationship_type)
+);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_source ON fraud_relationships (source_id, relationship_type);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_target ON fraud_relationships (target_id, relationship_type);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_last_seen ON fraud_relationships (last_seen_at);
+
+CREATE TABLE IF NOT EXISTS fraud_relationship_events (
+    id UUID PRIMARY KEY,
+    source_id UUID NOT NULL,
+    target_id UUID NOT NULL,
+    relationship_type VARCHAR(32) NOT NULL,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    operation_id UUID,
+    amount NUMERIC(19, 4),
+    metadata JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_src_time ON fraud_relationship_events (source_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_tgt_time ON fraud_relationship_events (target_id, occurred_at);
+CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_type_time ON fraud_relationship_events (relationship_type, occurred_at);
+
+-- 4. Seed Fraud Entities & Intelligence Graph Data (SPEC-000.5)
+INSERT INTO fraud_entities (id, entity_type, direct_risk, graph_risk, behavioral_risk, propagated_risk, final_risk, created_at, updated_at)
+VALUES
+    ('a1111111-1111-1111-1111-111111111111', 'USER',   0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('b2222222-2222-2222-2222-222222222222', 'USER',   0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('c3333333-3333-3333-3333-333333333333', 'USER',   0.9, 0.0, 0.0, 0.0, 0.9, NOW(), NOW()),
+    ('0a35fb14-75ee-4125-943b-500893c30d33', 'WALLET', 0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('2c57ad36-97aa-6347-b65d-722015e52f55', 'WALLET', 0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('3d68be47-08bb-7458-c76e-833126f63a66', 'WALLET', 0.9, 0.0, 0.0, 0.0, 0.9, NOW(), NOW()),
+    ('e5555555-5555-5555-5555-555555555555', 'DEVICE', 0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('f6666666-6666-6666-6666-666666666666', 'IP',     0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed Ownership & Topology Edges
+INSERT INTO fraud_relationships (source_id, target_id, relationship_type, first_seen_at, last_seen_at, tx_count, total_amount)
+VALUES
+    ('a1111111-1111-1111-1111-111111111111', '0a35fb14-75ee-4125-943b-500893c30d33', 'OWNS', NOW(), NOW(), 1, 0.0000),
+    ('b2222222-2222-2222-2222-222222222222', '2c57ad36-97aa-6347-b65d-722015e52f55', 'OWNS', NOW(), NOW(), 1, 0.0000),
+    ('c3333333-3333-3333-3333-333333333333', '3d68be47-08bb-7458-c76e-833126f63a66', 'OWNS', NOW(), NOW(), 1, 0.0000),
+    ('a1111111-1111-1111-1111-111111111111', 'e5555555-5555-5555-5555-555555555555', 'USES', NOW(), NOW(), 1, 0.0000),
+    ('b2222222-2222-2222-2222-222222222222', 'e5555555-5555-5555-5555-555555555555', 'USES', NOW(), NOW(), 1, 0.0000),
+    ('0a35fb14-75ee-4125-943b-500893c30d33', '2c57ad36-97aa-6347-b65d-722015e52f55', 'TRANSFERRED_TO', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour', 1, 500.0000),
+    ('2c57ad36-97aa-6347-b65d-722015e52f55', '3d68be47-08bb-7458-c76e-833126f63a66', 'TRANSFERRED_TO', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '30 minutes', 1, 450.0000)
+ON CONFLICT (source_id, target_id, relationship_type) DO NOTHING;
+
+-- Seed Temporal Event Stream
+INSERT INTO fraud_relationship_events (id, source_id, target_id, relationship_type, occurred_at, operation_id, amount)
+VALUES
+    ('fa111111-1111-1111-1111-111111111111', '0a35fb14-75ee-4125-943b-500893c30d33', '2c57ad36-97aa-6347-b65d-722015e52f55', 'TRANSFERRED_TO', NOW() - INTERVAL '1 hour', gen_random_uuid(), 500.0000),
+    ('fb222222-2222-2222-2222-222222222222', '2c57ad36-97aa-6347-b65d-722015e52f55', '3d68be47-08bb-7458-c76e-833126f63a66', 'TRANSFERRED_TO', NOW() - INTERVAL '30 minutes', gen_random_uuid(), 450.0000)
+ON CONFLICT (id) DO NOTHING;
+
 --TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

@@ -46,7 +46,8 @@ public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
         final var eventNode = objectReader.readTree(payload);
         log.info("Publishing event data: {}", eventNode.toString());
 
-        headers.add("Nats-Msg-Id", aggregateId.toString()); // dedup JetStream
+        final var natsMsgId = eventType.name() + "-" + aggregateId.toString();
+        headers.add("Nats-Msg-Id", natsMsgId); // dedup JetStream per event type and aggregate
         final var message = NatsMessage.builder()
                 .subject(eventType.getSubject())
                 .headers(headers)
@@ -60,8 +61,13 @@ public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
         try {
             final var jetStream = connection.jetStream();
             final var ack = jetStream.publish(message, publishOptions);
-            log.debug("Published event [{}] to subject [{}], seqNo={}",
-                    eventType, eventType.getSubject(), ack.getSeqno());
+            if (ack.isDuplicate()) {
+                log.warn("Event [{}] to subject [{}] was deduplicated by NATS (duplicate message ID: {})",
+                        eventType, eventType.getSubject(), natsMsgId);
+            } else {
+                log.debug("Published event [{}] to subject [{}], seqNo={}",
+                        eventType, eventType.getSubject(), ack.getSeqno());
+            }
         } catch (Exception ex) {
             log.error("Failed to publish event [{}] to NATS subject [{}]: {}", eventType, eventType.getSubject(), ex.getMessage());
             throw new EventPublishException("Unable to publish event to NATS: " + eventType, ex);

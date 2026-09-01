@@ -1,0 +1,147 @@
+### 1. Viabilidade do Llama 3.1 para esta Arquitetura
+
+O **Llama 3.1 (especialmente a versão 8B)** ou até os modelos compactos **Llama 3.2 (1B e 3B)** se encaixam no requisito **`REQ-VEC-004` (Investigation Context Synthesizer / GraphRAG)** pelos seguintes motivos:
+
+* **Isolamento de PII e Compliance:** Por se tratar de dados transacionais e antifraude, rodar um modelo local/on-premise via vLLM, Ollama ou TGI elimina o vazamento de dados sensíveis para APIs externas.
+* **Context Window de 128k tokens:** Permite injetar subgrafos de 2 hops extensos, histórico de transações e logs temporais brutos sem necessidade de truncamento agressivo.
+* **Saída Estruturada (JSON Mode / Outlines):** O Llama 3.1 8B tem alta aderência a *tool calling* e geração de JSON estrito com `temperature=0`, ideal para padronizar o `FraudInvestigationDossier`.
+* **Zero Impacto no Hot-Path:** Como o Non-Goal já estipula execução assíncrona (on-demand na triagem ou via worker de background), o overhead de inferência (200–500ms) não afeta a autorização de pagamentos.
+
+---
+
+### 2. Oportunidades de Melhoria Técnica na Spec
+
+1. **Otimização do Operador no `pgvector`:**
+* Como o invariante `I-VEC-001` garante $L_2$-normalização ($\Vert{}\vec{v}\Vert{} = 1.0$), a similaridade de cosseno equivale ao produto escalar:
+
+$$\cos(\vec{u}, \vec{v}) = \vec{u} \cdot \vec{v}$$
+
+
+* Usar o operador de produto interno (`vector_ip_ops` / `<#>`) é computacionalmente mais leve e rápido que `vector_cosine_ops` (`<=>`).
+
+
+2. **Dimensão e Indexação (`vector(16)` vs HNSW):**
+* HNSW tem alto custo de memória para construir o grafo. Com apenas 16 dimensões, um scan exato (flat) ou um índice `ivfflat` é eficiente até centenas de milhares de linhas. Se mantiver `HNSW`, configure explicitamente `m` e `ef_construction` adequados para baixa dimensionalidade.
+
+
+3. **Gestão dos Centróides de Fraude:**
+* A spec menciona $\vec{v}_{\text{fraud}}$ no `REQ-VEC-003`, mas falta definir onde esses centróides ficam armazenados e como são recalculados (ex: tabela `fraud_archetype_centroids` atualizada periodicamente via k-means/batch jobs).
+
+
+4. **Sanitização de PII para o LLM:**
+* O sintetizador precisa de uma camada de anonimização (substituição de CPF, nomes e chaves Pix por tokens `MASK_USER_X`) antes de alimentar o prompt do Llama.
+
+
+
+---
+
+### 3. Especificação Técnica Refinada
+
+Aqui está a especificação aprimorada e pronta para produção:
+
+```markdown
+# 📋 Specification: SPEC-000.7 — Fraud Behavioral Embeddings & Local LLM Dossier Synthesizer via pgvector
+
+- **Status**: Reviewed & Ratified
+- **Author**: Antigravity Financial & Risk Engineering Team
+- **Date**: 2026-08-30
+- **Target Release**: Wallet Service V4.x — Fraud Intelligence Evolution (Phase 0.7)
+- **Architectural Mantra**: *"Leverage pgvector on PostgreSQL for deterministic similarity and local quantized Llama 3.1 for automated investigative triage without external cloud egress."*
+
+---
+
+## 1. Intent & Business Value
+
+Graph topology identifies *who is connected to whom*, while **Behavioral Vector Embeddings** identify *who acts like a fraudster*.
+
+This specification introduces:
+1. **Behavioral Profile Feature Extraction**: Compiling normalized multidimensional vectors for entities (transaction frequency, average transfer size, velocity spikes, nocturnal ratio, counterparty dispersion, out-of-hours ratio).
+2. **PostgreSQL + `pgvector` Storage (`fraud_entity_features`)**: Storing compact feature embeddings using `vector(16)` or `halfvec` with Inner Product (`vector_ip_ops`) indexing.
+3. **Archetype Centroid Similarity**: Matching entity vectors against dynamic fraud archetypes (Mule, Smurfing, Account Takeover) persisted in `fraud_archetype_centroids`.
+4. **GraphRAG Investigation Synthesizer (Llama 3.1 8B)**: An asynchronous pipeline combining multi-hop topology, temporal facts, and vector similarity into an automated, structured `FraudInvestigationDossier`.
+
+---
+
+## 2. Scope & Non-Goals
+
+### In Scope
+- **`REQ-VEC-001` (pgvector Schema & Indexing)**: PostgreSQL schema migrations for entity vectors and archetype centroids using $L_2$-normalized vectors with `vector_ip_ops`.
+- **`REQ-VEC-002` (Behavioral Feature Vector Construction)**: Deterministic 16-dimension feature extraction mapped to $[0.0, 1.0]$ and $L_2$-normalized.
+- **`REQ-VEC-003` (k-NN Behavioral Distance & Risk Scoring)**:
+  $$\text{score}(\vec{u}, \vec{v}) = \vec{u} \cdot \vec{v} \quad (\text{since } \|\vec{u}\| = \|\vec{v}\| = 1.0)$$
+- **`REQ-VEC-004` (Local Llama 3.1 Investigation Agent)**: Worker pipeline assembling graph facts, vector metrics, and temporal alerts, executing local inference via Llama 3.1 8B (Q4_K_M / AWQ) to produce structured investigation narratives.
+
+### Non-Goals
+- Invoking LLM inference synchronously during payment transaction authorization.
+- Exposing raw PII/CPF to the LLM context window (requires pre-redaction/tokenization).
+- Replacing deterministic graph rule engines with pure vector predictions.
+
+---
+
+## 3. Mathematical & Architectural Invariants
+
+- **`I-VEC-001` (Normalized Vector Space)**: All extracted behavioral vectors and archetype centroids MUST be $L_2$-normalized ($\|\vec{v}\| = 1.0$) prior to persistence.
+- **`I-VEC-002` (Durable Co-Location)**: Vector state MUST reside inside PostgreSQL (`pgvector`) to ensure ACID transactions with relational wallet tables.
+- **`I-VEC-003` (Air-Gapped LLM Inference)**: All LLM reasoning MUST execute on local worker infrastructure (e.g., vLLM instance serving Llama 3.1 8B) with zero third-party API dependencies.
+- **`I-VEC-004` (Deterministic Schema Output)**: The LLM output MUST adhere strictly to a predefined JSON Schema validated via Pydantic/Zod.
+
+---
+
+## 4. Requirements & Acceptance Criteria
+
+### REQ-VEC-001: Schema & Inner Product Indexing
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS fraud_entity_features (
+    entity_id UUID PRIMARY KEY,
+    feature_version INT NOT NULL,
+    behavioral_vector vector(16) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS fraud_archetype_centroids (
+    archetype_id VARCHAR(64) PRIMARY KEY, -- e.g., 'MONEY_MULE_RAPID_DRAIN'
+    centroid_vector vector(16) NOT NULL,
+    risk_weight NUMERIC(3,2) NOT NULL,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_features_hnsw
+ON fraud_entity_features USING hnsw (behavioral_vector vector_ip_ops)
+WITH (m = 16, ef_construction = 64);
+
+```
+
+### REQ-VEC-002: Behavioral Vector Extraction
+
+* **Given** transaction history for `walletId` across a 30-day sliding window.
+* **When** `BehavioralFeatureExtractor.extractVector(walletId)` runs.
+* **Then** it generates 16 normalized metrics (velocity, nocturnal ratio, entropy, etc.) and returns the $L_2$-normalized unit vector.
+
+### REQ-VEC-003: Archetype Behavioral Distance Search
+
+* **Given** an updated entity vector $\vec{v}_{\text{entity}}$.
+* **When** comparing against `fraud_archetype_centroids`.
+* **Then** it computes the highest inner-product similarity and assigns `behavioral_risk = MAX(similarity \times risk_weight)`.
+
+### REQ-VEC-004: Llama 3.1 GraphRAG Synthesis
+
+* **Given** a flagged entity `user_id` pending manual compliance review.
+* **When** `InvestigationSynthesizer.generateDossier(user_id)` is triggered.
+* **Then**:
+1. Compiles: 2-hop topological graph neighbors, behavioral distances to top 3 archetypes, and chronological transaction anomaly list.
+2. Masks PII fields into opaque tokens (`USER_TARGET`, `COUNTERPARTY_A`).
+3. Prompts local **Llama 3.1 8B** (temperature = 0.0) with JSON Schema constraint.
+4. Returns `FraudInvestigationDossier` containing structured reasoning, risk level, and executive narrative for human analysts.
+
+
+
+```
+
+<ElicitationsGroup message="Como deseja prosseguir com o refinamento da arquitetura?">
+  <Elicitation label="Definir as 16 dimensões do vetor comportamental" query="Defina a lista exata das 16 dimensões matemáticas do vetor comportamental antifraude, com fórmulas de normalização entre 0 e 1."/>
+  <Elicitation label="Criar o prompt e schema do Llama 3.1 para o Dossier" query="Escreva o template do prompt estruturado e o JSON schema estrito para o sintetizador do Llama 3.1 8B gerar o FraudInvestigationDossier."/>
+</ElicitationsGroup>
+
+```

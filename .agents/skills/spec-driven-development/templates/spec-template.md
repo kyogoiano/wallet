@@ -88,3 +88,16 @@ Response (4xx / 5xx):
 - [ ] Criterion 1
 - [ ] Criterion 2
 - [ ] Criterion 3
+
+---
+
+## 9. Practical Verification Scenarios & Seed Data Requirements (`I-SDD-002`)
+
+### 9.1. Seed Data Requirements
+- [Specify required initial accounts, balances, users, or rule configurations needed to execute verification]
+
+### 9.2. Verification Scenarios
+1. **Scenario 1 (Happy Path)**: [Description, trigger mechanism, expected state change]
+2. **Scenario 2 (Invariant / Edge Case)**: [Description, trigger mechanism, expected error / rejection]
+3. **Scenario 3 (Asynchronous / Outbox / Eventual Consistency)**: [Description, event published, expected derived state]
+

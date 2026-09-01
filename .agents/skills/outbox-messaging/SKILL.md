@@ -49,7 +49,7 @@ flowchart LR
 ## 4. Relay Processing & Retry Rules
 
 1. **Claiming Batch**: `OutboxDao.claimBatch(now, 100)` uses PostgreSQL `FOR UPDATE SKIP LOCKED` to allow multiple parallel relay workers without race conditions.
-2. **NATS Deduplication**: Uses `Nats-Msg-Id: operationId` header in NATS JetStream messages to ensure idempotent delivery.
+2. **NATS Deduplication**: Uses `Nats-Msg-Id: <eventType>-<aggregateId>` header in NATS JetStream messages to ensure idempotent delivery per event type on the unified `events` stream.
 3. **Exponential Backoff**: When publishing fails:
    $$\text{backoff} = 2^{\text{retry\_count}} \text{ seconds}$$
 4. **Dead Letter Handling**: If `retry_count > 10`, mark event as `DEAD` for manual operational inspection.

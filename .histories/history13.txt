@@ -1,0 +1,601 @@
+Sim — e acho que isso deixa a SPEC-000.5 muito mais interessante. Minha recomendação seria não introduzir Neo4j como dependência obrigatória inicialmente. Podemos explorar Graph Intelligence usando uma arquitetura híbrida que aproveita o que sua Wallet já possui:
+
+PostgreSQL + pgvector = memória histórica, relações e features persistentes
+DragonflyDB = estado quente, contadores, features online e, opcionalmente, similaridade vetorial
+Micro-ML = scoring/adaptação incremental
+Graph projection = relações derivadas dos eventos financeiros, sem um graph database dedicado inicialmente
+
+O pgvector suporta busca exata e ANN com HNSW e IVFFlat, incluindo halfvec, o que pode reduzir bastante a pressão de memória. HNSW favorece consulta/recall, enquanto IVFFlat tende a consumir menos recursos e construir mais rapidamente.
+
+Minha decisão arquitetural para a SPEC-000.5
+
+Eu estruturaria a iniciativa assim:
+
+                         ┌─────────────────────────────┐
+                         │      Ledger / Wallet        │
+                         │  Deposit / Transfer / etc.  │
+                         └──────────────┬──────────────┘
+                                        │
+                              Domain / Outbox Events
+                                        │
+                                        ▼
+                    ┌───────────────────────────────────┐
+                    │      Fraud Intelligence Module    │
+                    │       br.com.wallet.fraud         │
+                    └───────────────┬───────────────────┘
+                                    │
+              ┌─────────────────────┼─────────────────────┐
+              │                     │                     │
+              ▼                     ▼                     ▼
+      ┌──────────────┐     ┌────────────────┐    ┌────────────────┐
+      │ Online Rules │     │ Graph Projector│    │ Feature Engine │
+      │ Existing     │     │ & Relationship │    │                │
+      │ O(1)         │     │ Intelligence   │    │ Micro-ML       │
+      └──────┬───────┘     └───────┬────────┘    └───────┬────────┘
+             │                     │                     │
+             ▼                     ▼                     ▼
+      ┌──────────────┐     ┌────────────────┐    ┌────────────────┐
+      │ DragonflyDB  │     │ PostgreSQL     │    │ DragonflyDB /  │
+      │ Hot State    │     │ Graph Facts    │    │ PostgreSQL     │
+      │ Velocity     │     │ Relationships  │    │ Feature Store  │
+      └──────────────┘     │ + pgvector    │    └────────────────┘
+                           └────────────────┘
+O ponto mais importante
+
+Vector search não substitui graph analysis.
+
+São duas capacidades diferentes:
+
+Graph responde:
+"Qual a relação entre estas contas?"
+"Existe um caminho de 3 hops entre um usuário suspeito e este novo destinatário?"
+Vector similarity responde:
+"Quais operações/comportamentos são parecidos com este?"
+
+Eu usaria os dois conceitos, mas sem comprar uma infraestrutura de graph database no V1.
+
+O modelo que eu adotaria: Relational Graph + Online Graph Cache
+
+Em vez de persistir:
+
+(User)-[:TRANSFERRED_TO]->(User)
+
+diretamente no Neo4j, podemos modelar relações no PostgreSQL.
+
+PostgreSQL: Graph Facts
+
+Por exemplo:
+
+fraud_entities
+-------------
+entity_id
+entity_type
+created_at
+
+fraud_relationships
+-------------------
+source_entity_id
+target_entity_id
+relationship_type
+first_seen_at
+last_seen_at
+transaction_count
+total_amount
+risk_score
+metadata
+
+fraud_entity_features
+---------------------
+entity_id
+feature_version
+feature_vector
+updated_at
+
+Relações:
+
+USER ───────────────► WALLET
+USER ───────────────► DEVICE
+USER ───────────────► IP
+WALLET ─────────────► RECIPIENT
+WALLET ─────────────► WALLET
+DEVICE ─────────────► USER
+
+Então uma situação de mule/fraud ring poderia ser:
+
+              ┌──── Wallet A
+              │
+User X ───────┼──── Wallet B ────► Mule Hub
+              │
+              └──── Wallet C
+
+Ou:
+
+Device D
+   │
+   ├──────── User 1 ─────► Wallet 1
+   │
+   ├──────── User 2 ─────► Wallet 2
+   │
+   └──────── User 3 ─────► Wallet 3
+                              │
+                              ▼
+                           Mule Hub
+
+Isso é extremamente relevante para complementar suas regras atuais de:
+
+Global Velocity
+New Recipient
+Fan-in
+Fan-out
+Mule detection
+
+Ou seja, a SPEC-000.5 pode transformar o antifraude de um conjunto de regras predominantemente transacionais em um motor também relacional.
+
+Onde o Dragonfly entra
+
+Aqui eu acho que temos uma oportunidade particularmente boa porque você acabou de introduzir Dragonfly no projeto.
+
+Eu não colocaria vetores no hot path imediatamente.
+
+O hot path deve continuar:
+
+Transfer Request
+       │
+       ▼
+┌──────────────────────┐
+│ Existing Fraud Gate  │
+│                      │
+│ O(1)                 │
+│ Redis-compatible     │
+│ DragonflyDB          │
+└──────────┬───────────┘
+           │
+       ALLOW / BLOCK
+
+Isso preserva seu princípio:
+
+O modelo inteligente nunca pode transformar uma decisão financeira determinística de microssegundos em uma consulta de IA imprevisível.
+
+Depois temos processamento assíncrono:
+
+TransactionCompletedEvent
+           │
+           ▼
+   Graph Intelligence
+           │
+     ┌─────┴──────┐
+     ▼            ▼
+PostgreSQL     Dragonfly
+Graph Facts    Hot Features
+     │            │
+     └─────┬──────┘
+           ▼
+    Feature Extraction
+           │
+           ▼
+      Micro-ML
+           │
+           ▼
+ Fraud Intelligence
+
+O resultado do processamento assíncrono pode retroalimentar o estado online:
+
+user:{id}:graph_risk
+wallet:{id}:network_risk
+recipient:{id}:fan_in_score
+device:{id}:shared_identity_score
+
+Então, na próxima transação:
+
+fraudScore =
+    velocityScore
+    + recipientScore
+    + graphRiskScore
+    + anomalyScore;
+
+Mas tudo continua sendo consulta rápida a feature materializada.
+
+pgvector: eu começaria aqui, não no Dragonfly
+
+Minha preferência para embeddings históricos seria inicialmente:
+
+PostgreSQL + pgvector
+
+Porque você já possui PostgreSQL como parte do sistema.
+
+O pgvector permite busca vetorial dentro do banco relacional e suporta HNSW e IVFFlat. HNSW tem melhor trade-off de busca/recall, mas consome mais memória e custa mais para construir; IVFFlat tende a ser mais econômico em memória/build.
+
+Isso nos dá uma progressão natural.
+
+Stage A — sem vector index
+100 / 1.000 / 10.000 operações
+
+Feature vectors persistidos, talvez busca exata em cenários controlados.
+
+Stage B — HNSW
+
+Quando similaridade se torna frequente:
+
+CREATE INDEX fraud_embedding_hnsw
+ON fraud_entity_features
+USING hnsw (feature_vector vector_cosine_ops);
+
+O pgvector também suporta halfvec, o que pode ser interessante para reduzir memória dependendo da dimensionalidade e precisão aceitável.
+
+Stage C — Dragonfly vector
+
+Só adotaria como alternativa se benchmarks demonstrarem que:
+
+PostgreSQL vector latency
+        >
+Dragonfly hot vector latency
+
+e houver uma carga realmente quente de similarity search.
+
+Não devemos assumir antes do benchmark que precisamos dos dois.
+
+A arquitetura que eu colocaria na SPEC-000.5
+
+Eu chamaria a iniciativa de algo como:
+
+📋 SPEC-000.5 — Adaptive Fraud Intelligence & Graph Risk Engine
+
+Domain Module: br.com.wallet.fraud
+
+Status: Draft / Discovery
+
+Target Release: Wallet Service V4.x Infrastructure & Intelligence Evolution
+
+Architectural Mantra:
+
+"The hot path decides deterministically. Intelligence learns asynchronously. Graph relationships reveal what isolated transactions cannot."
+
+1. Intent
+
+Evoluir o atual módulo antifraude baseado em regras e estado distribuído para uma arquitetura híbrida capaz de combinar:
+
+Deterministic O(1) online fraud rules
+Temporal relationship analysis
+Graph-derived risk features
+Behavioral similarity detection
+Incremental micro-machine-learning
+Historical feature persistence
+Optional semantic/vector retrieval without dedicated vector infrastructure
+
+Sem introduzir inicialmente:
+
+Neo4j obrigatório
+Graph database obrigatório
+GPU
+LLM no hot path
+modelo ML pesado
+serviço Python separado
+As 4 camadas da nova arquitetura
+Layer 1 — Online Fraud Gate
+
+Já existe.
+
+Transaction
+    │
+    ▼
+┌────────────────────────────┐
+│ UserBlockRule              │
+│ GlobalVelocityRule         │
+│ SlidingWindowRule          │
+│ NewRecipientRule           │
+│ Existing Fan-in/Fan-out    │
+└─────────────┬──────────────┘
+              ▼
+          DECISION
+Invariante
+I-AFI-001
+AI, graph traversal, embeddings and ML MUST NOT
+be synchronously required to authorize a transaction.
+
+Essa seria provavelmente a invariante mais importante da SPEC.
+
+Layer 2 — Graph Projection
+
+Novo componente:
+
+br.com.wallet.fraud
+├── api
+│
+├── internal
+│   ├── rules
+│   ├── graph
+│   │   ├── FraudGraphProjector
+│   │   ├── RelationshipExtractor
+│   │   ├── GraphFeatureCalculator
+│   │   └── GraphRiskService
+│   │
+│   ├── features
+│   │   ├── FeatureExtractor
+│   │   ├── FeatureVector
+│   │   └── FeatureStore
+│   │
+│   └── learning
+│       ├── OnlineModel
+│       ├── AnomalyDetector
+│       └── AdaptiveRiskModel
+
+Ele consome eventos após a transação:
+
+@ApplicationModuleListener
+public void onTransferCompleted(TransferCompletedEvent event) {
+    graphProjector.project(event);
+}
+
+Mas aqui eu manteria a mesma filosofia que discutimos no Savings:
+
+evento Modulith para colaboração intra-monolith; NATS para integração externa/durável.
+
+Assim, para essa projeção interna:
+
+TransferCompletedEvent
+        │
+        ├── FraudGraphProjector
+        ├── FeatureExtractor
+        └── FraudLearningPipeline
+
+não precisa de consumer NATS.
+
+Layer 3 — Feature Store
+
+Aqui a arquitetura híbrida:
+
+PostgreSQL — Offline / Historical
+fraud_graph_relationships
+fraud_graph_snapshots
+fraud_entity_features
+fraud_feature_vectors
+fraud_model_state
+fraud_training_samples
+DragonflyDB — Online
+fraud:graph:user:{id}:risk
+fraud:graph:wallet:{id}:degree
+fraud:graph:wallet:{id}:fan_in
+fraud:graph:wallet:{id}:fan_out
+fraud:graph:recipient:{id}:risk
+fraud:model:{id}
+
+Isso é muito melhor do que tentar fazer:
+
+Neo4j
+   +
+Postgres
+   +
+Dragonfly
+   +
+Redis
+   +
+Vector DB
+
+que seria claramente over-engineering para o estágio atual.
+
+Layer 4 — Micro Machine Learning
+
+Aqui acho que sua ideia é muito boa.
+
+Mas eu evitaria começar com "AI" no sentido de LLM.
+
+O primeiro modelo poderia ser algo extremamente simples:
+
+Online Logistic Regression
+
+Features:
+
+x1 = transaction velocity
+x2 = amount z-score
+x3 = new recipient
+x4 = recipient graph risk
+x5 = wallet fan-out score
+x6 = wallet fan-in score
+x7 = shared device score
+x8 = graph distance to known fraud
+x9 = behavioral similarity score
+x10 = historical anomaly score
+
+Modelo:
+
+$$ P(fraud) = \sigma( w_0 + w_1x_1 + w_2x_2 + \dots + w_{10}x_{10} ) $$
+
+Isso pode rodar diretamente em Java.
+
+Sem:
+
+Python
+TensorFlow
+PyTorch
+GPU
+Kubernetes ML stack
+
+Inicialmente.
+
+E o grande benefício é que podemos implementar um mecanismo incremental:
+
+Fraud Feedback
+      │
+      ▼
+Online Update
+      │
+      ▼
+Model Weights
+      │
+      ▼
+PostgreSQL persistence
+      │
+      ▼
+Atomic snapshot
+      │
+      ▼
+Dragonfly hot model cache
+Minha recomendação: criar a SPEC com evolução em estágios
+
+Eu faria a SPEC-000.5 explicitamente dividida em horizontes.
+
+Horizon 1 — Graph Features
+
+Primeiro implementar:
+
+REQ-AFI-001
+
+Relationship projection.
+
+REQ-AFI-002
+
+Fan-in/fan-out temporal metrics.
+
+REQ-AFI-003
+
+Shared entity detection.
+
+Exemplo:
+
+same device
+same recipient
+same source
+same IP
+REQ-AFI-004
+
+Multi-hop risk propagation.
+
+Mesmo que inicialmente limitado:
+
+1-hop
+2-hop
+
+e não um traversal arbitrário.
+
+Isso é importante para manter custo previsível.
+
+Horizon 2 — Historical Similarity
+
+Feature vectors:
+
+FraudFeatureVector
+
+por exemplo:
+
+public record FraudFeatureVector(
+    double velocity,
+    double amountDeviation,
+    double recipientNovelty,
+    double fanInScore,
+    double fanOutScore,
+    double sharedEntityScore,
+    double graphRisk
+) {}
+
+Persistência PostgreSQL.
+
+Depois benchmark:
+
+exact search
+vs
+pgvector HNSW
+vs
+Dragonfly vector
+
+E só então decidir o índice/engine.
+
+Isso é particularmente importante porque HNSW e IVFFlat possuem trade-offs diferentes de memória, build, recall e consulta; portanto eu não fixaria HNSW como decisão arquitetural antes de medir sua carga.
+
+Horizon 3 — Micro-ML
+
+Somente depois de termos:
+
+historical features
++
+feedback labels
++
+graph features
+
+Criamos:
+
+AdaptiveRiskModel
+
+Começando com:
+
+Logistic Regression
+
+ou um pequeno:
+
+Online Linear Model
+
+Depois podemos comparar contra modelos mais sofisticados.
+
+Sobre Neo4j
+
+Eu o colocaria como:
+
+Technology Candidate
+
+e não:
+
+Required Dependency
+
+na SPEC.
+
+A regra seria:
+
+PostgreSQL relational graph is the default persistence implementation. A dedicated graph database SHALL only be introduced when bounded graph traversal requirements cannot meet defined latency, throughput, or query-complexity SLOs using the existing infrastructure.
+
+Ou seja:
+
+┌──────────────────────────────┐
+│ PostgreSQL + Dragonfly       │
+│          DEFAULT             │
+└───────────────┬──────────────┘
+                │
+         Benchmark / SLO
+                │
+       ┌────────┴────────┐
+       │                 │
+     PASS              FAIL
+       │                 │
+       ▼                 ▼
+ Keep current      Evaluate Neo4j
+
+Isso mantém a Wallet alinhada com uma das ideias mais fortes do projeto: extrair o máximo da infraestrutura já existente antes de adicionar outro sistema operacional.
+
+Minha conclusão
+
+Para a SPEC-000.5, eu adotaria oficialmente:
+
+Base
+
+PostgreSQL
+
+Graph facts
+Historical relationships
+Model state
+Training samples
+pgvector como capacidade opcional
+
+DragonflyDB
+
+Hot fraud state
+Online graph features
+Velocity
+Cached model snapshot
+Opcionalmente vector search após benchmark
+
+Java/Spring Modulith
+
+Graph projection
+Feature extraction
+Learning pipeline
+Sem novo microserviço inicialmente
+
+NATS
+
+Continua para integração externa e eventos duráveis/distribuídos
+Não precisa ser o mecanismo de comunicação entre componentes internos do fraud/monolith
+
+Neo4j
+
+Candidate / escape hatch
+Só entra se os SLOs demonstrarem necessidade real
+
+Acho que esta é uma evolução muito mais coerente para sua Wallet do que simplesmente adicionar Neo4j porque "fraude usa grafos". O resultado seria uma antifraude em camadas: regras determinísticas no presente + inteligência relacional sobre o passado + aprendizado incremental para o futuro.

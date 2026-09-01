@@ -38,27 +38,53 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
     }
 
     protected void setupGeneralSubscription(@NonNull final String streamName,
-                                  @NonNull final String consumerName ) throws IOException, JetStreamApiException {
+                                            @NonNull final String consumerName) throws IOException, JetStreamApiException {
         final var jetStream = natsConnection.jetStream();
+        final var jsm = natsConnection.jetStreamManagement();
+
         // Configure consumer for at-least-once delivery, backoff follows current retry strategy
         final var consumerConfig = ConsumerConfiguration.builder()
                 .durable(consumerName)
+                .filterSubject(subject)
                 .ackPolicy(AckPolicy.Explicit)
                 .maxDeliver(maxDeliver)
                 .backoff(backoffSequence)
-                .deliverPolicy(DeliverPolicy.New) // 🔥 important in prod
+                .deliverPolicy(DeliverPolicy.All) // ensure un-acked messages in stream are processed
                 .build();
+
+        try {
+            final var existing = jsm.getConsumerInfo(streamName, consumerName);
+            if (existing != null) {
+                final String existingFilter = existing.getConsumerConfiguration().getFilterSubject();
+                if (existingFilter != null && !existingFilter.equals(subject)) {
+                    log.info("Consumer '{}' filter subject changed from '{}' to '{}'. Recreating consumer...",
+                            consumerName, existingFilter, subject);
+                    jsm.deleteConsumer(streamName, consumerName);
+                }
+            }
+            jsm.addOrUpdateConsumer(streamName, consumerConfig);
+        } catch (JetStreamApiException e) {
+            if (e.getApiErrorCode() == 10014 || e.getApiErrorCode() == 404) {
+                jsm.addOrUpdateConsumer(streamName, consumerConfig);
+            } else {
+                try {
+                    jsm.deleteConsumer(streamName, consumerName);
+                    jsm.addOrUpdateConsumer(streamName, consumerConfig);
+                } catch (Exception ex) {
+                    log.warn("Could not auto-recreate consumer '{}' via management API: {}", consumerName, ex.getMessage());
+                }
+            }
+        }
 
         final var pullSubscribeOptions = PullSubscribeOptions.builder()
                 .stream(streamName)
                 .durable(consumerName)
-                .configuration(consumerConfig)
+                .bind(true)
                 .build();
 
-        // Subscribe to the subject
-        subscription = jetStream.subscribe(subject, pullSubscribeOptions);
+        // Subscribe by binding directly to the durable consumer on the stream
+        subscription = jetStream.subscribe(null, pullSubscribeOptions);
         log.info("Subscribed to NATS JetStream subject '{}' with durable consumer '{}'.", subject, consumerName);
-
     }
 
     private void pollForMessages() {
@@ -101,12 +127,32 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
                         break;
                     }
                 }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (IllegalStateException e) {
+                if (!running.get() || (e.getMessage() != null && e.getMessage().contains("inactive"))) {
+                    log.debug("NATS subscription closed or became inactive during shutdown: {}", e.getMessage());
+                    break;
+                }
+                log.error("Unexpected IllegalStateException while fetching messages from NATS JetStream: {}", e.getMessage(), e);
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             } catch (Exception e) {
+                if (!running.get() || Thread.currentThread().isInterrupted()) {
+                    log.debug("NATS consumer stopping due to shutdown signal: {}", e.getMessage());
+                    break;
+                }
                 log.error("Error fetching messages from NATS JetStream: {}", e.getMessage(), e);
                 try {
                     Thread.sleep(1000); // Wait before retrying fetch
                 } catch (InterruptedException ie) {
                     Thread.currentThread().interrupt();
+                    break;
                 }
             }
         }
@@ -131,20 +177,25 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
 
     @Override
     public void stop() {
-        running.set(false);
+        if (running.compareAndSet(true, false)) {
+            if (subscription != null) {
+                try {
+                    subscription.unsubscribe();
+                    log.info("Unsubscribed from NATS JetStream.");
+                } catch (Exception e) {
+                    log.debug("Subscription already closed during shutdown: {}", e.getMessage());
+                }
+            }
 
-        if (subscription != null) {
-            subscription.unsubscribe();
-            log.info("Unsubscribed from NATS JetStream.");
-        }
-
-        if (executorService != null) {
-            executorService.shutdown(); // immediate stop due to virtual threads
-            log.info("NATS message consumer executor service shut down.");
-            try {
-                final var finished = executorService.awaitTermination(5, TimeUnit.SECONDS);
-                log.debug("NATS message consumer executor service shut down finished? : {}",  finished);
-            } catch (InterruptedException ignored) {
+            if (executorService != null) {
+                executorService.shutdownNow(); // immediate stop of polling virtual threads
+                log.info("NATS message consumer executor service shut down.");
+                try {
+                    final var finished = executorService.awaitTermination(5, TimeUnit.SECONDS);
+                    log.debug("NATS message consumer executor service shut down finished? : {}", finished);
+                } catch (InterruptedException ignored) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
     }

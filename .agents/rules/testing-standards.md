@@ -60,3 +60,18 @@ Every financial operation test suite must verify:
   - Core domain & ledger services (`br.com.wallet.ledger.internal.service`): $\ge 85\%$
   - Anti-fraud rules & scoring (`br.com.wallet.fraud.rules`): $\ge 85\%$
 - **Traceability Integration**: All SDD execution summaries ([`.spec/summaries/SUMMARY-XXX.md`](file:///.spec/summaries/)) must record code coverage results.
+
+---
+
+## 5. Practical Verification Guides & Seed Data Fixtures (`I-SDD-002`)
+
+Every delivered feature or specification summary (`SUMMARY-XXX.md`) must provide a **Practical Verification Guide**:
+
+1. **Environment Prerequisites**: Exact docker compose services, environment variables, and ports required (`PostgreSQL:5432`, `Dragonfly:6379`, `NATS:4222`, `App:8080`).
+2. **Deterministic Seed Data**: Ready-to-execute SQL inserts or JSON payloads establishing initial test accounts, rules, or entity graphs.
+3. **Step-by-Step Execution Commands**:
+   - Complete `curl` commands with realistic JSON request bodies and `Idempotency-Key` headers.
+   - NATS CLI commands (`nats pub ...`) for asynchronous event testing.
+   - Direct Redis/Dragonfly verification commands (`redis-cli GET ...` or `redis-cli ZRANGE ...`).
+4. **State Assertion Queries**: PostgreSQL SQL queries to verify ledger entries, balances, outbox records, and domain entity states after command execution.
+5. **Expected Output & Telemetry**: Explicit HTTP status codes, JSON response shapes, and OpenTelemetry trace checkpoints to verify correctness.

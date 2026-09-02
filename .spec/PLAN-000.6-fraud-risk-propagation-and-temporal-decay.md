@@ -35,7 +35,7 @@ flowchart TD
         end
     end
 
-    Outbox -->|OutboxRelay (10s)| NATS["NATS JetStream: events.fraud.propagation"]
+    Outbox -->|OutboxRelay 10s| NATS["NATS JetStream: events.fraud.propagation"]
 ```
 
 ### Key Architectural Refinements (History 23)

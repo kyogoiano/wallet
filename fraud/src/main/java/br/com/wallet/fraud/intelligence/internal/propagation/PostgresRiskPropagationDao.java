@@ -58,7 +58,7 @@ public class PostgresRiskPropagationDao {
         return jdbc.query("""
             WITH RECURSIVE propagation_paths AS (
                 -- Anchor: 1-hop outgoing edges from source
-                SELECT 
+                SELECT\s
                     e.source_id,
                     e.target_id,
                     1 AS hop_count,
@@ -73,7 +73,7 @@ public class PostgresRiskPropagationDao {
                 UNION ALL
 
                 -- Recursive step: traverse outgoing edges from current target
-                SELECT 
+                SELECT\s
                     p.source_id,
                     e.target_id,
                     p.hop_count + 1,
@@ -81,7 +81,7 @@ public class PostgresRiskPropagationDao {
                     p.edge_types || e.relationship_type::text,
                     p.edge_times || e.occurred_at
                 FROM propagation_paths p
-                JOIN fraud_relationship_events e 
+                JOIN fraud_relationship_events e\s
                   ON p.target_id = e.source_id
                  AND e.occurred_at <= ?
                 WHERE p.hop_count < ?
@@ -90,7 +90,7 @@ public class PostgresRiskPropagationDao {
             SELECT source_id, target_id, hop_count, path_nodes, edge_types, edge_times
             FROM propagation_paths
             LIMIT ?
-            """,
+           \s""",
             this::mapDiscoveredPath,
             sourceEntityId,
             asOfTs,
@@ -119,7 +119,7 @@ public class PostgresRiskPropagationDao {
 
         return jdbc.query("""
             WITH RECURSIVE propagation_paths AS (
-                SELECT 
+                SELECT\s
                     e.source_id,
                     e.target_id,
                     1 AS hop_count,
@@ -133,7 +133,7 @@ public class PostgresRiskPropagationDao {
 
                 UNION ALL
 
-                SELECT 
+                SELECT\s
                     p.source_id,
                     e.target_id,
                     p.hop_count + 1,
@@ -141,7 +141,7 @@ public class PostgresRiskPropagationDao {
                     p.edge_types || e.relationship_type::text,
                     p.edge_times || e.occurred_at
                 FROM propagation_paths p
-                JOIN fraud_relationship_events e 
+                JOIN fraud_relationship_events e\s
                   ON p.target_id = e.source_id
                  AND e.occurred_at <= ?
                 WHERE p.hop_count < ?
@@ -151,7 +151,7 @@ public class PostgresRiskPropagationDao {
             FROM propagation_paths
             WHERE target_id = ?
             LIMIT ?
-            """,
+           \s""",
             this::mapDiscoveredPath,
             sourceEntityId,
             asOfTs,

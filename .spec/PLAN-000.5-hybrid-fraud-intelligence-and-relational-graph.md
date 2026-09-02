@@ -45,7 +45,7 @@ flowchart TD
         end
     end
 
-    TxUC -->|Pre-execution O(1) check| Gate
+    TxUC -->|Pre-execution O 1 check| Gate
 ```
 
 ---

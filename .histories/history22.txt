@@ -1,0 +1,965 @@
+Yes. And looking at it from our **actual Wallet/Fraud architecture**, I think the answer changes quite a bit from “let's introduce Temporal.”
+
+For **SPEC-000.6 specifically**, I would rank the options:
+
+> **1. Hand-rolled + PostgreSQL/NATS — best fit**
+> **2. Lightweight state/workflow abstraction inside the application — potentially useful**
+> **3. Spring Statemachine — probably unnecessary**
+> **4. LangGraph/StateGraph — excellent for AI/agent workflows, but wrong abstraction for 000.6**
+> **5. Temporal — technically strongest, but currently more infrastructure than we need**
+
+The key is that our fraud propagation workflow is **not really a general-purpose workflow problem yet**.
+
+---
+
+# 1. First, let's separate two problems
+
+We were previously treating this:
+
+```text
+Graph
+ ↓
+Propagation
+ ↓
+Aggregation
+ ↓
+Persistence
+ ↓
+Dragonfly
+ ↓
+NATS
+```
+
+as a workflow.
+
+But there are actually two different concepts:
+
+### A. Computation pipeline
+
+```text
+load → calculate → aggregate → persist
+```
+
+### B. Durable workflow
+
+```text
+START
+ ↓
+WAIT
+ ↓
+RETRY
+ ↓
+HUMAN INTERVENTION
+ ↓
+RESUME
+ ↓
+TIMEOUT
+ ↓
+COMPENSATE
+```
+
+Temporal is designed primarily for **B**.
+
+Our 000.6 is overwhelmingly **A**.
+
+That's an important distinction.
+
+---
+
+# 2. Hand-rolled design
+
+I think this deserves much more consideration than we initially gave it.
+
+We already have:
+
+* PostgreSQL
+* NATS JetStream
+* DragonflyDB
+* Spring Boot
+* Spring Modulith
+* transactional outbox
+* `FOR UPDATE SKIP LOCKED`
+* scheduled workers
+* Testcontainers
+* OpenTelemetry
+
+We already possess almost all the primitives required to build a reliable propagation executor.
+
+We don't need another infrastructure system merely to execute:
+
+```text
+Entity
+  ↓
+query graph
+  ↓
+calculate
+  ↓
+persist
+  ↓
+materialize
+```
+
+## A very simple architecture
+
+```text
+                 NATS
+                   │
+                   ▼
+          FraudPropagationRequested
+                   │
+                   ▼
+        ┌──────────────────────┐
+        │ PropagationDispatcher│
+        └──────────┬───────────┘
+                   │
+                   ▼
+             PostgreSQL
+          propagation_jobs
+                   │
+             SKIP LOCKED
+                   │
+          ┌────────┴────────┐
+          ▼                 ▼
+      Worker #1          Worker #2
+          │                 │
+          └────────┬────────┘
+                   ▼
+          RiskPropagationEngine
+                   │
+        ┌──────────┼──────────┐
+        ▼          ▼          ▼
+     Graph      Aggregate   Persist
+        │                     │
+        └──────────┬──────────┘
+                   ▼
+              Dragonfly
+```
+
+That's remarkably small.
+
+---
+
+# 3. We can make the job itself the state machine
+
+For example:
+
+```sql
+CREATE TABLE fraud_propagation_jobs (
+    id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    available_at TIMESTAMPTZ NOT NULL,
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);
+```
+
+States:
+
+```text
+PENDING
+   │
+   ▼
+RUNNING
+   │
+   ├──────────────► RETRY_WAIT
+   │                    │
+   │                    └──► RUNNING
+   │
+   ├──────────────► COMPLETED
+   │
+   └──────────────► FAILED
+```
+
+And the worker can claim work with the exact PostgreSQL machinery we're already comfortable with:
+
+```sql
+SELECT id
+FROM fraud_propagation_jobs
+WHERE status = 'PENDING'
+  AND available_at <= now()
+ORDER BY created_at
+FOR UPDATE SKIP LOCKED
+LIMIT 1;
+```
+
+This is **not a toy architecture**.
+
+For a bounded asynchronous calculation, it's often the correct architecture.
+
+---
+
+# 4. What do we gain by doing this ourselves?
+
+Quite a lot.
+
+### No new infrastructure
+
+```text
+Temporal     ❌
+Temporal DB  ❌
+Temporal UI  ❌
+Temporal ops ❌
+```
+
+We keep:
+
+```text
+PostgreSQL
+NATS
+Dragonfly
+```
+
+### We control semantics
+
+For example:
+
+```java
+enum PropagationJobStatus {
+    PENDING,
+    RUNNING,
+    RETRY_WAIT,
+    COMPLETED,
+    FAILED
+}
+```
+
+There's no framework abstraction hiding what's happening.
+
+### Debugging is trivial
+
+We can query:
+
+```sql
+SELECT *
+FROM fraud_propagation_jobs
+WHERE entity_id = ?;
+```
+
+and immediately understand what happened.
+
+That's attractive for a fraud system.
+
+---
+
+# 5. The interesting part: idempotency
+
+We already know how to do this.
+
+A propagation evaluation can have:
+
+```text
+entity_id
++
+evaluation_timestamp
++
+model_version
+```
+
+and the persistence operation can be idempotent.
+
+For example:
+
+```text
+(entity_id, propagation_model_version, evaluation_id)
+```
+
+or a versioned result.
+
+Then if:
+
+```text
+worker crashes
+     ↓
+job retried
+     ↓
+same calculation
+```
+
+we don't create duplicate state.
+
+This is much easier because **risk propagation is naturally idempotent**.
+
+That's a major reason I don't think Temporal is necessary yet.
+
+---
+
+# 6. NATS already gives us the event-driven trigger
+
+This is where our existing architecture is particularly helpful.
+
+We don't need:
+
+```text
+Temporal Schedule
+```
+
+just to wake something up.
+
+We already have:
+
+```text
+Ledger
+ ↓
+Outbox
+ ↓
+NATS
+ ↓
+Fraud listener
+```
+
+The listener can simply create a propagation job:
+
+```text
+TransferCompletedEvent
+        │
+        ▼
+FraudGraphProjection
+        │
+        ▼
+PropagationJob
+        │
+        ▼
+Worker
+```
+
+And then we can have a periodic reconciliation:
+
+```text
+every 1 minute
+       ↓
+find PENDING / RETRY_WAIT
+       ↓
+process
+```
+
+This is basically a tiny workflow engine built from primitives we already operate.
+
+---
+
+# 7. Where LangGraph/StateGraph enters
+
+This is a very different proposition.
+
+LangGraph describes itself as a low-level framework for **long-running, stateful workflows/agents**, with durable execution, persistence/checkpointing and human-in-the-loop capabilities. Its `StateGraph` model is essentially a graph of nodes operating on shared state. ([Docs by LangChain][1])
+
+Conceptually:
+
+```text
+START
+  │
+  ▼
+Graph Analysis
+  │
+  ├──────► Behavioral Analysis
+  │                 │
+  ▼                 ▼
+Propagation ───► Risk Fusion
+                    │
+                    ▼
+                 Decision
+```
+
+That's actually a **beautiful model** for our future fraud intelligence architecture.
+
+But there's a catch.
+
+---
+
+# 8. LangGraph is much more interesting for 000.8 than 000.6
+
+Consider our eventual architecture:
+
+```text
+                Fraud Investigation
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+      Graph Agent   Behavioral    LLM/RAG
+                     Model
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+                  Risk Fusion
+                       │
+                       ▼
+                Investigation
+                  Dossier
+```
+
+Now StateGraph becomes extremely compelling.
+
+Especially if we introduce:
+
+* LLM reasoning
+* tool calls
+* investigation loops
+* human review
+* retrieval
+* graph exploration
+* behavioral similarity
+* evidence gathering
+* analyst feedback
+
+That's precisely where a graph-oriented agent framework becomes useful.
+
+---
+
+# 9. But LangGraph is a poor fit for our Java core
+
+This is the biggest problem.
+
+Our system is:
+
+```text
+Java
+Spring Boot
+Spring Modulith
+PostgreSQL
+NATS
+Dragonfly
+```
+
+LangGraph's mainstream implementation is Python-oriented, and its ecosystem is tightly coupled to the LangChain/agent ecosystem. ([Docs by LangChain][1])
+
+So introducing it into 000.6 would potentially mean:
+
+```text
+Java Fraud Service
+        │
+        ▼
+Python LangGraph Service
+        │
+        ▼
+PostgreSQL
+```
+
+Now we've added:
+
+```text
+Python runtime
+service deployment
+API boundary
+serialization
+observability boundary
+deployment pipeline
+security boundary
+```
+
+Which is almost the opposite of our objective.
+
+### Therefore:
+
+**LangGraph should not enter 000.6.**
+
+I'd keep it in reserve for the eventual **Investigation Intelligence / Agentic Fraud Analysis** layer.
+
+---
+
+# 10. What about Spring Statemachine?
+
+This one is more interesting because it stays inside Java/Spring.
+
+Spring Statemachine provides:
+
+* states
+* transitions
+* guards
+* actions
+* events
+* timers
+* hierarchical states
+* persistence
+* state machine services
+
+and even persistence through JPA/Redis repositories. ([Home][2])
+
+So we could technically model:
+
+```text
+PENDING
+   ↓
+RUNNING
+   ↓
+GRAPH_ANALYSIS
+   ↓
+PROPAGATION
+   ↓
+PERSISTING
+   ↓
+MATERIALIZING
+   ↓
+COMPLETED
+```
+
+But I don't like it here.
+
+Why?
+
+Because this isn't really a **finite state machine problem**.
+
+It's a **data processing pipeline**.
+
+Spring Statemachine would give us an abstraction like:
+
+```java
+.withExternal()
+    .source(GRAPH_ANALYSIS)
+    .target(PROPAGATION)
+    .event(GRAPH_COMPLETED)
+```
+
+when our real problem is simply:
+
+```java
+var graph = graphDao.find(...);
+var risk = propagationEngine.calculate(graph);
+riskDao.persist(risk);
+```
+
+We're adding framework ceremony without solving a significant problem.
+
+---
+
+# 11. There's actually a fourth option
+
+I'd seriously consider **Spring Batch** if 000.6 eventually becomes primarily a large-scale batch/recalculation system.
+
+For example:
+
+```text
+10 million entities
+       ↓
+partition
+       ↓
+workers
+       ↓
+propagation
+       ↓
+checkpoint
+```
+
+But that's a different requirement.
+
+Our current 000.6 is:
+
+> event-driven incremental risk propagation.
+
+So I wouldn't introduce Spring Batch either.
+
+---
+
+# 12. Comparison
+
+Here's how I see it specifically for our project:
+
+| Solution                          | Infra | Java fit | Durable | Complexity |      000.6 |
+| --------------------------------- | ----: | -------: | ------: | ---------: | ---------: |
+| **Hand-rolled PostgreSQL + NATS** |    🟢 |       🟢 |      🟢 |         🟢 | **9.5/10** |
+| Spring Statemachine               |    🟢 |       🟢 |      🟢 |         🟡 |       6/10 |
+| Spring Batch                      |    🟢 |       🟢 |      🟢 |         🟡 |       5/10 |
+| LangGraph                         | 🟡/🔴 |       🔴 |      🟢 |         🟡 |       3/10 |
+| Temporal                          |    🔴 |       🟢 |    🟢🟢 |         🟡 |       7/10 |
+
+But:
+
+| Solution            | Future AI investigation |
+| ------------------- | ----------------------: |
+| Hand-rolled         |                    6/10 |
+| Spring Statemachine |                    4/10 |
+| Spring Batch        |                    2/10 |
+| **LangGraph**       |               **10/10** |
+| Temporal            |                    9/10 |
+
+That's the interesting conclusion.
+
+---
+
+# 13. I would actually use a hybrid evolution
+
+Rather than deciding today that we need a workflow engine, I'd structure the domain so that **we can introduce one later without rewriting the fraud engine**.
+
+Something like:
+
+```text
+fraud
+│
+├── domain
+│   ├── RiskPropagationEngine
+│   ├── PathInfluenceCalculator
+│   └── MultiPathAggregator
+│
+├── application
+│   ├── EvaluatePropagation
+│   └── PersistPropagation
+│
+├── orchestration
+│   ├── PropagationDispatcher
+│   └── PropagationJobWorker
+│
+└── infrastructure
+    ├── postgres
+    ├── nats
+    └── dragonfly
+```
+
+The key interface:
+
+```java
+public interface RiskPropagationOrchestrator {
+
+    PropagationEvaluationId evaluate(
+        PropagationRequest request
+    );
+}
+```
+
+Current implementation:
+
+```text
+PostgresPropagationOrchestrator
+```
+
+Later:
+
+```text
+TemporalPropagationOrchestrator
+```
+
+or perhaps:
+
+```text
+LangGraphInvestigationOrchestrator
+```
+
+without changing:
+
+```text
+RiskPropagationEngine
+```
+
+---
+
+# 14. And I would make the orchestration extremely boring
+
+Something like:
+
+```java
+@Transactional
+public void dispatch(PropagationRequest request) {
+
+    if (jobRepository.existsActive(request.entityId())) {
+        return;
+    }
+
+    jobRepository.enqueue(
+        PropagationJob.pending(
+            request.entityId(),
+            request.modelVersion()
+        )
+    );
+}
+```
+
+Worker:
+
+```java
+public void execute(PropagationJob job) {
+
+    try {
+
+        var graph = graphQuery.loadTemporalGraph(
+            job.entityId(),
+            job.asOf()
+        );
+
+        var result = propagationEngine.evaluate(
+            graph,
+            propagationConfig
+        );
+
+        propagationRepository.persist(result);
+
+        hotRiskMaterializer.materialize(result);
+
+        jobRepository.complete(job.id());
+
+    } catch (RetryableException e) {
+
+        jobRepository.retry(job.id(), nextBackoff(job));
+
+    } catch (Exception e) {
+
+        jobRepository.fail(job.id(), e);
+    }
+}
+```
+
+That's basically our own **tiny, domain-specific workflow engine**.
+
+And importantly:
+
+**we don't pretend it's a generic workflow engine.**
+
+That's a feature.
+
+---
+
+# 15. The one thing I would steal from Temporal/LangGraph
+
+Even if we don't adopt either, I'd adopt their **conceptual model**.
+
+Specifically:
+
+### Workflow instance
+
+```text
+PropagationEvaluation
+```
+
+### State
+
+```text
+PENDING
+RUNNING
+COMPLETED
+FAILED
+```
+
+### Execution ID
+
+```text
+evaluation_id
+```
+
+### Model version
+
+```text
+propagation_model_version
+```
+
+### Checkpoint/result
+
+```text
+propagated_risk
+evaluated_at
+```
+
+### Retry metadata
+
+```text
+attempt_count
+next_attempt_at
+last_error
+```
+
+### Correlation
+
+```text
+workflow/evaluation ID
+        ↓
+NATS
+        ↓
+PostgreSQL
+        ↓
+Dragonfly
+        ↓
+OpenTelemetry
+```
+
+This gives us many of the **engineering benefits** of workflow engines without actually running one.
+
+---
+
+# 16. And this makes SPEC-000.6 cleaner
+
+I would change the architecture from:
+
+```text
+NATS
+ ↓
+FraudGraphEventListener
+ ↓
+RiskPropagationEngine
+```
+
+to:
+
+```text
+NATS
+ ↓
+FraudGraphEventListener
+ ↓
+PropagationEvaluationDispatcher
+ ↓
+PostgreSQL propagation_jobs
+ ↓
+PropagationWorker
+ ↓
+RiskPropagationEngine
+```
+
+Then:
+
+```text
+RiskPropagationEngine
+```
+
+remains pure and synchronous **inside the asynchronous worker**.
+
+That's an important distinction.
+
+The financial path remains:
+
+```text
+                 ┌──────────────┐
+Transfer ───────►│ Fraud Gate   │
+                 │ Dragonfly    │
+                 └──────┬───────┘
+                        │
+                        ▼
+                     Ledger
+```
+
+while intelligence becomes:
+
+```text
+NATS
+ │
+ ▼
+Job
+ │
+ ▼
+Worker
+ │
+ ├── PostgreSQL graph
+ ├── propagation
+ ├── pgvector eventually
+ ├── micro-ML eventually
+ └── Dragonfly materialization
+```
+
+---
+
+# 17. My preferred long-term architecture
+
+This is where I think we can get something quite elegant.
+
+### Phase 0.6–0.7
+
+**No workflow engine.**
+
+```text
+NATS + PostgreSQL jobs + workers
+```
+
+Minimal infrastructure.
+
+### Phase 0.8
+
+Still probably no workflow engine.
+
+```text
+Graph
+ +
+Propagation
+ +
+Behavioral
+ +
+Micro-ML
+```
+
+can still be executed by the same worker architecture.
+
+### Later — Investigation Intelligence
+
+Now introduce something specialized:
+
+```text
+Fraud Investigation Service
+             │
+             ▼
+         StateGraph
+             │
+       ┌─────┼─────┐
+       ▼     ▼     ▼
+     Graph  RAG   ML
+       │     │     │
+       └─────┼─────┘
+             ▼
+        LLM reasoning
+             │
+             ▼
+       Analyst dossier
+```
+
+**That is where I would consider LangGraph.**
+
+### Much later
+
+If we reach:
+
+* multi-hour workflows
+* human approval
+* compensation
+* timers
+* external callbacks
+* thousands/millions of concurrent workflow instances
+* strict workflow durability requirements
+
+then:
+
+**Temporal becomes justified.**
+
+---
+
+# Bottom line
+
+I think our initial Temporal proposal was **one step too early**.
+
+For the system we're actually building:
+
+> **SPEC-000.6 doesn't need a workflow engine. It needs a durable asynchronous job/execution model.**
+
+And we already have the infrastructure to build that with:
+
+**NATS + PostgreSQL + `SKIP LOCKED` + idempotent workers + retry metadata.**
+
+Then:
+
+> **LangGraph is not a cheaper Temporal for this problem.**
+
+It's a different tool, and its sweet spot is much closer to our future **agentic investigation / GraphRAG / LLM fraud analyst** capability.
+
+And:
+
+> **Spring Statemachine is technically capable, but adds abstraction without enough value for this particular pipeline.** Its own documentation positions state machines around explicit states, transitions, triggers and guards, with persistence when state must survive outside the running machine. ([Home][2])
+
+So I'd currently choose:
+
+```text
+              NOW                         FUTURE
+               │                            │
+               ▼                            ▼
+       PostgreSQL Job Queue            LangGraph
+               │                    Investigation AI
+               ▼
+           Workers
+               │
+               ▼
+       Fraud Intelligence
+               │
+               ▼
+          NATS events
+```
+
+and keep **Temporal as an architectural escape hatch**, not as a dependency we introduce now.
+
+This also fits our original architectural principle very well: **don't add infrastructure until the complexity of the problem actually demands it.**
+
+[1]: https://docs.langchain.com/oss/python/langgraph/overview?utm_source=chatgpt.com "LangGraph overview - Docs by LangChain"
+[2]: https://docs.spring.io/spring-statemachine/docs/current-SNAPSHOT/reference/?utm_source=chatgpt.com "Spring Statemachine - Reference Documentation"

@@ -26,13 +26,13 @@ flowchart TD
         FeatExt --> DB_Feat[(pgvector: fraud_entity_features)]
         Centroids[(pgvector: fraud_archetype_centroids)] --> Matcher[Inner Product Query: behavioral_vector <#> centroid]
         DB_Feat --> Matcher
-        Matcher --> Score[behavioral_risk = max(sim * w_i)]
+        Matcher --> Score[behavioral_risk = max sim * w_i]
     end
 
     subgraph Investigation ["Local GraphRAG Investigation Pipeline"]
         Score --> Trigger{Alert / Manual Review}
-        Trigger --> GraphContext[Assemble 2-Hop Graph Facts (SPEC-000.5)]
-        Trigger --> TempContext[Assemble Temporal Evidence (SPEC-000.6)]
+        Trigger --> GraphContext[Assemble 2-Hop Graph Facts SPEC-000.5]
+        Trigger --> TempContext[Assemble Temporal Evidence SPEC-000.6]
         GraphContext & TempContext & Matcher --> Sanitizer[PII Masking & Tokenization: MASK_USER_X]
         Sanitizer --> LLM["Local Llama 3.1 8B (vLLM / Ollama with JSON Mode)"]
         LLM --> Dossier[Structured FraudInvestigationDossier]

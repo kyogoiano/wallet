@@ -9,7 +9,7 @@ receivers:
 exporters:
   debug:
     verbosity: basic
-  otlphttp/openobserve:
+  otlp_http/openobserve:
     endpoint: http://openobserve:5080/api/default
     headers:
       # Base64 of leandro.ueg@gmail.com:Admin123!@#
@@ -31,12 +31,12 @@ service:
     metrics:
       receivers: [ otlp ]
       processors: [ batch ]
-      exporters: [ debug, otlphttp/openobserve ]
+      exporters: [ debug, otlp_http/openobserve ]
     traces:
       receivers: [ otlp ]
       processors: [ batch ]
-      exporters: [ debug, otlphttp/openobserve ]
+      exporters: [ debug, otlp_http/openobserve ]
     logs:
       receivers: [ otlp ]
       processors: [ batch ]
-      exporters: [ debug, otlphttp/openobserve ]
+      exporters: [ debug, otlp_http/openobserve ]

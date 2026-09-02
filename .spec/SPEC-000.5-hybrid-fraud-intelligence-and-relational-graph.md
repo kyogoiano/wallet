@@ -29,7 +29,7 @@ This specification evolves `br.com.wallet.fraud` into a **Hybrid Fraud Intellige
 ```mermaid
 flowchart TD
     subgraph HotPath ["Synchronous Financial Path (< 1ms)"]
-        TxReq[Transfer Request] --> FG[Fraud Gate V3: Local + Dragonfly O(1)]
+        TxReq[Transfer Request] --> FG[Fraud Gate V3: Local + Dragonfly O 1]
         FG -->|ALLOW| Core[Ledger Core Transaction]
         FG -->|BLOCK| Reject[Reject with FraudException]
         Core --> Outbox[Outbox Commit]

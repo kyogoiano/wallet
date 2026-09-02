@@ -1,0 +1,745 @@
+Sim. E olhando o `PLAN-000.6` junto com a `SPEC-000.6`, eu faria **uma revisão antes de começar a implementação**. A estrutura está boa e, principalmente, a separação em TDD phases está coerente com a arquitetura que estamos construindo. O plano também preserva a ideia central: cálculo profundo assíncrono, isolamento de `propagated_risk` e uso do PostgreSQL como graph projection.
+
+Mas encontrei **algumas inconsistências importantes entre SPEC e PLAN** que vale corrigir agora, porque senão o Antigravity provavelmente vai implementar decisões diferentes dependendo de qual documento consultar.
+
+## 1. A principal inconsistência: REQ vs TASK
+
+Na SPEC temos:
+
+* `REQ-PROP-001` → Multi-Hop Neighborhood Traversal
+* `REQ-PROP-002` → Temporal Decay
+* `REQ-PROP-003` → Propagated Risk Persistence
+* `REQ-PROP-004` → Community Risk & Ring Detection
+* `REQ-PROP-005` → Quarantine Event
+
+Mas no PLAN aparece:
+
+* `REQ-PROP-001` → Edge Weights
+* `REQ-PROP-002` → Temporal Half-Life
+* `REQ-PROP-003` → Multi-Path Union
+* `REQ-PROP-004` → Bounded Traversal
+* `REQ-PROP-005` → Dimension Isolation
+* `REQ-PROP-006` → Decoupled Alert Event
+
+Isso significa que **o PLAN está descrevendo uma versão diferente da SPEC**.
+
+E isso é particularmente perigoso em SDD, porque a traceability matrix deveria ser uma relação quase mecânica:
+
+```text
+SPEC requirement
+       ↓
+implementation task
+       ↓
+verification test
+```
+
+### Minha recomendação
+
+Não mudaria a filosofia do PLAN. Eu mudaria a SPEC para refletir melhor aquilo que realmente queremos implementar.
+
+Eu faria os requisitos da `000.6` ficarem:
+
+```text
+REQ-PROP-001 — Relationship Weight Matrix
+REQ-PROP-002 — Temporal Decay
+REQ-PROP-003 — Multi-Hop Propagation & Bounded Traversal
+REQ-PROP-004 — Multi-Path Risk Aggregation
+REQ-PROP-005 — Propagated Risk Dimension Isolation
+REQ-PROP-006 — Quarantine / Propagation Alert
+```
+
+E colocaria **Community Risk & Ring Detection como parte da 000.5**, porque isso é essencialmente graph pattern detection.
+
+Essa divisão fica muito mais limpa:
+
+```text
+000.5
+Graph Projection + Graph Patterns
+        │
+        ▼
+000.6
+Risk Propagation + Temporal Decay
+        │
+        ▼
+000.7
+Behavioral Embeddings / pgvector
+        │
+        ▼
+000.8
+Micro-ML / Risk Fusion
+```
+
+Ou seja:
+
+> **000.5 descobre a estrutura. 000.6 propaga risco através dela. 000.7 descobre similaridade comportamental. 000.8 combina tudo.**
+
+Isso está muito alinhado com a arquitetura que já estabelecemos.
+
+---
+
+# 2. Há um problema mais importante: `fraud_relationship_events`
+
+Aqui eu prestaria bastante atenção.
+
+O PLAN usa:
+
+```sql
+FROM fraud_relationship_events e
+```
+
+e inclusive depende de:
+
+```text
+e.occurred_at
+```
+
+para calcular temporal decay.
+
+Mas na `000.5` nós definimos:
+
+```text
+fraud_relationships
+```
+
+com:
+
+```text
+first_seen_at
+last_seen_at
+tx_count
+total_amount
+```
+
+Isso não é suficiente para reconstruir corretamente a dimensão temporal.
+
+### Exemplo
+
+Imagine:
+
+```text
+A --TRANSFERRED_TO--> B
+
+Jan 01
+Jan 02
+Jan 03
+...
+Aug 30
+```
+
+Se só temos:
+
+```text
+last_seen_at = Aug 30
+tx_count = 200
+```
+
+perdemos a história temporal.
+
+Para o propagation engine, isso é relevante.
+
+Então eu manteria deliberadamente **duas representações**:
+
+```text
+fraud_relationship_events
+        │
+        │ append-only evidence
+        ▼
+fraud_relationships
+        │
+        │ aggregated projection
+        ▼
+graph queries
+```
+
+### `fraud_relationship_events`
+
+Representa **evidência temporal individual**:
+
+```sql
+id
+source_id
+target_id
+relationship_type
+occurred_at
+operation_id
+amount
+metadata
+```
+
+### `fraud_relationships`
+
+Representa **estado agregado**:
+
+```text
+first_seen_at
+last_seen_at
+tx_count
+total_amount
+```
+
+Isso é muito mais poderoso.
+
+E casa perfeitamente com o princípio que colocamos na arquitetura:
+
+> temporal evidence deve vir da evidência histórica, não de um agregado.
+
+O próprio PLAN já assume isso quando diz que o decay é calculado diretamente da evidência histórica em `fraud_relationship_events`.
+
+**Portanto, eu não removeria `fraud_relationship_events`; pelo contrário, eu o formalizaria na SPEC 000.6.**
+
+---
+
+# 3. Outro ponto: `last_seen_at` vs `occurred_at`
+
+Existe uma sutileza importante aqui.
+
+Na 000.5 temos:
+
+```text
+last_seen_at
+```
+
+Na 000.6:
+
+```text
+occurred_at
+```
+
+Eu definiria explicitamente:
+
+```text
+fraud_relationship_events.occurred_at
+    = timestamp da evidência original
+
+fraud_relationships.last_seen_at
+    = MAX(fraud_relationship_events.occurred_at)
+```
+
+Assim temos uma fonte de verdade clara:
+
+```text
+events = source of temporal truth
+relationships = projection
+```
+
+Isso também torna o sistema reconstruível.
+
+Se amanhã mudarmos o algoritmo de propagation de:
+
+```text
+half-life = 7 days
+```
+
+para:
+
+```text
+half-life = 3 days
+```
+
+podemos recalcular tudo sem precisar reconstruir a relação.
+
+---
+
+# 4. A fórmula multi-hop está boa, mas eu faria uma pequena mudança conceitual
+
+O PLAN define:
+
+```text
+I(p,t) =
+Rsource × ∏(w(e) × D(e,t))
+```
+
+Isso está excelente.
+
+Mas existe uma consequência importante.
+
+Para um caminho:
+
+```text
+A → B → C
+```
+
+temos:
+
+```text
+R(A)
+ × weight(A,B)
+ × decay(A,B)
+ × weight(B,C)
+ × decay(B,C)
+```
+
+Isso significa que **cada hop efetivamente reduz a influência**.
+
+Perfeito.
+
+Mas eu adicionaria explicitamente um terceiro mecanismo:
+
+```text
+path influence
+       +
+hop attenuation
+       +
+path deduplication
+```
+
+Porque podemos acabar encontrando:
+
+```text
+A → B → C
+A → D → C
+A → B → D → C
+A → X → C
+...
+```
+
+e esses caminhos podem representar praticamente a mesma evidência.
+
+O:
+
+```text
+1 - ∏(1-I)
+```
+
+resolve o problema matemático de ultrapassar 1.0, mas **não resolve correlação entre evidências**.
+
+Portanto eu adicionaria ao 000.6:
+
+### `I-PROP-005 — Path Evidence Deduplication`
+
+Algo como:
+
+> The engine MUST avoid counting the same underlying relationship event more than once within a propagation evaluation.
+
+Isso é especialmente importante para antifraud.
+
+---
+
+# 5. Eu também mudaria "probabilistic independence"
+
+O PLAN diz:
+
+> Multi-path aggregation uses probabilistic independence
+
+
+
+Eu seria mais cuidadoso.
+
+Matematicamente:
+
+```text
+1 - Π(1-I)
+```
+
+é equivalente à união probabilística **sob uma interpretação de independência**.
+
+Mas:
+
+```text
+SHARED_DEVICE
++
+SHARED_PHONE
++
+SHARED_EMAIL
+```
+
+não são necessariamente independentes.
+
+Na verdade podem ser altamente correlacionados:
+
+```text
+fraudster
+   │
+   ├── device
+   ├── phone
+   └── email
+```
+
+Então eu chamaria no domínio simplesmente de:
+
+> **bounded probabilistic-union aggregation**
+
+e não afirmaria que os sinais são estatisticamente independentes.
+
+Isso nos deixa espaço para o `000.8` eventualmente introduzir correlação aprendida por ML.
+
+---
+
+# 6. O `POST evaluate` conflita com o princípio assíncrono
+
+No PLAN:
+
+```text
+POST /propagation/evaluate/{entityId}
+```
+
+é descrito como:
+
+> synchronous on-demand recalculation
+
+
+
+Mas temos:
+
+```text
+I-PROP-004
+Propagation MUST execute asynchronously
+```
+
+Então existe uma pequena contradição.
+
+Eu faria:
+
+```http
+POST /api/v1/fraud/intelligence/propagation/evaluate/{entityId}
+```
+
+retornar:
+
+```http
+202 Accepted
+```
+
+com algo como:
+
+```json
+{
+  "entityId": "...",
+  "evaluationId": "...",
+  "status": "SCHEDULED"
+}
+```
+
+e depois:
+
+```http
+GET /propagation/entity/{entityId}
+```
+
+retorna o último resultado.
+
+Isso mantém:
+
+```text
+HTTP request
+      ↓
+enqueue propagation
+      ↓
+202
+      ↓
+background worker
+      ↓
+Postgres
+      ↓
+Dragonfly
+      ↓
+NATS
+```
+
+Sem permitir que uma API REST vire uma maneira acidental de colocar um recursive CTE pesado no request thread.
+
+---
+
+# 7. Eu mudaria também a estratégia do NATS Alert
+
+O PLAN diz:
+
+> If NATS event publishing fails, database update is already committed; event publication is retried with backoff.
+
+Isso funciona, mas eu **não faria retry apenas em memória**.
+
+Nós já temos:
+
+```text
+Postgres
+Transactional Outbox
+NATS JetStream
+```
+
+Então o desenho mais consistente seria:
+
+```text
+Propagation Engine
+       │
+       ├── UPDATE fraud_entities
+       │
+       └── INSERT outbox event
+                    │
+                    ▼
+             Transaction COMMIT
+                    │
+                    ▼
+              Outbox Relay
+                    │
+                    ▼
+              NATS JetStream
+```
+
+Assim ganhamos:
+
+* crash safety
+* retry
+* durability
+* exactly-once-ish publication semantics via idempotency
+* mesma arquitetura já usada pelo Wallet
+
+E evita termos **dois mecanismos de publicação diferentes** no sistema.
+
+Eu considero isso uma melhoria arquitetural importante para o `000.6`.
+
+---
+
+# 8. Há uma inconsistência nos nomes dos eventos
+
+Na SPEC:
+
+```text
+EntityQuarantineRecommendedEvent
+```
+
+No PLAN:
+
+```text
+EntityRiskPropagationDetectedEvent
+```
+
+e o tópico:
+
+```text
+events.fraud.propagation
+```
+
+Eu manteria os dois conceitos separados.
+
+### Evento interno do intelligence engine
+
+```text
+EntityRiskPropagationDetectedEvent
+```
+
+Significa:
+
+> "o engine detectou propagação relevante"
+
+### Evento operacional
+
+```text
+EntityQuarantineRecommendedEvent
+```
+
+Significa:
+
+> "o engine recomenda uma ação de quarantine"
+
+Isso deixa a arquitetura muito mais extensível:
+
+```text
+PropagationDetected
+       │
+       ├── quarantine?
+       ├── investigation?
+       ├── score update?
+       └── ML feedback?
+```
+
+Não devemos transformar qualquer propagation em quarantine.
+
+---
+
+# 9. A estrutura de tasks está muito boa
+
+A ordem:
+
+```text
+Phase 1
+Domain + Mathematics
+
+Phase 2
+Graph traversal + persistence
+
+Phase 3
+Propagation engine + Modulith
+
+Phase 4
+Scheduler + API + notification
+
+Phase 5
+Architecture + practical verification
+```
+
+é exatamente a ordem que eu usaria.
+
+Especialmente:
+
+```text
+RED
+ ↓
+GREEN
+ ↓
+REFACTOR
+```
+
+para:
+
+```text
+PathInfluenceCalculator
+MultiPathAggregator
+```
+
+é uma excelente decisão.
+
+Isso reduz muito o risco de o modelo "inventar" a matemática durante a implementação.
+
+---
+
+# 10. Eu acrescentaria uma task antes do Phase 2
+
+Hoje temos:
+
+```text
+TASK-2.1
+PostgresRiskPropagationDaoIT
+```
+
+Eu adicionaria:
+
+### `TASK-2.0 — Define Temporal Evidence Model`
+
+Antes do DAO:
+
+```text
+fraud_relationship_events
+```
+
+e definir formalmente:
+
+```text
+event identity
+occurred_at
+operation_id
+relationship_type
+source_id
+target_id
+```
+
+com:
+
+```text
+UNIQUE(operation_id, relationship_type)
+```
+
+ou outra chave de idempotência apropriada.
+
+Porque essa tabela é **fundamental para a validade matemática do 000.6**.
+
+---
+
+# 11. E uma última melhoria: snapshot/as-of semantics
+
+O PLAN já faz uma coisa muito boa:
+
+```sql
+e.occurred_at <= :asOf
+```
+
+
+
+Eu transformaria isso em uma regra explícita do domínio:
+
+```text
+PropagationEvaluation
+    sourceEntity
+    asOf
+    modelVersion
+```
+
+Assim uma execução é sempre:
+
+```text
+propagate(
+    source,
+    asOf = T,
+    modelVersion = v1
+)
+```
+
+e não simplesmente:
+
+```text
+propagate(source)
+```
+
+Isso será **muito importante para o futuro ML**.
+
+Porque poderemos dizer:
+
+```text
+What did the system know at T?
+```
+
+e depois:
+
+```text
+What would model v2 have decided at T?
+```
+
+Isso é ouro para backtesting e treinamento.
+
+---
+
+# Minha avaliação
+
+Eu daria ao PLAN atual algo como **8.5/10**.
+
+A arquitetura está correta. O principal problema não é conceitual; é **consistência documental e algumas decisões de implementação que precisam ser congeladas antes do código**.
+
+Eu faria esta evolução:
+
+```text
+                 SPEC-000.5
+          Graph Projection & Patterns
+                    │
+                    │ graph evidence
+                    ▼
+        fraud_relationship_events
+                    │
+                    ▼
+             SPEC-000.6
+      Risk Propagation + Temporal Decay
+                    │
+          ┌─────────┴─────────┐
+          ▼                   ▼
+   propagated_risk        NATS event
+          │                   │
+          ▼                   ▼
+      Dragonfly            Outbox
+          │
+          ▼
+   Synchronous Fraud Gate
+          │
+          ▼
+       SPEC-000.7
+   Behavioral Embeddings
+          │
+          ▼
+       SPEC-000.8
+   Micro-ML / Risk Fusion
+```
+
+E o mais importante: **não colocaria Neo4j agora**. O desenho que vocês chegaram com PostgreSQL + Dragonfly + NATS mantém a infraestrutura relativamente simples, mas deixa uma abstração pronta para, no futuro, substituir apenas a implementação de `FraudGraphQuery` se o volume realmente justificar um graph DB.
+
+### Eu faria agora
+
+Antes de gerar código, eu atualizaria **a SPEC-000.6 e o PLAN-000.6 em conjunto**, corrigindo:
+
+1. traceability `REQ ↔ TASK ↔ TEST`;
+2. `fraud_relationship_events` como temporal source of truth;
+3. path deduplication;
+4. distinção `PropagationDetected` vs `QuarantineRecommended`;
+5. REST assíncrono com `202`;
+6. publicação via Transactional Outbox;
+7. `asOf + modelVersion`;
+8. invariants `I-PROP-005/006` que hoje aparecem no PLAN mas não estão formalmente na SPEC;
+9. incluir `TASK-2.0` para o modelo temporal.
+
+**Depois disso, o TASKS-000.6 que você gerou fica praticamente pronto para entrar no Antigravity e começar o TDD.**

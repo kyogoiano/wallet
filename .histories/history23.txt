@@ -1,0 +1,587 @@
+Yes — and seeing the **reviewed SPEC-000.6 and PLAN-000.6 together**, I think the hand-rolled decision is actually quite strong.
+
+The important thing is that the spec has now explicitly constrained the problem: bounded 3-hop propagation, PostgreSQL as temporal truth, idempotent jobs, retries, and no human-in-the-loop workflow.
+
+So I would **not reopen the decision in favor of Temporal or LangGraph** at this stage.
+
+However, I would make a few refinements before implementation.
+
+## 1. The current architecture is the right abstraction level
+
+The key flow is now:
+
+```text
+NATS event
+    │
+    ▼
+FraudGraphEventListener
+    │
+    ▼
+PropagationEvaluationDispatcher
+    │
+    ▼
+PostgreSQL job
+    │
+    ▼
+PropagationJobWorker
+    │
+    ├── temporal graph query
+    ├── path influence
+    ├── probabilistic aggregation
+    ├── persist propagated risk
+    └── publish alert
+```
+
+That is essentially a **durable asynchronous computation**, not a workflow.
+
+The plan explicitly keeps `fraud_relationship_events` as temporal truth and `fraud_relationships` as the aggregate projection, which is exactly the distinction we needed to fix earlier.
+
+So:
+
+**PostgreSQL is both our data store and the durable coordination mechanism.**
+
+That's a very attractive architecture for this scale.
+
+---
+
+# 2. I would keep Temporal out of 000.6
+
+Your current non-goal says:
+
+> External workflow engines like Temporal are reserved for multi-day human-in-the-loop workflows.
+
+I agree with that.
+
+More importantly, I'd preserve this as an **architectural boundary**, not merely a current implementation decision.
+
+Something like:
+
+> **Workflow engines are introduced only when workflow semantics exceed the capabilities of the domain-specific job engine, such as multi-day execution, human interaction, external callbacks, durable timers, or compensation workflows.**
+
+That gives us a clear migration trigger.
+
+Right now:
+
+```text
+Propagation
+    ↓
+calculate
+    ↓
+persist
+    ↓
+done
+```
+
+doesn't justify Temporal.
+
+Later:
+
+```text
+Investigation
+    ↓
+collect evidence
+    ↓
+LLM analysis
+    ↓
+wait for analyst
+    ↓
+request additional evidence
+    ↓
+wait 24h
+    ↓
+approve/reject
+    ↓
+remediate
+```
+
+would.
+
+That's a fundamentally different problem.
+
+---
+
+# 3. I would also keep LangGraph out of 000.6
+
+This is even clearer now.
+
+LangGraph/StateGraph would make sense for something like:
+
+```text
+Fraud Investigation Agent
+        │
+        ├── query graph
+        ├── query transactions
+        ├── search behavioral vectors
+        ├── retrieve evidence
+        ├── reason
+        ├── ask another tool
+        ├── reassess
+        └── produce dossier
+```
+
+Our 000.6 engine is instead:
+
+```text
+graph → mathematical function → persistence
+```
+
+We shouldn't introduce an agent/workflow abstraction into a deterministic mathematical engine.
+
+---
+
+# 4. There is one thing I WOULD change in the plan
+
+The job queue currently has:
+
+```text
+PENDING
+RUNNING
+RETRY_WAIT
+COMPLETED
+FAILED
+```
+
+and orphan jobs are recovered after 10 minutes.
+
+That's good, but there's a subtle concurrency problem.
+
+Imagine:
+
+```text
+Worker A
+  claims job
+  status = RUNNING
+  starts calculation
+```
+
+Then:
+
+```text
+10 minutes
+```
+
+passes.
+
+Reaper:
+
+```text
+RUNNING → RETRY_WAIT
+```
+
+But Worker A is **still alive**.
+
+Another worker can now claim it.
+
+You have:
+
+```text
+             ┌── Worker A ──► persist
+Job ─────────┤
+             └── Worker B ──► persist
+```
+
+That's duplicate execution.
+
+Because propagation is intended to be idempotent, this may not corrupt the risk score, but it still creates duplicate work and potentially duplicate alert events.
+
+---
+
+# 5. I'd add a lease/token
+
+The lightweight solution doesn't require Temporal.
+
+Add:
+
+```sql
+lease_until TIMESTAMPTZ
+worker_token UUID
+```
+
+Then:
+
+```text
+PENDING
+   ↓
+RUNNING
+   │
+   ├── lease_until
+   └── worker_token
+```
+
+The worker periodically renews:
+
+```sql
+UPDATE fraud_propagation_jobs
+SET lease_until = now() + interval '2 minutes'
+WHERE id = ?
+  AND status = 'RUNNING'
+  AND worker_token = ?;
+```
+
+The reaper only recovers:
+
+```sql
+WHERE status = 'RUNNING'
+  AND lease_until < now()
+```
+
+This is much safer than a fixed:
+
+```text
+RUNNING > 10 minutes
+```
+
+threshold.
+
+And still very cheap.
+
+---
+
+# 6. I'd make job identity/idempotency stronger
+
+Your current invariant says that enqueueing an entity already `PENDING` or `RUNNING` is deduplicated.
+
+I'd turn that into a database-enforced invariant rather than relying only on application logic.
+
+For example, conceptually:
+
+```sql
+CREATE UNIQUE INDEX ...
+ON fraud_propagation_jobs(entity_id, model_version)
+WHERE status IN ('PENDING', 'RUNNING', 'RETRY_WAIT');
+```
+
+Then:
+
+```text
+Event A ──┐
+          ├──► entity X
+Event B ──┘
+
+             ↓
+
+       ONE active job
+```
+
+This is exactly the kind of thing PostgreSQL is excellent at.
+
+---
+
+# 7. One important issue in the mathematical model remains
+
+Your spec says:
+
+> "most recent timestamp ... at or before evaluation timestamp"
+
+and then computes:
+
+```text
+Δt = t - t_event
+```
+
+This is now **temporally much better** than the previous aggregate-only design. The plan explicitly uses `fraud_relationship_events` as the source of truth.
+
+But we should be precise about what this means.
+
+Suppose:
+
+```text
+A ──device──► B
+```
+
+events:
+
+```text
+Jan 01
+Jan 10
+Jan 20
+```
+
+At:
+
+```text
+Jan 25
+```
+
+we use Jan 20.
+
+Good.
+
+But if we're doing historical evaluation:
+
+```text
+asOf = Jan 15
+```
+
+we use Jan 10.
+
+Also good.
+
+Therefore the **job itself should carry `as_of`**.
+
+I would add:
+
+```sql
+as_of TIMESTAMPTZ NOT NULL
+```
+
+to `fraud_propagation_jobs`.
+
+Then the computation becomes reproducible:
+
+```text
+job
+ ├── entity_id
+ ├── model_version
+ └── as_of
+        ↓
+temporal graph
+        ↓
+deterministic result
+```
+
+This will become extremely valuable when we eventually do backtesting.
+
+---
+
+# 8. Alert publishing needs one more durability consideration
+
+Currently the flow is:
+
+```text
+Aggregate
+   ↓
+Persist propagated_risk
+   ↓
+Alert threshold
+   ↓
+NATS
+```
+
+The danger is:
+
+```text
+PostgreSQL COMMIT
+       ↓
+   process dies
+       X
+    NATS publish
+```
+
+Then:
+
+```text
+propagated_risk = 0.75
+```
+
+but no:
+
+```text
+EntityRiskPropagationDetectedEvent
+```
+
+gets published.
+
+This is the one place where the hand-rolled design shouldn't try to reinvent distributed transactions.
+
+I'd use the same principle we've already adopted elsewhere:
+
+```text
+Propagation transaction
+       │
+       ├── update fraud_entities
+       │
+       └── insert event/outbox
+                    │
+                    ▼
+               NATS relay
+```
+
+So:
+
+```text
+PostgreSQL
+ ┌───────────────────────┐
+ │ propagated_risk       │
+ │ propagation_job       │
+ │ fraud_outbox_event    │
+ └───────────┬───────────┘
+             │
+             ▼
+          NATS
+```
+
+That makes alert delivery durable.
+
+---
+
+# 9. Then the "hand-rolled workflow engine" becomes very small
+
+And this is the architecture I like most:
+
+```text
+             PostgreSQL
+ ┌─────────────────────────────────┐
+ │                                 │
+ │ fraud_relationship_events       │
+ │ fraud_relationships             │
+ │ fraud_entities                  │
+ │                                 │
+ │ fraud_propagation_jobs          │
+ │         │                       │
+ │         ▼                       │
+ │    SKIP LOCKED                  │
+ │         │                       │
+ │         ▼                       │
+ │     workers                     │
+ │                                 │
+ │ fraud_outbox_events             │
+ │         │                       │
+ └─────────┼───────────────────────┘
+           │
+           ▼
+          NATS
+```
+
+We are essentially using PostgreSQL for four distinct but well-understood responsibilities:
+
+1. **Durable fraud facts**
+2. **Graph projection**
+3. **Job coordination**
+4. **Transactional event staging**
+
+That's a lot of functionality from infrastructure we already need anyway.
+
+---
+
+# 10. And the worker itself remains deliberately boring
+
+This is exactly what we want.
+
+```java
+while (running) {
+
+    var job = jobRepository.claimNext();
+
+    if (job == null) {
+        sleep();
+        continue;
+    }
+
+    try {
+        var result =
+            propagationEngine.evaluateEntity(
+                job.entityId(),
+                job.asOf()
+            );
+
+        propagationRepository.persist(result);
+
+        eventRepository.stageIfThresholdExceeded(result);
+
+        jobRepository.complete(job.id());
+
+    } catch (RetryableException e) {
+
+        jobRepository.scheduleRetry(job, e);
+
+    } catch (Exception e) {
+
+        jobRepository.fail(job, e);
+    }
+}
+```
+
+No framework magic.
+
+No workflow DSL.
+
+No distributed workflow server.
+
+No Python service.
+
+No new persistence system.
+
+---
+
+# 11. This also preserves our future migration seam
+
+This is perhaps the most important architectural benefit.
+
+The domain remains:
+
+```text
+RiskPropagationEngine
+```
+
+The execution mechanism remains:
+
+```text
+PropagationEvaluationDispatcher
+PropagationJobWorker
+```
+
+If someday the system grows enough that this becomes inadequate:
+
+```text
+PropagationEvaluationDispatcher
+             │
+             ▼
+      Temporal adapter
+```
+
+could replace the worker implementation.
+
+And for an AI investigation system:
+
+```text
+FraudInvestigationOrchestrator
+             │
+             ▼
+        LangGraph
+```
+
+could exist **beside** propagation rather than replacing it.
+
+So we're not closing doors.
+
+---
+
+# 12. My final assessment of the reviewed SPEC
+
+I'd call the architecture:
+
+### 🟢 Strong — with 4 small hardening changes
+
+| Area                       | Assessment            |
+| -------------------------- | --------------------- |
+| Temporal truth             | 🟢 Excellent          |
+| Mathematical model         | 🟢 Clear              |
+| Bounded traversal          | 🟢 Good               |
+| Risk dimension isolation   | 🟢 Excellent          |
+| PostgreSQL job engine      | 🟢 Appropriate        |
+| NATS integration           | 🟢 Appropriate        |
+| Infrastructure overhead    | 🟢 Minimal            |
+| Future Temporal migration  | 🟢 Possible           |
+| Future LangGraph/AI        | 🟢 Compatible         |
+| Job lease/recovery         | 🟡 Needs hardening    |
+| Alert durability           | 🟡 Needs outbox       |
+| Historical reproducibility | 🟡 Add `as_of` to job |
+| Active-job uniqueness      | 🟡 Prefer DB-enforced |
+
+The current plan already has the right basic worker architecture: PostgreSQL queue, `SKIP LOCKED`, bounded retries, reaping, and direct SQL inspection.
+
+### Therefore my recommendation is:
+
+**Keep SPEC-000.6 exactly on the hand-rolled path. Don't add Temporal, StateGraph, or Spring Statemachine.**
+
+But before implementation, I'd amend the plan with:
+
+```text
+1. job lease_until + worker_token
+2. DB-enforced active-job uniqueness
+3. job as_of timestamp
+4. transactional outbox for propagation alert
+```
+
+Those four changes would make the "hand-rolled job engine" substantially more robust without undermining the core philosophy of **zero additional infrastructure**.

@@ -21,8 +21,8 @@ flowchart LR
         Outbox[(Outbox Table)]
     end
 
-    Outbox -->|Polling / SKIP LOCKED| Relay[OutboxRelay (10s)]
-    Relay -->|Deduplicated Publish| NATS[NATS JetStream (events.*)]
+    Outbox -->|Polling / SKIP LOCKED| Relay[OutboxRelay 10s]
+    Relay -->|Deduplicated Publish| NATS[NATS JetStream events.*]
     Relay -->|Exhausted Retries| DLQ[(Dead Letter Queue / Status DEAD)]
 ```
 

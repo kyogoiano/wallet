@@ -16,7 +16,8 @@ public enum DomainEventType {
     TRANSFER_COMPLETED(TransferCompletedEvent.class, "events.transfer.completed"),
     DEPOSIT_COMPLETED(DepositCompletedEvent.class, "events.deposit.completed"),
     WITHDRAW_COMPLETED(WithdrawCompletedEvent.class, "events.withdraw.completed"),
-    FRAUD(FraudEvent.class, "events.fraud");
+    FRAUD(FraudEvent.class, "events.fraud"),
+    RISK_PROPAGATION_DETECTED(EntityRiskPropagationAlertEvent.class, "events.fraud.propagation");
 
     private static final Map<String, DomainEventType> MAP =
             Arrays.stream(values())

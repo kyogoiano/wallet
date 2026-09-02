@@ -112,21 +112,21 @@ Before introducing new business capabilities (Smart Savings, Goal Engine, Subscr
 gantt
     title Wallet Service Evolution Roadmap
     dateFormat  YYYY-MM-DD
-    section Phase 0: Baseline & Infrastructure
+    section Phase 0 Baseline & Infrastructure
     SPEC-000 Architecture Alignment     :done, p00_1, 2026-08-22, 2d
     TASKS-000 & Modulith Baseline       :done, p00_2, after p00_1, 2d
     SPEC-000.1 DragonflyDB Migration    :active, p00_3, 2026-08-26, 2d
-    section Phase 1: Programmable Money
+    section Phase 1 Programmable Money
     SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
     SPEC-001.1 Account Lifecycle        :done, p1_2, 2026-08-24, 2d
     SPEC-001.2 Savings Plans & Rules    :done, p1_3, 2026-08-26, 2d
-    section Phase 2: Goal Engine
+    section Phase 2 Goal Engine
     SPEC-002 Financial Goal Engine      :p2_1, after p1_3, 3d
     TASKS-002 & Strategy Engine         :p2_2, after p2_1, 4d
-    section Phase 3: Intelligence
+    section Phase 3 Intelligence
     SPEC-003 Subscription & Spend Intel :p3_1, after p2_2, 3d
     TASKS-003 & Pattern Extraction      :p3_2, after p3_1, 4d
-    section Phase 4: AI Copilot & MCP
+    section Phase 4 AI Copilot & MCP
     SPEC-004 MCP Server & AI Copilot    :p4_1, after p3_2, 3d
     TASKS-004 & Tool Protocol Delivery  :p4_2, after p4_1, 5d
 ```
@@ -207,14 +207,17 @@ gantt
 
 ---
 
-### 🔹 Phase 0.6: Fraud Risk Propagation & Temporal Decay Engine
+### 🔹 Phase 0.6: Fraud Risk Propagation, Temporal Decay & Hand-Rolled Job Engine
 **Spec Identifier**: [`SPEC-000.6-fraud-risk-propagation-and-temporal-decay`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md)  
-**Status**: 🟢 **Reviewed & Ratified**  
-**Core Abstraction**: `Path-Influence Risk Propagation, Exponential Temporal Decay & Bounded Traversal (br.com.wallet.fraud.propagation)`
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Path-Influence Risk Propagation, Exponential Temporal Decay & Hand-Rolled PostgreSQL SKIP LOCKED Job Queue (br.com.wallet.fraud.propagation)`
 
-- **Intent**: Propagate risk scores across connected graph paths using temporal evidence from `fraud_relationship_events` and exponential decay ($I(p, t) = R_{\text{source}}(v) \cdot \prod w(e) \cdot \prod e^{-\lambda \Delta t_e}$), resolve multi-path convergence via probabilistic union without double-counting, enforce bounded traversal limits, and publish `EntityRiskPropagationDetectedEvent`.
+- **Intent**: Propagate risk scores across connected graph paths using temporal evidence from `fraud_relationship_events.occurred_at` and exponential decay ($I(p, t) = R_{\text{source}}(v) \cdot \prod w(e) \cdot \prod e^{-\lambda \Delta t_e}$), resolve multi-path convergence via probabilistic union without double-counting, execute through an idempotent hand-rolled PostgreSQL job queue (`fraud_propagation_jobs` with `FOR UPDATE SKIP LOCKED`), and publish `EntityRiskPropagationDetectedEvent`.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md) (Ratified)
+  - [`.spec/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md) (Approved)
+  - [`.spec/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/summaries/SUMMARY-000.6-fraud-risk-propagation-and-temporal-decay.md) (Verified)
 
 ---
 
@@ -229,12 +232,12 @@ gantt
 
 ---
 
-### 🔹 Phase 0.8: Fraud Signal Fusion & Micro-ML Risk Engine
+### 🔹 Phase 0.8: Fraud Signal Fusion, Micro-ML & LangGraph Agentic Investigation
 **Spec Identifier**: [`SPEC-000.8-fraud-signal-fusion-and-micro-ml`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)  
 **Status**: 🟢 **Reviewed & Ratified**  
-**Core Abstraction**: `Multi-Signal Probabilistic Fusion, Micro-ML Shadow Scoring & Fraud Gate V4 (br.com.wallet.fraud.fusion)`
+**Core Abstraction**: `Multi-Signal Probabilistic Fusion, Micro-ML ONNX Scoring & LangGraph StateGraph Agentic Workflow (br.com.wallet.fraud.fusion)`
 
-- **Intent**: Fuse deterministic rules, graph topology, temporal risk propagation, behavioral vector anomalies, and micro-ML shadow scores into an explainable final risk score ($R_{\text{final}}$), materializing hot risk state into DragonflyDB for sub-millisecond $O(1)$ Fraud Gate V4 execution.
+- **Intent**: Fuse deterministic rules, graph topology, temporal risk propagation, behavioral vector anomalies, and micro-ML shadow scores into an explainable final risk score ($R_{\text{final}}$), orchestrate deep asynchronous investigations and analyst reviews via a LangGraph StateGraph workflow, and materialize hot risk state into DragonflyDB for sub-millisecond $O(1)$ Fraud Gate V4 execution.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md) (Ratified)
 

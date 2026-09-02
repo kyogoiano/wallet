@@ -82,7 +82,7 @@ CREATE TABLE outbox (
     CONSTRAINT outbox_status_chk
         CHECK (status IN ('PENDING', 'FAILED', 'PROCESSING', 'PROCESSED', 'DEAD')),
     CONSTRAINT outbox_event_type_chk -- might be removed for flexibility
-        CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED', 'FRAUD'))
+        CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED', 'FRAUD', 'RISK_PROPAGATION_DETECTED'))
 );
 
 CREATE INDEX idx_outbox_unprocessed
@@ -296,12 +296,15 @@ CREATE TABLE IF NOT EXISTS fraud_entities (
     behavioral_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     propagated_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     final_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
+    propagation_model_version VARCHAR(32) DEFAULT 'v1',
+    propagation_evaluated_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     metadata JSONB
 );
 
 CREATE INDEX IF NOT EXISTS idx_fraud_entities_type ON fraud_entities(entity_type);
+CREATE INDEX IF NOT EXISTS idx_fraud_entities_propagated ON fraud_entities(propagated_risk DESC) WHERE propagated_risk > 0.0;
 
 CREATE TABLE IF NOT EXISTS fraud_relationships (
     source_id UUID NOT NULL,
@@ -333,6 +336,40 @@ CREATE TABLE IF NOT EXISTS fraud_relationship_events (
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_src_time ON fraud_relationship_events (source_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_tgt_time ON fraud_relationship_events (target_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_type_time ON fraud_relationship_events (relationship_type, occurred_at);
+
+-- =========================================================================
+-- Risk Propagation & Durable Job Queue Tables (SPEC-000.6 / PLAN-000.6)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS fraud_propagation_jobs (
+    id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    as_of TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    worker_token UUID,
+    lease_until TIMESTAMPTZ,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    last_error TEXT,
+    model_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Partial unique index guaranteeing active job uniqueness (History 23)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fraud_prop_active_unique 
+ON fraud_propagation_jobs (entity_id, model_version) 
+WHERE status IN ('PENDING', 'RUNNING', 'RETRY_WAIT');
+
+-- Index for high-speed worker polling with SKIP LOCKED
+CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_claim 
+ON fraud_propagation_jobs (available_at, created_at) 
+WHERE status IN ('PENDING', 'RETRY_WAIT');
+
+CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_entity 
+ON fraud_propagation_jobs (entity_id, status);
 
 -- 4. Seed Fraud Entities & Intelligence Graph Data (SPEC-000.5)
 INSERT INTO fraud_entities (id, entity_type, direct_risk, graph_risk, behavioral_risk, propagated_risk, final_risk, created_at, updated_at)

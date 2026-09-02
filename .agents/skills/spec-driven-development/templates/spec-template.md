@@ -67,7 +67,7 @@ Response (4xx / 5xx):
 {
   "eventType": "...",
   "operationId": "...",
-  "payload": { ... }
+  "payload": {  }
 }
 ```
 

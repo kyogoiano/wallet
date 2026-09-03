@@ -1,0 +1,613 @@
+Sim — olhando a evolução completa de **SPEC → PLAN → TASKS**, o `TASKS-000.7` está muito melhor estruturado agora. A separação em fases está coerente com o SDD/TDD que estamos usando.
+
+Mas eu faria **alguns ajustes antes de ratificar**. Há principalmente **3 inconsistências arquiteturais importantes** e algumas melhorias menores.
+
+---
+
+# ✅ Veredito geral
+
+| Área                               | Avaliação                              |
+| ---------------------------------- | -------------------------------------- |
+| Ordem TDD                          | 🟢 Muito boa                           |
+| Separação embeddings/investigation | 🟢 Boa                                 |
+| pgvector                           | 🟢 Adequado                            |
+| Dual representation                | 🟢 Excelente                           |
+| Exact centroid matching            | 🟢 Correto                             |
+| Deterministic ownership            | 🟢 Excelente                           |
+| Grounded LLM                       | 🟢 Muito bom                           |
+| Graceful degradation               | 🟢 Muito importante                    |
+| Modulith boundaries                | 🟡 Precisa ajuste                      |
+| PII masking                        | 🟡 Precisa reforço                     |
+| Model benchmark                    | 🔴 Sumiu das tasks                     |
+| Async execution                    | 🟡 Não está completamente implementado |
+
+---
+
+# 🔴 Problema 1 — REQ-VEC-007 está na matriz, mas não existe implementação real
+
+Na matriz temos:
+
+> `REQ-VEC-007 (Hardware-Aware Benchmark Gate)`
+
+Mas na implementação das tasks não existe:
+
+```text
+ModelEvaluationHarness
+Gold-standard fixtures
+Model candidate matrix
+Latency measurements
+JSON validity benchmark
+Grounding benchmark
+```
+
+Isso é importante porque o SPEC explicitamente criou um **Benchmark Gate**.
+
+Eu adicionaria uma fase específica.
+
+---
+
+# 🟢 Nova Phase 6 — Model Evaluation & Benchmark Gate
+
+Antes da REST API:
+
+```markdown
+### Phase 6: Model Evaluation & Benchmark Gate (`:fraud:investigation`)
+
+- [ ] `TASK-6.1` [RED]: Create `ModelEvaluationHarnessTest` and gold-standard fixtures:
+  - `CASE-001-money-mule`
+  - `CASE-002-smurfing`
+  - `CASE-003-account-takeover`
+  - `CASE-004-low-risk-neutral`
+
+- [ ] `TASK-6.2` [GREEN]: Implement `ModelEvaluationHarness`:
+  - JSON Schema validity measurement
+  - Claim grounding validity measurement
+  - Hallucinated evidence detection
+  - P50/P95 latency collection
+  - Token usage measurement
+  - Candidate model comparison
+
+- [ ] `TASK-6.3` [GREEN]: Define benchmark gate:
+  - JSON validity = 100%
+  - Evidence reference validity = 100%
+  - Unsupported claims = 0
+  - Balanced profile P95 target according to configured hardware budget
+
+- [ ] `TASK-6.4` [REFACTOR]: Add benchmark report generation and regression comparison.
+```
+
+Então a atual **Phase 6 REST** vira **Phase 7**.
+
+Isso preserva o conceito importante que discutimos: **o modelo não é escolhido por opinião; ele passa por uma avaliação reproduzível**.
+
+---
+
+# 🔴 Problema 2 — P95 < 300ms ainda é uma meta perigosa como invariant absoluto
+
+Eu manteria o benchmark, mas não como requisito universal.
+
+Um modelo 3B/7B local pode ter resultados radicalmente diferentes dependendo de:
+
+* CPU
+* GPU
+* VRAM
+* quantização
+* backend
+* context size
+* batching
+* Ollama vs vLLM vs llama.cpp
+
+Portanto, no harness eu criaria:
+
+```java
+public record InferenceBenchmarkThresholds(
+    Duration maxP95Latency,
+    Duration maxTimeout,
+    double minJsonValidityRate,
+    double minGroundingValidityRate
+) {}
+```
+
+E configuração:
+
+```yaml
+fraud:
+  investigation:
+    benchmark:
+      balanced:
+        max-p95-latency: 2s
+        min-json-validity: 1.0
+        min-grounding-validity: 1.0
+```
+
+Depois podemos criar perfis específicos:
+
+```yaml
+benchmark:
+  ci:
+    max-p95-latency: 5s
+
+  workstation:
+    max-p95-latency: 2s
+
+  gpu:
+    max-p95-latency: 300ms
+```
+
+Isso é muito mais sustentável.
+
+---
+
+# 🔴 Problema 3 — `LocalInferenceClient` não deveria estar em `internal/inference`
+
+Na PLAN original tínhamos:
+
+```text
+internal/
+    inference/
+        LocalInferenceClient.java
+```
+
+Mas nas TASKS você está dizendo:
+
+```text
+NamedInterface("investigation-spi")
+```
+
+Essas duas coisas entram em conflito.
+
+Se queremos que diferentes adapters possam implementar o SPI, o contrato não deveria ficar escondido dentro de `internal`.
+
+Eu recomendo:
+
+```text
+br.com.wallet.fraud.investigation/
+
+├── api/
+│   ├── InvestigationService.java
+│   └── model/
+│
+├── spi/
+│   ├── LocalInferenceClient.java
+│   └── StructuredInferenceRequest.java
+│
+└── internal/
+    ├── DefaultInvestigationService.java
+    ├── ClaimGroundingValidator.java
+    ├── OllamaInferenceClient.java
+    └── ...
+```
+
+E:
+
+```java
+@NamedInterface("investigation-api")
+```
+
+para:
+
+```text
+api
+```
+
+e:
+
+```java
+@NamedInterface("investigation-spi")
+```
+
+para:
+
+```text
+spi
+```
+
+Assim o design fica muito mais limpo:
+
+```text
+Fraud Investigation
+       │
+       ▼
+InvestigationService API
+       │
+       ▼
+LocalInferenceClient SPI
+       │
+ ┌─────┼──────────┐
+ ▼     ▼          ▼
+Ollama vLLM    llama.cpp
+```
+
+---
+
+# 🟡 Problema 4 — PII Masking deveria ocorrer antes do Context Builder expor dados
+
+Hoje temos:
+
+```text
+InvestigationContextBuilder
+        ↓
+PiiMaskingService
+        ↓
+LocalInferenceClient
+```
+
+Eu inverteria conceitualmente a responsabilidade.
+
+O `InvestigationContextBuilder` deveria produzir duas coisas diferentes:
+
+```java
+RawInvestigationEvidence
+```
+
+internamente.
+
+E:
+
+```java
+SanitizedInvestigationContext
+```
+
+para inference.
+
+Algo assim:
+
+```text
+Database Facts
+      │
+      ▼
+InvestigationEvidence
+      │
+      ├──────────────► Deterministic Dossier
+      │
+      ▼
+Sanitization Boundary
+      │
+      ▼
+SanitizedInferenceContext
+      │
+      ▼
+LocalInferenceClient
+```
+
+A razão é importante:
+
+> Nunca queremos depender do modelo lembrar de não usar PII.
+
+O boundary precisa ser arquitetural.
+
+---
+
+# 🟢 Problema 5 — Excelente decisão: magnitude preservation
+
+Essa foi provavelmente uma das melhores evoluções do SPEC.
+
+Antes:
+
+```text
+Raw features
+     ↓
+L2 normalization
+     ↓
+Vector
+```
+
+Problema:
+
+```text
+[0.1, 0.1, 0.1...]
+```
+
+e:
+
+```text
+[1.0, 1.0, 1.0...]
+```
+
+podem ter direção semelhante após normalização.
+
+Agora temos:
+
+```text
+Raw Vector d
+     │
+     ├── L2 normalize ──► Direction
+     │
+     └── ||d||₂ ────────► Intensity
+```
+
+Excelente.
+
+Eu só acrescentaria um teste explícito:
+
+```markdown
+FeatureNormalizerTest.shouldDistinguishLowAndHighIntensityProfilesWithSameDirection()
+```
+
+Por exemplo:
+
+```text
+A = [0.1, 0.1, 0.1]
+B = [0.8, 0.8, 0.8]
+```
+
+Após normalização:
+
+```text
+direction(A) ≈ direction(B)
+```
+
+Mas:
+
+```text
+magnitude(A) << magnitude(B)
+```
+
+Isso garante que a decisão arquitetural nunca seja perdida em refactors futuros.
+
+---
+
+# 🟡 Problema 6 — Behavioral risk está ignorando magnitude
+
+Atualmente:
+
+$$
+behavioral\_risk =
+\max_i(similarity(v,c_i) \times w_i)
+$$
+
+Isso significa que:
+
+```text
+perfil muito fraco
+```
+
+e:
+
+```text
+perfil extremamente intenso
+```
+
+podem obter o mesmo risco se tiverem a mesma direção.
+
+Você preservou:
+
+```text
+feature_magnitude
+```
+
+mas o risco ainda não usa isso.
+
+Eu não necessariamente colocaria magnitude diretamente no risco agora, porque isso altera a semântica do modelo.
+
+Mas criaria um conceito explícito:
+
+```java
+public record ArchetypeMatch(
+    ArchetypeId archetype,
+    double directionalSimilarity,
+    double archetypeWeight,
+    double behavioralIntensity,
+    double weightedSimilarity
+) {}
+```
+
+Assim temos:
+
+```text
+Directional similarity
+        +
+Behavioral intensity
+```
+
+disponíveis para o futuro `SPEC-000.8`.
+
+Isso é especialmente importante porque **000.8 será o Signal Fusion Engine**.
+
+Eu deixaria:
+
+```text
+SPEC-000.7
+→ produces signals
+
+SPEC-000.8
+→ decides how signals are fused
+```
+
+Perfeito para o boundary.
+
+---
+
+# 🟡 Problema 7 — Async execution está apenas testado conceitualmente
+
+Você tem:
+
+```text
+I-VEC-007 (Zero Hot-Path Impact)
+```
+
+e:
+
+```text
+BehavioralEmbeddingEngineTest.shouldExecuteAsynchronouslyOrOnDemand()
+```
+
+Mas não existe uma implementação clara de scheduling/job dispatch.
+
+Eu recomendo reutilizar a infraestrutura conceitual do **SPEC-000.6**.
+
+Temos:
+
+```text
+SPEC-000.6
+fraud_propagation_jobs
+```
+
+Podemos ter:
+
+```sql
+fraud_embedding_jobs
+```
+
+ou, melhor ainda, avaliar futuramente um job abstraction comum:
+
+```text
+fraud_async_jobs
+```
+
+Mas **eu não faria a abstração genérica agora**.
+
+Para 000.7:
+
+```text
+TransferCompleted
+      │
+      ▼
+EmbeddingEvaluationDispatcher
+      │
+      ▼
+fraud_embedding_jobs
+      │
+      ▼
+SKIP LOCKED Worker
+      │
+      ▼
+Feature Extraction
+      │
+      ▼
+Archetype Matching
+```
+
+Isso mantém a coerência com 000.6.
+
+---
+
+# ⭐ Minha sugestão de Task adicional
+
+Entre Phase 3 e Phase 4:
+
+## Phase 3.5 — Asynchronous Embedding Execution
+
+```markdown
+### Phase 3.5: Asynchronous Embedding Job Execution (`:fraud:embeddings`)
+
+- [ ] `TASK-3.4` [RED]: Write tests for:
+  - idempotent embedding job enqueue
+  - SKIP LOCKED job claiming
+  - retry on transient database failures
+  - no execution on synchronous transfer thread
+
+- [ ] `TASK-3.5` [GREEN]: Implement:
+  - `EmbeddingEvaluationDispatcher`
+  - `EmbeddingJobWorker`
+  - `fraud_embedding_jobs`
+  - lifecycle:
+    `PENDING → RUNNING → COMPLETED`
+    `RUNNING → RETRY_WAIT → RUNNING`
+    `RUNNING → FAILED`
+
+- [ ] `TASK-3.6` [REFACTOR]: Tune batch claiming and worker concurrency.
+```
+
+---
+
+# 🟢 A sequência final que eu recomendaria
+
+```text
+Phase 1
+Feature Extraction & Dual Normalization
+        ↓
+Phase 2
+pgvector Persistence
+        ↓
+Phase 3
+Archetype Matching Engine
+        ↓
+Phase 3.5
+Async Embedding Job Execution
+        ↓
+Phase 4
+Evidence Context & Deterministic Policy
+        ↓
+Phase 5
+Local Inference + Grounding + Degradation
+        ↓
+Phase 6
+Model Evaluation Harness & Benchmark Gate
+        ↓
+Phase 7
+REST API + Practical Verification
+```
+
+---
+
+# 🎯 Minha avaliação final
+
+Eu consideraria o `TASKS-000.7` **90–95% pronto para ratificação**.
+
+Os únicos pontos que eu considero realmente necessários antes de começar a implementação são:
+
+### 🔴 Obrigatórios
+
+1. Adicionar **Model Evaluation Harness** como fase explícita.
+2. Corrigir o boundary do `LocalInferenceClient` para um verdadeiro **SPI**.
+3. Definir claramente como `I-VEC-007` será implementado (job/worker ou event-driven async).
+
+### 🟡 Fortemente recomendados
+
+4. Transformar PII sanitization em um **hard architectural boundary**.
+5. Adicionar testes para **same direction / different magnitude**.
+6. Expor magnitude/intensity no `ArchetypeMatch`, sem deixar o 000.7 decidir a fusão final.
+
+---
+
+## O ponto mais importante da arquitetura
+
+A evolução **000.5 → 000.6 → 000.7 → 000.8** está começando a ficar muito boa:
+
+```text
+SPEC-000.5
+GRAPH INTELLIGENCE
+"Who is connected?"
+
+        ↓
+
+SPEC-000.6
+RISK PROPAGATION
+"How does risk spread?"
+
+        ↓
+
+SPEC-000.7
+BEHAVIORAL INTELLIGENCE
+"Who behaves like known fraud archetypes?"
+
+        ↓
+
+SPEC-000.8
+SIGNAL FUSION
+"Given all signals, what is the final risk?"
+```
+
+E o LLM fica corretamente fora dessa cadeia decisória:
+
+```text
+Deterministic Engines
+        │
+        ▼
+Evidence
+        │
+        ▼
+LLM
+        │
+        ▼
+Explanation / Investigation Copilot
+```
+
+**Nunca:**
+
+```text
+LLM → decides fraud risk → blocks payment
+```
+
+Essa é, na minha opinião, a decisão arquitetural mais forte de toda a evolução do Fraud Intelligence V4.x.

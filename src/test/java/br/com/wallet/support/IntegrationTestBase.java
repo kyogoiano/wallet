@@ -15,7 +15,8 @@ import org.testcontainers.utility.DockerImageName;
 public class IntegrationTestBase {
 
 
-    private static final DockerImageName POSTGRES_FSYNC_OFF_IMAGE = DockerImageName.parse("postgres:18.3-alpine");
+    private static final DockerImageName POSTGRES_FSYNC_OFF_IMAGE = DockerImageName.parse("pgvector/pgvector:pg18")
+            .asCompatibleSubstituteFor("postgres");
 
     /**
      * Optimized postgres image

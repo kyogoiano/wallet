@@ -82,3 +82,10 @@ redis:
   socket:
     enabled: ${REDIS_SOCKET_ENABLED:false}
     path: ${REDIS_SOCKET_PATH:/var/run/redis/redis.sock}
+
+fraud:
+  investigation:
+    ollama:
+      base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
+      connect-timeout: 3s
+      read-timeout: 30s

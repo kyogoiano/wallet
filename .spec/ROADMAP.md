@@ -221,14 +221,17 @@ gantt
 
 ---
 
-### 🔹 Phase 0.7: Fraud Behavioral Embeddings & Investigation Intelligence (pgvector)
+### 🔹 Phase 0.7: Fraud Behavioral Embeddings & Evidence-Grounded Investigation Synthesizer (pgvector)
 **Spec Identifier**: [`SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)  
-**Status**: 🟢 **Reviewed & Ratified**  
-**Core Abstraction**: `Behavioral Profile Vectors, Cosine Anomaly Search & Investigation Context Synthesizer (br.com.wallet.fraud.embeddings)`
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Behavioral Profile Vectors, Exact Archetype Centroid Matching & Evidence-Grounded Investigation Synthesizer (br.com.wallet.fraud.embeddings & br.com.wallet.fraud.investigation)`
 
-- **Intent**: Store $L_2$-normalized behavioral feature vectors in PostgreSQL using `pgvector` HNSW indexing, detect anomaly clusters via cosine distance to known fraud archetypes, and synthesize comprehensive investigation dossiers (GraphRAG-ready) for analysts.
+- **Intent**: Store $L_2$-normalized behavioral feature vectors with scalar intensity magnitude in PostgreSQL using `pgvector`, match calibrated fraud archetypes via exact dot products ($O(N)$), process updates asynchronously via a durable job queue (`fraud_embedding_jobs`), and synthesize explainable investigation dossiers via a pluggable local inference SPI (`LocalInferenceClient`) using Small Language Models with deterministic risk ownership, zero cloud egress, hard sanitization boundary, claim grounding validation, and graceful degradation.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
+  - [`.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
+  - [`.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Completed)
+  - [`.spec/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Verified)
 
 ---
 

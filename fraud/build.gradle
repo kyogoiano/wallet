@@ -16,6 +16,9 @@ dependencies {
     implementation("io.lettuce:lettuce-core:${lettuceVersion}")
     implementation("com.github.ben-manes.caffeine:caffeine:${caffeineVersion}")
     implementation("io.github.resilience4j:resilience4j-spring-boot4:${resilience4jVersion}")
+    implementation 'org.springframework:spring-web'
+    implementation 'tools.jackson.core:jackson-core'
+    implementation 'tools.jackson.core:jackson-databind'
     // Spring Boot Test dependencies for fraud module
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'

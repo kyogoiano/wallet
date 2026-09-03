@@ -1,0 +1,715 @@
+Sim — olhando a evolução que você trouxe, **a PLAN-000.7 está muito boa e está alinhada com a SPEC ratificada**, especialmente depois das correções que incorporaram o History 26.
+
+A principal coisa que eu faria agora não é uma reescrita completa, mas uma **evolução de arquitetura antes de gerar TASKS-000.7**.
+
+A direção central está correta: **vetores determinísticos + magnitude preservada + pgvector co-localizado + SLM estritamente como sintetizador de evidências**. Isso está explicitamente consistente com a SPEC.
+
+## Minha avaliação: 9/10
+
+### O que está especialmente bom
+
+#### 1. Você corrigiu o maior problema matemático da primeira versão
+
+A separação:
+
+```text
+raw features d
+       │
+       ├── magnitude M = ||d||₂
+       │
+       └── normalized vector v = d / ||d||₂
+```
+
+é uma evolução importante.
+
+Agora você não perde intensidade comportamental quando normaliza o vetor. A SPEC exige explicitamente essa dual representation.
+
+---
+
+#### 2. A decisão de não usar HNSW para os arquétipos está correta
+
+Seu plano diz:
+
+> Exact dot-product matching against calibrated archetypes O(N), N ≤ 20.
+
+Perfeito.
+
+Para:
+
+```text
+3–20 archetypes
+```
+
+HNSW seria complexidade operacional sem benefício real.
+
+A arquitetura ideal fica:
+
+```text
+Entity → Archetype
+==================
+
+Exact dot product
+O(20)
+```
+
+e opcionalmente:
+
+```text
+Entity → Entity
+===============
+
+HNSW / ANN
+```
+
+Isso também está coerente com a SPEC, que separa exact centroid matching de HNSW opcional para nearest-neighbor entre entidades.
+
+---
+
+# As evoluções que eu recomendo antes do TASKS-000.7
+
+## 1. Separar `Embedding Engine` de `Investigation Engine`
+
+Hoje a sua API pública está assim:
+
+```text
+embeddings/api
+├── BehavioralEmbeddingEngine
+└── InvestigationSynthesizer
+```
+
+Eu faria uma separação conceitual mais forte.
+
+### Minha sugestão
+
+```text
+br.com.wallet.fraud
+│
+├── embeddings
+│   ├── api
+│   │   ├── BehavioralEmbeddingEngine
+│   │   └── ArchetypeMatcher
+│   │
+│   └── internal
+│       ├── extraction
+│       ├── normalization
+│       ├── matching
+│       └── persistence
+│
+└── investigation
+    ├── api
+    │   └── InvestigationService
+    │
+    └── internal
+        ├── evidence
+        ├── policy
+        ├── sanitization
+        ├── grounding
+        └── inference
+```
+
+### Por quê?
+
+Porque existem dois bounded contexts diferentes:
+
+### Embeddings
+
+Responsabilidade:
+
+```text
+Transactions
+    ↓
+Feature Extraction
+    ↓
+Vector
+    ↓
+Archetype Matching
+    ↓
+Behavioral Risk
+```
+
+### Investigation
+
+Responsabilidade:
+
+```text
+Risk dimensions
+Graph facts
+Temporal facts
+Behavioral facts
+        ↓
+Evidence
+        ↓
+Policy
+        ↓
+Narrative
+```
+
+Isso será especialmente importante quando chegarmos ao:
+
+```text
+SPEC-000.8 Signal Fusion
+```
+
+A SPEC já estabelece essa separação entre embeddings quantitativos, policy determinística e narrativa.
+
+---
+
+# 2. Eu mudaria o cálculo de `behavioral_risk`
+
+Hoje:
+
+```text
+behavioral_risk =
+    max(similarity × archetypeWeight)
+```
+
+Funciona, mas agora que você preservou magnitude, eu considero um desperdício **não usar magnitude na decisão quantitativa**.
+
+Hoje você tem:
+
+```text
+Vector direction
+→ "What behavior does this resemble?"
+
+Magnitude
+→ "How strong is the behavior?"
+```
+
+Mas o plano só usa o primeiro para `behavioral_risk`.
+
+## Minha sugestão
+
+Separar:
+
+```java
+public record BehavioralRiskAssessment(
+    double archetypeSimilarity,
+    double featureMagnitude,
+    double behavioralRisk,
+    String topArchetype
+) {}
+```
+
+E usar magnitude como um **confidence/intensity modifier**, não diretamente como multiplicador bruto.
+
+Por exemplo:
+
+$$
+M_{normalized}
+=
+\min\left(1,
+\frac{M}{M_{reference}}
+\right)
+$$
+
+Então:
+
+$$
+R_{behavioral}
+=
+similarity
+\times
+archetypeWeight
+\times
+intensityModifier
+$$
+
+onde:
+
+```text
+intensityModifier ∈ [0.6, 1.0]
+```
+
+Exemplo:
+
+```text
+similarity = 0.95
+weight     = 0.90
+
+Entity A:
+magnitude = very low
+→ behavioral evidence weak
+
+Entity B:
+magnitude = very high
+→ behavioral evidence strong
+```
+
+Mas eu **não colocaria isso automaticamente na SPEC ainda**.
+
+Minha preferência seria:
+
+### V1
+
+```text
+behavioral_risk = similarity × weight
+```
+
+### Persistir
+
+```text
+feature_magnitude
+```
+
+### SPEC-000.8
+
+Decidir se magnitude entra no Signal Fusion.
+
+Isso mantém a V0.7 matematicamente simples e calibrável.
+
+---
+
+# 3. O zero-vector case precisa aparecer explicitamente
+
+Você colocou corretamente:
+
+```text
+M = 0 → vector = zero vector
+```
+
+Mas o contrato precisa definir o comportamento do matching.
+
+Sugiro adicionar:
+
+## `I-VEC-008 — Zero Activity Neutrality`
+
+> When `feature_magnitude = 0`, archetype matching MUST return:
+>
+> ```text
+> similarity = 0
+> behavioral_risk = 0
+> archetype = NONE
+> ```
+
+Porque um vetor:
+
+```text
+[0,0,0,...,0]
+```
+
+não é L2-normalizado.
+
+A SPEC atualmente diz que vetores e centróides devem ser normalizados, então esse edge case precisa ser explicitamente tratado.
+
+Eu faria:
+
+```java
+if (magnitude == 0.0) {
+    return BehavioralFeatureVector.inactive();
+}
+```
+
+---
+
+# 4. O HNSW index deveria ser removido da migration inicial
+
+Hoje:
+
+```sql
+CREATE INDEX ... USING hnsw
+```
+
+Mesmo marcado como optional.
+
+Eu faria uma separação:
+
+### Core migration
+
+```sql
+CREATE EXTENSION vector;
+
+CREATE TABLE fraud_entity_features (...);
+CREATE TABLE fraud_archetype_centroids (...);
+```
+
+### Optional future migration
+
+```text
+V0.7.2__add_entity_similarity_hnsw.sql
+```
+
+Por quê?
+
+Porque atualmente o use case principal é:
+
+```text
+Entity → Archetype
+```
+
+e você mesmo já definiu:
+
+```text
+N ≤ 20
+```
+
+Não precisa de ANN.
+
+HNSW só deveria entrar quando existir uma feature concreta como:
+
+```text
+REQ:
+Find behavioral neighbors of entity X
+```
+
+Exemplo:
+
+```text
+"show me the 50 accounts behaving most similarly"
+```
+
+A SPEC trata HNSW como opcional justamente para entity-to-entity similarity, não para o matching principal de arquétipos.
+
+---
+
+# 5. `LocalInferenceClient` não deveria ficar dentro de `internal`
+
+Aqui há uma pequena inconsistência.
+
+Você definiu:
+
+```java
+LocalInferenceClient
+```
+
+como SPI.
+
+Mas colocou:
+
+```text
+internal/inference/
+```
+
+Se for realmente extensível por:
+
+```text
+Ollama
+vLLM
+llama.cpp
+```
+
+eu faria:
+
+```text
+investigation/
+├── api/
+│
+├── spi/
+│   └── LocalInferenceClient.java
+│
+└── internal/
+    ├── inference/
+    │   ├── OllamaInferenceClient
+    │   ├── VllmInferenceClient
+    │   └── LlamaCppInferenceClient
+```
+
+Ou:
+
+```text
+br.com.wallet.fraud.investigation.inference
+```
+
+como Named Interface específico.
+
+Porque SPI escondido em `internal` é uma contradição arquitetural.
+
+---
+
+# 6. Falta uma abstração muito importante: `InferenceCapability`
+
+Eu não faria o código depender diretamente de profiles:
+
+```text
+efficient
+balanced
+quality
+```
+
+Esses são nomes operacionais.
+
+Melhor:
+
+```java
+public enum InferenceCapability {
+    FAST,
+    BALANCED,
+    HIGH_QUALITY
+}
+```
+
+e depois:
+
+```java
+public record InferenceModelProfile(
+    String model,
+    InferenceCapability capability,
+    int maxContextTokens,
+    int maxOutputTokens,
+    Duration timeout
+) {}
+```
+
+Assim:
+
+```text
+Application
+     ↓
+BALANCED
+     ↓
+Configuration
+     ↓
+Qwen / Llama / Phi / outro
+```
+
+O modelo fica realmente pluggable.
+
+Isso é particularmente importante porque sua SPEC já definiu uma arquitetura **model-agnostic** via SPI.
+
+---
+
+# 7. Eu adicionaria `InferenceFailurePolicy`
+
+Hoje:
+
+```text
+Invalid
+   ↓
+Retry / Fallback
+```
+
+Mas precisamos definir o que acontece se:
+
+```text
+SLM unavailable
+timeout
+invalid JSON
+hallucinated claim
+fallback also fails
+```
+
+Minha recomendação:
+
+```java
+public enum InvestigationGenerationStatus {
+
+    GENERATED,
+    GENERATED_WITH_FALLBACK,
+    VALIDATION_FAILED,
+    INFERENCE_UNAVAILABLE
+}
+```
+
+E o sistema deve poder retornar:
+
+```text
+Evidence ✓
+Classification ✓
+Actions ✓
+Narrative ✗ unavailable
+```
+
+Isso é muito importante.
+
+A investigação não pode falhar completamente porque o LLM está offline.
+
+Arquiteturalmente:
+
+```text
+Deterministic dossier
+        │
+        ├── always available
+        │
+        └── Narrative enrichment
+                 │
+                 ├── available
+                 └── unavailable
+```
+
+O SLM deve ser um:
+
+> enrichment layer
+
+Nunca uma dependency que impede o acesso à investigação.
+
+---
+
+# 8. O `ClaimGroundingValidator` está correto, mas eu faria o output mais estruturado
+
+Hoje:
+
+```json
+{
+  "claim": "Account functions as...",
+  "evidenceReferences": ["GRAPH-001"]
+}
+```
+
+O problema é validar semanticamente:
+
+> "functions as intermediary node"
+
+é difícil.
+
+Minha recomendação para V1:
+
+## Structured claims
+
+```json
+{
+  "claimType": "SHARED_INFRASTRUCTURE_CLUSTER",
+  "subject": "MASK_USER_TARGET",
+  "evidenceReferences": ["GRAPH-001"]
+}
+```
+
+E o LLM gera apenas:
+
+```json
+{
+  "executiveSummary": "...",
+  "claims": [...]
+}
+```
+
+Mas com um schema mais restrito.
+
+Idealmente:
+
+```java
+public record InvestigationClaim(
+    ClaimType type,
+    String summary,
+    List<String> evidenceReferences
+) {}
+```
+
+Onde:
+
+```java
+enum ClaimType {
+    SHARED_INFRASTRUCTURE,
+    RAPID_FUND_MOVEMENT,
+    ARCHETYPE_SIMILARITY,
+    HIGH_VELOCITY,
+    DEVICE_ANOMALY
+}
+```
+
+Isso torna:
+
+```text
+Claim grounding
+```
+
+muito mais verificável.
+
+A SPEC exige que toda afirmação tenha rastreabilidade determinística e que claims sem evidência falhem na validação.
+
+---
+
+# Minha arquitetura final recomendada
+
+Eu deixaria assim:
+
+```text
+:fraud
+│
+├── embeddings
+│   │
+│   ├── api
+│   │   ├── BehavioralEmbeddingEngine
+│   │   └── ArchetypeMatchingService
+│   │
+│   ├── spi
+│   │   └── BehavioralFeatureStore
+│   │
+│   └── internal
+│       ├── extraction
+│       ├── normalization
+│       ├── matching
+│       └── persistence
+│
+└── investigation
+    │
+    ├── api
+    │   └── InvestigationService
+    │
+    ├── spi
+    │   └── LocalInferenceClient
+    │
+    └── internal
+        ├── evidence
+        │   ├── InvestigationContextBuilder
+        │   └── EvidenceAssembler
+        │
+        ├── policy
+        │   ├── RiskClassificationPolicy
+        │   └── RecommendedActionPolicy
+        │
+        ├── sanitization
+        │   └── PiiMaskingService
+        │
+        ├── grounding
+        │   └── ClaimGroundingValidator
+        │
+        ├── inference
+        │   ├── OllamaInferenceClient
+        │   ├── VllmInferenceClient
+        │   └── LlamaCppInferenceClient
+        │
+        └── orchestration
+            └── DefaultInvestigationService
+```
+
+---
+
+# Sobre a model strategy
+
+Eu manteria exatamente a filosofia da SPEC:
+
+```text
+efficient
+    ↓
+small / fast
+
+balanced
+    ↓
+default
+
+quality
+    ↓
+fallback
+```
+
+Mas **não fixaria Llama ou Qwen na arquitetura**.
+
+O benchmark deve decidir.
+
+A SPEC revisada já está mais madura nesse ponto: ela define perfis de hardware e métricas de TTFT, completion, JSON validity e claim grounding, em vez de tornar um modelo específico parte do contrato arquitetural.
+
+Isso é o caminho certo.
+
+---
+
+# Minha recomendação final
+
+## Eu ratificaria a PLAN-000.7 com 6 pequenas alterações:
+
+### P0 — Antes da implementação
+
+1. **Adicionar explicitamente o zero-vector case**
+2. **Separar Embeddings e Investigation como submódulos conceituais**
+3. **Mover `LocalInferenceClient` para SPI/Named Interface**
+4. **Adicionar graceful degradation quando o SLM falhar**
+5. **Remover HNSW da migration inicial**
+6. **Definir `ClaimType` estruturado para melhorar grounding**
+
+### P1 — Depois
+
+7. Decidir na SPEC-000.8 como `feature_magnitude` participa do Signal Fusion.
+8. Adicionar HNSW somente quando surgir entity-to-entity similarity como caso de uso real.
+9. Fazer o benchmark selecionar modelos concretos por hardware.
+
+**Com essas alterações, eu considero a PLAN-000.7 pronta para gerar a `TASKS-000.7` em ordem TDD.**
+
+E eu recomendo que a próxima etapa seja exatamente essa: **gerar a TASKS-000.7 já incorporando essas seis correções arquiteturais**, porque elas vão influenciar bastante a ordem das fases e os testes RED/GREEN.

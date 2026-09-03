@@ -1,0 +1,492 @@
+Sim — e olhando a **SPEC-000.7 atual**, eu definitivamente revisaria a escolha do modelo.
+
+A spec hoje fixa:
+
+> **Local quantized Llama 3.1 8B** para sintetizar o `FraudInvestigationDossier`.
+
+Minha conclusão é:
+
+## Minha recomendação: não simplesmente trocar para Llama 3.2
+
+O **Llama 3.2 não é exatamente o sucessor direto do Llama 3.1 8B**.
+
+Os modelos text-only do Llama 3.2 são **1B e 3B**, focados justamente em ambientes restritos/edge, sumarização, retrieval e instruction following. Meta posiciona esses modelos para execução local e workloads mais leves. ([GitHub][1])
+
+Então teríamos:
+
+| Modelo            | Qualidade de análise | Custo/recursos | Velocidade | Minha visão                      |
+| ----------------- | -------------------: | -------------: | ---------: | -------------------------------- |
+| Llama 3.1 8B      |                 ⭐⭐⭐⭐ |          Médio |      Médio | Muito bom                        |
+| **Llama 3.2 3B**  |                  ⭐⭐⭐ |      **Baixo** |   **Alta** | Excelente para triagem           |
+| Llama 3.2 1B      |                   ⭐⭐ |    Muito baixo | Muito alta | Pequeno demais para investigação |
+| Modelo 4B moderno |                 ⭐⭐⭐⭐ |    Baixo/Médio |       Alta | **Possível sweet spot**          |
+| 8B+ moderno       |                ⭐⭐⭐⭐⭐ |     Médio/Alto |      Média | Overkill para V1                 |
+
+---
+
+# O ponto mais importante: o LLM da SPEC-000.7 não está fazendo fraude detection
+
+Essa distinção muda bastante a escolha.
+
+Na sua arquitetura, o LLM:
+
+❌ não autoriza transações
+❌ não calcula `behavioral_risk`
+❌ não bloqueia contas
+❌ não executa propagation
+❌ não toma a decisão financeira
+
+Ele recebe algo como:
+
+```text
+Graph Facts
++
+Temporal Evidence
++
+Archetype Matches
++
+Risk Scores
++
+Chronological Events
+↓
+PII Sanitization
+↓
+LLM
+↓
+FraudInvestigationDossier JSON
+```
+
+Ou seja, o modelo é essencialmente um:
+
+> **Evidence Synthesizer + Investigator Copilot**
+
+Isso significa que **8B provavelmente é maior do que precisamos** para o MVP.
+
+A própria spec já deixa o trabalho matemático e determinístico fora do LLM:
+
+* 16-D behavioral vector;
+* pgvector;
+* archetype centroid matching;
+* graph topology;
+* temporal propagation;
+* risk scores.
+
+O LLM só precisa **interpretar fatos já calculados** e produzir uma narrativa estruturada.
+
+---
+
+# Minha arquitetura favorita: Small Model First
+
+Eu alteraria a SPEC para não acoplar a arquitetura a um modelo específico.
+
+Em vez de:
+
+```text
+Local Llama 3.1 8B
+```
+
+teríamos:
+
+```text
+Local Investigation LLM
+        │
+        ├── Primary: Small / Fast Model (3B–4B)
+        │
+        └── Optional Escalation: Larger Model (8B)
+```
+
+## Novo fluxo
+
+```mermaid
+flowchart TD
+    Facts[Deterministic Fraud Evidence] --> Sanitize[PII Sanitizer]
+
+    Sanitize --> Small[Local Small LLM<br/>3B-4B]
+
+    Small --> Validator[JSON Schema Validator]
+
+    Validator -->|Valid + High Confidence| Dossier[Fraud Investigation Dossier]
+
+    Validator -->|Invalid / Low Confidence| Escalate[Optional 8B Model]
+
+    Escalate --> Validator2[JSON Schema Validator]
+    Validator2 --> Dossier
+```
+
+Isso é muito mais alinhado com o mantra de custo-benefício que estamos usando desde DragonflyDB.
+
+---
+
+# Opção 1 — Llama 3.2 3B
+
+Essa seria a mudança mais simples.
+
+## Vantagens
+
+* muito menor que 8B;
+* 128K context;
+* oficialmente voltado para:
+
+  * summarization;
+  * retrieval;
+  * instruction following;
+  * local/on-device workloads;
+* suporta português entre os idiomas oficialmente suportados. ([GitHub][1])
+
+Também existem versões quantizadas que a Meta diz trazer ganhos significativos de velocidade e redução de memória. ([AI Meta][2])
+
+### Eu usaria para:
+
+```text
+Risk summary
+Evidence summarization
+Timeline generation
+JSON dossier
+Human-readable explanation
+```
+
+### Mas há uma preocupação
+
+O gap de capacidade entre **3B e 8B** é real.
+
+Na avaliação publicada pela Meta, o 3B fica consideravelmente abaixo do Llama 3.1 8B em benchmarks gerais e de reasoning. ([GitHub][1])
+
+Então eu não escolheria 3B se quisermos que o modelo:
+
+* descubra relações complexas;
+* faça inferências profundas;
+* reconstrua causalidade.
+
+**Mas isso não deveria ser função dele.**
+
+A nossa arquitetura já tem:
+
+```text
+PostgreSQL Graph
++
+SPEC-000.5 Pattern Detection
++
+SPEC-000.6 Temporal Propagation
++
+pgvector Archetype Matching
+```
+
+Portanto podemos reduzir drasticamente a necessidade de reasoning do LLM.
+
+---
+
+# Opção 2 — O que eu acho ainda melhor: modelo 3B–4B moderno
+
+Eu faria uma mudança conceitual importante na SPEC.
+
+Em vez de dizer:
+
+```text
+Local Llama 3.1 8B
+```
+
+usar:
+
+```text
+Local Investigation Model Profile
+```
+
+Por exemplo:
+
+```yaml
+fraud:
+  investigation:
+    llm:
+      provider: ollama
+      primary-model: configurable
+      fallback-model: configurable
+
+      temperature: 0.0
+
+      structured-output:
+        enabled: true
+        schema-validation: strict
+
+      privacy:
+        external-egress: false
+        pii-masking-required: true
+```
+
+E a implementação:
+
+```java
+public interface InvestigationLanguageModel {
+
+    FraudInvestigationDossier generate(
+        SanitizedInvestigationContext context
+    );
+}
+```
+
+Assim podemos benchmarkar modelos.
+
+---
+
+# O benchmark deve decidir, não marketing
+
+Essa é minha principal recomendação para a SPEC-000.7.
+
+Criar um **Model Evaluation Harness**.
+
+Por exemplo:
+
+```text
+src/test/resources/fraud-investigation/
+```
+
+com casos:
+
+```text
+CASE-001-money-mule.json
+CASE-002-circular-flow.json
+CASE-003-shared-device.json
+CASE-004-smurfing.json
+CASE-005-account-takeover.json
+CASE-006-low-risk-false-positive.json
+```
+
+Cada modelo recebe exatamente:
+
+```json
+{
+  "graphEvidence": [],
+  "temporalEvidence": [],
+  "archetypeMatches": [],
+  "riskScores": {},
+  "timeline": []
+}
+```
+
+E avaliamos:
+
+### 1. JSON validity
+
+```text
+JSON Schema valid?
+```
+
+### 2. Hallucination rate
+
+O modelo inventou evidência?
+
+```text
+Hallucinated Evidence = FAIL
+```
+
+### 3. Evidence fidelity
+
+Tudo que ele afirma existe no contexto?
+
+### 4. Risk classification agreement
+
+```text
+LOW
+MEDIUM
+HIGH
+CRITICAL
+```
+
+contra um expected result.
+
+### 5. Latency
+
+```text
+P50
+P95
+P99
+```
+
+### 6. Resource efficiency
+
+```text
+RAM
+VRAM
+CPU
+tokens/sec
+```
+
+---
+
+# Isso permitiria uma matriz real
+
+| Model         | JSON Valid % | Hallucination |   P95 | RAM/VRAM | Score |
+| ------------- | -----------: | ------------: | ----: | -------: | ----: |
+| Small Model A |          99% |           Low | 300ms |      Low | ⭐⭐⭐⭐⭐ |
+| Llama 3.2 3B  |          98% |        Medium | 250ms |      Low |  ⭐⭐⭐⭐ |
+| Llama 3.1 8B  |          99% |           Low | 700ms |   Medium |  ⭐⭐⭐⭐ |
+| Larger Model  |          99% |      Very Low |  1.5s |     High |   ⭐⭐⭐ |
+
+E aí escolhemos baseado **no nosso workload**, não no benchmark genérico.
+
+---
+
+# Uma melhoria ainda mais importante para a SPEC
+
+Eu mudaria o papel do LLM.
+
+Atualmente:
+
+```text
+LLM → Risk Classification
+```
+
+Eu evitaria isso.
+
+A spec diz que o output contém:
+
+```text
+LOW / MEDIUM / HIGH / CRITICAL
+```
+
+
+
+Eu prefiro:
+
+```text
+Deterministic Engine
+        ↓
+Risk Classification
+        ↓
+LLM
+        ↓
+Explanation
+```
+
+Ou seja:
+
+```mermaid
+flowchart LR
+    Rules[Fraud Rules] --> Fusion[Signal Fusion]
+    Graph[Graph Risk] --> Fusion
+    Propagation[Propagation Risk] --> Fusion
+    Vector[Behavioral Risk] --> Fusion
+
+    Fusion --> Classification[Deterministic Classification]
+
+    Classification --> LLM[Local LLM]
+    Evidence[Evidence Bundle] --> LLM
+
+    LLM --> Narrative[Human-readable Dossier]
+```
+
+Então:
+
+```json
+{
+  "riskClassification": "HIGH",
+  "classificationSource": "DETERMINISTIC_ENGINE",
+
+  "executiveSummary": "...",
+
+  "evidence": [
+    {
+      "type": "CIRCULAR_FLOW",
+      "description": "..."
+    }
+  ]
+}
+```
+
+O LLM **não decide**:
+
+```text
+HIGH
+```
+
+Ele explica por que o engine chegou em HIGH.
+
+Isso reduz muito:
+
+* hallucination;
+* model dependency;
+* compliance risk;
+* necessidade de um modelo grande.
+
+---
+
+# Minha recomendação final para SPEC-000.7
+
+## 🥇 Arquitetura recomendada
+
+### Primary model
+
+**Small local model: 3B–4B class**
+
+Use para:
+
+* JSON generation;
+* summarization;
+* evidence synthesis;
+* investigation narrative.
+
+### Optional fallback
+
+**8B class**
+
+Somente quando:
+
+```text
+JSON validation failed
+OR
+evidence complexity > threshold
+OR
+manual analyst requests deep analysis
+```
+
+---
+
+## Alteração que eu faria no mantra
+
+Hoje:
+
+> *"Leverage pgvector with inner product (<#>) on PostgreSQL for deterministic 16-D behavioral similarity and local quantized Llama 3.1 for automated investigative triage..."*
+
+Eu mudaria para:
+
+> **"Leverage pgvector for deterministic behavioral similarity and a benchmark-selected local Small Language Model for evidence-grounded investigation synthesis, preserving zero cloud egress, strict PII isolation, and deterministic risk ownership."**
+
+Isso é mais **future-proof**.
+
+---
+
+## Minha escolha prática para o Wallet V4
+
+Eu faria:
+
+```text
+SPEC-000.5
+Graph Projection
+        ↓
+SPEC-000.6
+Temporal Propagation
+        ↓
+SPEC-000.7
+Behavioral Embeddings + Archetype Matching
+        ↓
+Deterministic Evidence Bundle
+        ↓
+Small Local LLM (3B–4B)
+        ↓
+Strict JSON Validation
+        ↓
+FraudInvestigationDossier
+```
+
+E deixaria o **8B como upgrade/fallback**, não como dependência obrigatória.
+
+### Minha opinião direta:
+
+**Sim, vale revisar o Llama 3.1 8B.**
+Mas eu **não faria simplesmente "3.1 → 3.2"**. O Llama 3.2 text-only é uma família diferente, com 1B/3B focados em eficiência. ([GitHub][1])
+
+Eu transformaria a SPEC-000.7 em uma arquitetura **model-agnostic + benchmark-driven**, provavelmente escolhendo um modelo **3B–4B como default**.
+
+Se quiser, o próximo passo pode ser fazer uma revisão completa da **SPEC-000.7**, atualizando-a para esse desenho — incluindo uma seção nova de **LLM Provider Abstraction, Model Benchmark Gate, deterministic risk ownership e small-model-first architecture**.
+
+[1]: https://github.com/meta-llama/llama-models/blob/main/models/llama3_2/MODEL_CARD.md?utm_source=chatgpt.com "llama-models/models/llama3_2/MODEL_CARD.md at main · meta-llama/llama-models · GitHub"
+[2]: https://ai.meta.com/blog/meta-llama-quantized-lightweight-models/?utm_source=chatgpt.com "Introducing quantized Llama models with increased speed and a reduced memory footprint"

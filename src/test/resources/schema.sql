@@ -330,3 +330,100 @@ CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_claim
 CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_entity
     ON fraud_propagation_jobs (entity_id, status);
 
+-- =========================================================================
+-- Behavioral Embeddings, Archetype Centroids & Async Queue (SPEC-000.7 / PLAN-000.7)
+-- =========================================================================
+
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE IF NOT EXISTS fraud_entity_features (
+    entity_id UUID PRIMARY KEY REFERENCES fraud_entities(id) ON DELETE CASCADE,
+    feature_version INT NOT NULL DEFAULT 1,
+    behavioral_vector vector(16) NOT NULL,
+    feature_magnitude DOUBLE PRECISION NOT NULL,
+    transaction_count BIGINT NOT NULL DEFAULT 0,
+    transaction_volume NUMERIC(19, 4) NOT NULL DEFAULT 0.0000,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+CREATE TABLE IF NOT EXISTS fraud_archetype_centroids (
+    archetype_id VARCHAR(64) PRIMARY KEY,
+    description TEXT NOT NULL,
+    centroid_vector vector(16) NOT NULL,
+    risk_weight NUMERIC(3, 2) NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+CREATE TABLE IF NOT EXISTS fraud_embedding_jobs (
+    id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL REFERENCES fraud_entities(id) ON DELETE CASCADE,
+    model_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+    as_of TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    worker_token UUID,
+    lease_until TIMESTAMPTZ,
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    max_attempts INTEGER NOT NULL DEFAULT 3,
+    available_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    );
+
+-- Active job deduplication index (Histories 23 & 28)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fraud_emb_active_unique
+    ON fraud_embedding_jobs (entity_id, model_version)
+    WHERE status IN ('PENDING', 'RUNNING', 'RETRY_WAIT');
+
+-- High-speed worker polling with SKIP LOCKED
+CREATE INDEX IF NOT EXISTS idx_fraud_emb_jobs_claim
+    ON fraud_embedding_jobs (available_at, created_at)
+    WHERE status IN ('PENDING', 'RETRY_WAIT');
+
+CREATE INDEX IF NOT EXISTS idx_fraud_emb_jobs_entity
+    ON fraud_embedding_jobs (entity_id, status);
+
+-- Seed Calibrated Fraud Archetypes (L2-normalized unit vectors)
+INSERT INTO fraud_archetype_centroids (archetype_id, description, centroid_vector, risk_weight)
+VALUES
+    ('MONEY_MULE_RAPID_DRAIN', 'Rapid pass-through funds drain with high velocity and nocturnal activity', 
+     '[0.1849, 0.2311, 0.1387, 0.3698, 0.3236, 0.1849, 0.1849, 0.4160, 0.3698, 0.2774, 0.0462, 0.0924, 0.1387, 0.2311, 0.0924, 0.3236]', 0.95),
+    ('SMURFING', 'High frequency micro-transactions with dispersed counterparties and low amount variance',
+     '[0.3996, 0.0666, 0.0222, 0.3108, 0.1332, 0.3996, 0.3774, 0.1332, 0.3774, 0.3774, 0.0444, 0.0444, 0.0888, 0.1776, 0.0444, 0.2664]', 0.85),
+    ('ACCOUNT_TAKEOVER', 'Sudden new hardware/device switch with failed authentications and out-of-pattern spikes',
+     '[0.1826, 0.2922, 0.2922, 0.2191, 0.1826, 0.1096, 0.2191, 0.3104, 0.2556, 0.0730, 0.1461, 0.3287, 0.3470, 0.3287, 0.1826, 0.3104]', 0.90)
+ON CONFLICT (archetype_id) DO NOTHING;
+
+-- Seed Fraud Entities & Intelligence Graph Data (SPEC-000.5)
+INSERT INTO fraud_entities (id, entity_type, direct_risk, graph_risk, behavioral_risk, propagated_risk, final_risk, created_at, updated_at)
+VALUES
+    ('a1111111-1111-1111-1111-111111111111', 'USER',   0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('b2222222-2222-2222-2222-222222222222', 'USER',   0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('c3333333-3333-3333-3333-333333333333', 'USER',   0.9, 0.0, 0.0, 0.0, 0.9, NOW(), NOW()),
+    ('0a35fb14-75ee-4125-943b-500893c30d33', 'WALLET', 0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('2c57ad36-97aa-6347-b65d-722015e52f55', 'WALLET', 0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('3d68be47-08bb-7458-c76e-833126f63a66', 'WALLET', 0.9, 0.0, 0.0, 0.0, 0.9, NOW(), NOW()),
+    ('e5555555-5555-5555-5555-555555555555', 'DEVICE', 0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
+    ('f6666666-6666-6666-6666-666666666666', 'IP',     0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- Seed Ownership & Topology Edges
+INSERT INTO fraud_relationships (source_id, target_id, relationship_type, first_seen_at, last_seen_at, tx_count, total_amount)
+VALUES
+    ('a1111111-1111-1111-1111-111111111111', '0a35fb14-75ee-4125-943b-500893c30d33', 'OWNS', NOW(), NOW(), 1, 0.0000),
+    ('b2222222-2222-2222-2222-222222222222', '2c57ad36-97aa-6347-b65d-722015e52f55', 'OWNS', NOW(), NOW(), 1, 0.0000),
+    ('c3333333-3333-3333-3333-333333333333', '3d68be47-08bb-7458-c76e-833126f63a66', 'OWNS', NOW(), NOW(), 1, 0.0000),
+    ('a1111111-1111-1111-1111-111111111111', 'e5555555-5555-5555-5555-555555555555', 'USES', NOW(), NOW(), 1, 0.0000),
+    ('b2222222-2222-2222-2222-222222222222', 'e5555555-5555-5555-5555-555555555555', 'USES', NOW(), NOW(), 1, 0.0000),
+    ('0a35fb14-75ee-4125-943b-500893c30d33', '2c57ad36-97aa-6347-b65d-722015e52f55', 'TRANSFERRED_TO', NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour', 1, 500.0000),
+    ('2c57ad36-97aa-6347-b65d-722015e52f55', '3d68be47-08bb-7458-c76e-833126f63a66', 'TRANSFERRED_TO', NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '30 minutes', 1, 450.0000)
+ON CONFLICT (source_id, target_id, relationship_type) DO NOTHING;
+
+-- Seed Temporal Event Stream
+INSERT INTO fraud_relationship_events (id, source_id, target_id, relationship_type, occurred_at, operation_id, amount)
+VALUES
+    ('fa111111-1111-1111-1111-111111111111', '0a35fb14-75ee-4125-943b-500893c30d33', '2c57ad36-97aa-6347-b65d-722015e52f55', 'TRANSFERRED_TO', NOW() - INTERVAL '1 hour', gen_random_uuid(), 500.0000),
+    ('fb222222-2222-2222-2222-222222222222', '2c57ad36-97aa-6347-b65d-722015e52f55', '3d68be47-08bb-7458-c76e-833126f63a66', 'TRANSFERRED_TO', NOW() - INTERVAL '30 minutes', gen_random_uuid(), 450.0000)
+ON CONFLICT (id) DO NOTHING;

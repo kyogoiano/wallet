@@ -52,7 +52,7 @@ Following the architectural consensus refined across **Histories 20, 24, 25, 26,
 flowchart TD
     subgraph Vectors ["16-D Behavioral Embedding Engine (Histories 20 & 26)"]
         Hist[30-Day Transaction History] --> FeatExt[16-D Feature Extractor]
-        FeatExt --> Norm[L2 Normalization: unit vector v + magnitude ||d||]
+        FeatExt --> Norm[L2 Normalization: unit vector v + magnitude d]
         Norm --> DB_Feat[(pgvector: fraud_entity_features)]
         Centroids[(pgvector: fraud_archetype_centroids)] --> ExactMatcher[Exact Dot Product: v · centroid_i]
         DB_Feat --> ExactMatcher

@@ -279,7 +279,7 @@ If the SLM backend is unreachable, times out, or fails schema validation:
     "classificationSource": "EVIDENCE_POLICY",
     "status": "INFERENCE_UNAVAILABLE",
     "allowedActions": ["MANUAL_REVIEW", "TEMPORARY_OUTGOING_RESTRICTION"],
-    "evidence": { ... },
+    "evidence": {  },
     "narrative": null
   }
   ```

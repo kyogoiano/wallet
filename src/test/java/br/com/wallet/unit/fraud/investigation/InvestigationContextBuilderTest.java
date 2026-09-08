@@ -7,6 +7,8 @@ import br.com.wallet.fraud.embeddings.spi.BehavioralFeatureStore;
 import br.com.wallet.fraud.intelligence.domain.EntityType;
 import br.com.wallet.fraud.intelligence.domain.FraudEntity;
 import br.com.wallet.fraud.intelligence.domain.FraudRelationshipStore;
+import br.com.wallet.fraud.investigation.api.model.AtomicEvidenceItem;
+import br.com.wallet.fraud.investigation.api.model.FraudArchetype;
 import br.com.wallet.fraud.investigation.api.model.InvestigationEvidence;
 import br.com.wallet.fraud.investigation.internal.evidence.InvestigationContextBuilder;
 import org.junit.jupiter.api.BeforeEach;
@@ -69,10 +71,10 @@ class InvestigationContextBuilderTest {
         assertThat(evidence.risks().directRisk()).isEqualTo(0.4);
         assertThat(evidence.risks().graphRisk()).isEqualTo(0.75);
         assertThat(evidence.risks().propagatedRisk()).isEqualTo(0.6);
-        assertThat(evidence.risks().topArchetype()).isEqualTo("MONEY_MULE_RAPID_DRAIN");
+        assertThat(evidence.risks().topArchetype()).isEqualTo(FraudArchetype.MONEY_MULE_RAPID_DRAIN);
         assertThat(evidence.risks().archetypeSimilarity()).isEqualTo(0.88);
 
-        assertThat(evidence.evidenceItems()).extracting(item -> item.id())
+        assertThat(evidence.evidenceItems()).extracting(AtomicEvidenceItem::id)
             .contains("ARCHETYPE-001", "GRAPH-001", "TEMPORAL-001");
     }
 }

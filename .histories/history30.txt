@@ -1,0 +1,502 @@
+Sim — **eu incluiria**, mas faria uma distinção importante entre **testes de integração do pipeline** e **benchmark/quality gate do modelo**.
+
+Para a sua arquitetura, isso encaixa muito bem.
+
+## Minha recomendação
+
+### 🥇 Default para Integration Tests: SmolLM2 360M Instruct
+
+Eu usaria:
+
+**`smollm2:360m-instruct-q5_K_M`**
+
+A variante 360M é um excelente ponto de partida porque mantém o ambiente relativamente leve — a versão Q5 disponível no Ollama fica na faixa de ~290 MB — enquanto ainda é significativamente mais útil que 135M para seguir instruções estruturadas. ([Ollama][1])
+
+O SmolLM2 oficialmente possui variantes **135M, 360M e 1.7B**. ([Ollama][2])
+
+Minha hierarquia seria:
+
+| Uso                         | Modelo                         |
+| --------------------------- | ------------------------------ |
+| Fast CI / smoke test        | **135M**                       |
+| Default integration test    | 🥇 **360M Instruct**           |
+| Quality benchmark           | **1.7B Instruct**              |
+| Futuro production benchmark | Qwen / Llama / outro candidato |
+
+---
+
+# O ponto mais importante: não colocar a LLM em todos os testes
+
+Eu **não faria** isso:
+
+```text
+mvn test
+   ↓
+sobe Ollama
+   ↓
+baixa modelo
+   ↓
+roda inferência real em 50 testes
+```
+
+Isso vai tornar seu pipeline:
+
+* lento;
+* potencialmente flaky;
+* dependente de pull de modelo;
+* pesado para PRs.
+
+Em vez disso, eu criaria **três níveis**.
+
+---
+
+# 1. Unit Tests — FakeInferenceClient
+
+```text
+ClaimGroundingValidatorTest
+DefaultInvestigationServiceTest
+RecommendedActionPolicyTest
+```
+
+Aqui:
+
+```java
+LocalInferenceClient -> Fake / Stub
+```
+
+Sem Docker.
+
+Sem Ollama.
+
+Sem modelo.
+
+Esses testes validam:
+
+* evidence IDs;
+* schema;
+* degradation;
+* risk ownership;
+* action ownership;
+* retry logic.
+
+---
+
+# 2. Integration Tests — Ollama + SmolLM2 360M
+
+Aqui sim:
+
+```text
+┌─────────────────────────────┐
+│ Spring Boot Test            │
+│                             │
+│ DefaultInvestigationService │
+│              │              │
+│              ▼              │
+│ OllamaInferenceClient       │
+└──────────────┬──────────────┘
+               │ HTTP
+               ▼
+┌─────────────────────────────┐
+│ Testcontainers              │
+│                             │
+│ Ollama                      │
+│ + SmolLM2 360M Instruct     │
+└─────────────────────────────┘
+```
+
+Esse teste valida o que mocks nunca conseguem validar:
+
+### `OllamaInferenceClientIT`
+
+```java
+@Test
+void shouldGenerateSchemaCompliantNarrative() {
+    var result = client.generateStructured(request);
+
+    assertThat(result).isNotNull();
+
+    validator.validate(result, evidence);
+}
+```
+
+---
+
+# 3. Benchmark / Evaluation Gate
+
+Aqui você testa múltiplos modelos:
+
+```text
+CASE-001 Money Mule
+        │
+        ├── SmolLM2 360M
+        │
+        ├── SmolLM2 1.7B
+        │
+        ├── Qwen candidate
+        │
+        └── Llama candidate
+```
+
+E produz:
+
+```text
+ModelEvaluationReport
+
+Model:
+- JSON validity
+- Evidence grounding accuracy
+- Invalid references
+- Hallucinated numeric facts
+- P50 latency
+- P95 latency
+- Memory
+```
+
+Isso é muito mais alinhado com o espírito da sua `REQ-VEC-007`.
+
+---
+
+# Eu adicionaria uma nova requirement na SPEC
+
+## `REQ-VEC-011 — Containerized Local Inference Integration Testing`
+
+Eu escreveria algo próximo disso:
+
+---
+
+### **REQ-VEC-011 (Containerized Local SLM Integration Testing)**
+
+The system MUST provide an optional integration-test profile validating the complete local inference pipeline against a real containerized Small Language Model.
+
+The integration environment SHALL:
+
+* start a local Ollama-compatible inference runtime using Testcontainers;
+* execute inference entirely inside Docker network boundaries;
+* use a compact instruct model as the default integration candidate;
+* validate the complete path:
+
+```text
+FraudInvestigationContext
+        ↓
+PiiMaskingService
+        ↓
+StructuredInferenceRequest
+        ↓
+LocalInferenceClient
+        ↓
+Containerized SLM
+        ↓
+Structured JSON Response
+        ↓
+JSON Schema Validation
+        ↓
+ClaimGroundingValidator
+        ↓
+FraudInvestigationDossier
+```
+
+The default integration model SHOULD be configurable:
+
+```yaml
+fraud:
+  investigation:
+    integration-test:
+      enabled: true
+      runtime: ollama
+      model: smollm2:360m-instruct-q5_K_M
+```
+
+The test suite MUST support separate execution profiles for:
+
+```yaml
+fast:
+  model: smollm2:135m
+
+default:
+  model: smollm2:360m-instruct-q5_K_M
+
+quality:
+  model: smollm2:1.7b
+```
+
+---
+
+# Nova invariant
+
+Eu também adicionaria:
+
+### `I-VEC-010 — Real Inference Path Verification`
+
+> The production inference adapter MUST be periodically verified against a real local inference runtime. Mock-based tests alone are insufficient to validate structured output, transport serialization, model instruction following, or grounding behavior.
+
+Isso é importante porque seu sistema possui um problema clássico:
+
+```text
+Mock test passes
+        ↓
+Production LLM returns:
+"Sure! Here is your JSON:"
+{ ... invalid structure ... }
+```
+
+Ou:
+
+```json
+{
+  "claims": [
+    {
+      "evidenceReferences": [
+        "GRAPH-999"
+      ]
+    }
+  ]
+}
+```
+
+Seu mock nunca descobre isso.
+
+---
+
+# Testcontainers: eu faria um container próprio
+
+Eu evitaria acoplar inicialmente a solução a uma biblioteca específica de Testcontainers para Ollama.
+
+Você pode começar simplesmente com:
+
+```java
+static final GenericContainer<?> ollama =
+    new GenericContainer<>("ollama/ollama:latest")
+        .withExposedPorts(11434);
+```
+
+Mas há uma questão importante:
+
+## O modelo precisa estar disponível antes dos testes
+
+O fluxo seria:
+
+```text
+Container starts
+       ↓
+Wait for /api/tags
+       ↓
+ollama pull smollm2:360m...
+       ↓
+Wait until model available
+       ↓
+Run tests
+```
+
+### Porém...
+
+Fazer `ollama pull` em todo teste é ruim.
+
+Minha recomendação para o seu projeto:
+
+## Opção A — melhor para desenvolvimento
+
+Criar uma imagem de teste:
+
+```dockerfile
+FROM ollama/ollama
+
+RUN ollama serve & \
+    sleep 5 && \
+    ollama pull smollm2:360m-instruct-q5_K_M
+```
+
+Assim o modelo já está na imagem/cache.
+
+---
+
+## Opção B — melhor para CI
+
+Usar cache de Docker layers/model volumes.
+
+```text
+CI
+ ↓
+restore Docker cache
+ ↓
+start Ollama
+ ↓
+model already cached
+ ↓
+tests
+```
+
+---
+
+# Um detalhe que eu mudaria na sua SPEC
+
+Seu requisito atual diz:
+
+> **100% JSON Schema validity**
+>
+> **0% hallucinated evidence**
+>
+> **P95 < 300ms**
+
+Para **SmolLM2 135M/360M em CPU via Docker**, eu não colocaria inicialmente o `< 300ms` como requisito absoluto de CI.
+
+Especialmente porque isso depende de:
+
+* CPU do runner;
+* quantização;
+* cold/warm model;
+* Docker overhead;
+* hardware local.
+
+Eu separaria:
+
+## Functional Gate
+
+Obrigatório:
+
+```text
+✓ JSON valid
+✓ Evidence references valid
+✓ No invented evidence IDs
+✓ No risk mutation
+✓ No action-policy mutation
+```
+
+## Performance Benchmark
+
+Informativo inicialmente:
+
+```text
+P50 latency
+P95 latency
+tokens/sec
+cold start
+RSS memory
+```
+
+Depois, quando você tiver hardware de referência:
+
+```yaml
+hardware-profile:
+  cpu: reference-machine
+  cores: 8
+  ram: 32GB
+```
+
+aí sim você pode definir:
+
+```text
+P95 < X ms
+```
+
+---
+
+# Minha sugestão para o TASKS-000.7
+
+Eu criaria uma nova fase.
+
+## Phase 5.5 — Real Local Model Integration
+
+### `TASK-5.4 [RED]`
+
+```text
+Write OllamaInferenceClientIT validating:
+
+- Testcontainers Ollama runtime startup
+- model availability
+- HTTP transport
+- structured generation
+- JSON parsing
+- ClaimGroundingValidator integration
+- graceful timeout behavior
+```
+
+### `TASK-5.5 [GREEN]`
+
+Implement:
+
+```text
+Testcontainer configuration
+Ollama test fixture
+Model warmup
+Integration profile
+Docker network isolation
+```
+
+### `TASK-5.6 [BENCHMARK]`
+
+```text
+Evaluate:
+
+SmolLM2 135M
+SmolLM2 360M
+SmolLM2 1.7B
+```
+
+Against:
+
+```text
+CASE-001-money-mule
+CASE-002-smurfing
+CASE-003-account-takeover
+CASE-004-clean-account
+CASE-005-conflicting-evidence
+CASE-006-insufficient-evidence
+```
+
+Output:
+
+```text
+MODEL EVALUATION REPORT
+
+Model: SmolLM2 360M
+
+Schema validity:       98.7%
+Grounded claims:       99.1%
+Invalid evidence refs: 0.9%
+P50 latency:           142ms
+P95 latency:           287ms
+Memory:                850MB
+```
+
+---
+
+# Minha opinião final para o Wallet Service
+
+### Eu faria exatamente assim:
+
+```text
+┌─────────────────────────────────────┐
+│ UNIT TESTS                          │
+│                                     │
+│ FakeInferenceClient                 │
+│ Fast / deterministic                │
+└─────────────────────────────────────┘
+
+┌─────────────────────────────────────┐
+│ INTEGRATION TESTS                   │
+│                                     │
+│ Ollama + SmolLM2 360M               │
+│ Testcontainers                      │
+│                                     │
+│ Validates real inference pipeline   │
+└─────────────────────────────────────┘
+
+┌─────────────────────────────────────┐
+│ NIGHTLY / MANUAL BENCHMARK          │
+│                                     │
+│ 135M vs 360M vs 1.7B                │
+│                                     │
+│ ModelEvaluationHarness              │
+└─────────────────────────────────────┘
+```
+
+## 🏆 Minha escolha inicial: **SmolLM2 360M Instruct**
+
+O **135M** eu usaria apenas como *smoke test extremamente rápido*. O **360M** é o melhor candidato para provar que sua arquitetura de structured generation + grounding funciona com um modelo realmente compacto. Para validação de qualidade, eu incluiria o **1.7B** como baseline superior. O Ollama distribui oficialmente essas três classes de tamanho. ([Ollama][2])
+
+E tem um benefício arquitetural muito bom: **se o SmolLM2 360M passar consistentemente nos seus testes de grounding, isso prova que o design do seu `FraudInvestigationContext` está fazendo o trabalho pesado corretamente — e não a inteligência do modelo**.
+
+Isso, para a filosofia da SPEC-000.7, é exatamente o que queremos.
+
+[1]: https://ollama.com/library/smollm2%3A360m-instruct-q5_K_M?utm_source=chatgpt.com "smollm2:360m-instruct-q5_K_M"
+[2]: https://ollama.com/library/smollm2?utm_source=chatgpt.com "smollm2"

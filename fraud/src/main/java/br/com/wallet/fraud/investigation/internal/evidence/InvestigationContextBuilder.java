@@ -7,6 +7,7 @@ import br.com.wallet.fraud.embeddings.spi.BehavioralFeatureStore;
 import br.com.wallet.fraud.intelligence.domain.FraudEntity;
 import br.com.wallet.fraud.intelligence.domain.FraudRelationshipStore;
 import br.com.wallet.fraud.investigation.api.model.AtomicEvidenceItem;
+import br.com.wallet.fraud.investigation.api.model.FraudArchetype;
 import br.com.wallet.fraud.investigation.api.model.FraudRiskSnapshot;
 import br.com.wallet.fraud.investigation.api.model.InvestigationEvidence;
 import org.jspecify.annotations.NonNull;
@@ -62,7 +63,7 @@ public class InvestigationContextBuilder {
             propagatedRisk,
             behavioralRisk,
             features.featureMagnitude(),
-            match.archetypeId(),
+            FraudArchetype.fromString(match.archetypeId()),
             match.directionalSimilarity()
         );
 

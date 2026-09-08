@@ -17,14 +17,14 @@ public record InferenceModelProfile(
     }
 
     public static InferenceModelProfile fast() {
-        return new InferenceModelProfile("llama3.2:1b", 256, 0.0, Duration.ofMillis(500));
+        return new InferenceModelProfile("smollm2:135m", 384, 0.0, Duration.ofSeconds(1));
     }
 
     public static InferenceModelProfile balanced() {
-        return new InferenceModelProfile("llama3.2:3b", 512, 0.0, Duration.ofSeconds(2));
+        return new InferenceModelProfile("smollm2:360m-instruct-q5_K_M", 512, 0.0, Duration.ofSeconds(3));
     }
 
     public static InferenceModelProfile highQuality() {
-        return new InferenceModelProfile("llama3.1:8b", 1024, 0.0, Duration.ofSeconds(5));
+        return new InferenceModelProfile("llama3.2:1b", 768, 0.0, Duration.ofSeconds(5));
     }
 }

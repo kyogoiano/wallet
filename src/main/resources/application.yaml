@@ -89,3 +89,24 @@ fraud:
       base-url: ${OLLAMA_BASE_URL:http://localhost:11434}
       connect-timeout: 3s
       read-timeout: 30s
+    inference:
+      profile: balanced
+      profiles:
+        efficient:
+          model: smollm2:135m
+          max-context-tokens: 2048
+          max-output-tokens: 384
+          temperature: 0.0
+          timeout: 1s
+        balanced:
+          model: smollm2:360m-instruct-q5_K_M
+          max-context-tokens: 4096
+          max-output-tokens: 512
+          temperature: 0.0
+          timeout: 3s
+        quality:
+          model: llama3.2:1b
+          max-context-tokens: 8192
+          max-output-tokens: 1024
+          temperature: 0.0
+          timeout: 5s

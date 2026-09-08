@@ -119,8 +119,18 @@ dependencies {
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		excludeTags 'integration-slm'
+	}
 	finalizedBy jacocoTestReport
+}
+
+tasks.register('slmTest', Test) {
+	description = 'Runs containerized local SLM integration tests (REQ-VEC-012, History 30)'
+	group = 'verification'
+	useJUnitPlatform {
+		includeTags 'integration-slm'
+	}
 }
 
 jacocoTestReport {

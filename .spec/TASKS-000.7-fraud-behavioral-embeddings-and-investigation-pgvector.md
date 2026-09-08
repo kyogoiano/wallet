@@ -22,6 +22,7 @@
 | `REQ-VEC-009` (Formal Claim Grounding Validator) | `ClaimGroundingValidatorTest.shouldEnforceClaimTypeAndEvidenceReferences()` | `TASK-5.1`, `TASK-5.2` |
 | `REQ-VEC-010` (Deterministic Action Policy) | `RecommendedActionPolicyTest.shouldDeriveActionsDeterministically()` | `TASK-4.1`, `TASK-4.2` |
 | `REQ-VEC-011` (Asynchronous Embedding Job Queue) | `PostgresEmbeddingJobDaoIT.shouldEnforceUniqueActiveJobsAndTokenLeases()` | `TASK-3.4`, `TASK-3.5` |
+| `REQ-VEC-012` (Containerized SLM Integration Testing)| `OllamaInferenceClientIT.shouldGenerateSchemaCompliantNarrativeWithContainer()`| `TASK-5.4`, `TASK-5.5` |
 | `I-VEC-001` (Normalized Vector Space & Magnitude) | `FeatureNormalizerTest.shouldGuaranteeUnitLengthWhenMagnitudePositive()` | `TASK-1.1`, `TASK-1.2` |
 | `I-VEC-002` (Durable Co-Location) | `PostgresEntityFeaturesDaoIT.shouldPersistInPostgresDatabase()` | `TASK-2.1`, `TASK-2.2` |
 | `I-VEC-003` (Deterministic Risk & Action Ownership) | `DefaultInvestigationServiceTest.shouldNeverPermitLLMToMutateRiskOrActions()`| `TASK-5.1`, `TASK-5.2` |
@@ -31,6 +32,7 @@
 | `I-VEC-007` (Zero Hot-Path Impact) | `EmbeddingJobWorkerTest.shouldExecuteInWorkerPoolWithoutBlockingCore()` | `TASK-3.4`, `TASK-3.5` |
 | `I-VEC-008` (Zero Activity Neutrality) | `FeatureNormalizerTest.shouldReturnZeroVectorAndNoneForZeroMagnitude()` | `TASK-1.1`, `TASK-1.2` |
 | `I-VEC-009` (Investigation Resilience & Degradation)| `DefaultInvestigationServiceTest.shouldReturnDossierWhenInferenceFails()` | `TASK-5.1`, `TASK-5.2` |
+| `I-VEC-010` (Real Inference Path Verification) | `OllamaInferenceClientIT.shouldVerifyRealInferencePipelineInsideDocker()` | `TASK-5.4`, `TASK-5.5` |
 
 ---
 
@@ -112,6 +114,23 @@
   - `DefaultInvestigationService` (implements `InvestigationService`).
   - Configure Spring Modulith `@NamedInterface("investigation-api")`.
 - [x] `TASK-5.3` [REFACTOR]: Resilience timeouts, circuit breaker fallback, and structured prompt templates.
+
+### Phase 5.5: Containerized Local SLM Integration Testing (Testcontainers & History 30)
+- [ ] `TASK-5.4` [RED]: Write `OllamaInferenceClientIT` (`REQ-VEC-012`, `I-VEC-010`) using Testcontainers Ollama:
+  - Boots containerized Ollama runtime inside Docker network.
+  - Verifies model availability (`smollm2:360m-instruct-q5_K_M`).
+  - Executes real HTTP request with `StructuredInferenceRequest` via Spring `RestClient`.
+  - Asserts response parses into `InvestigationNarrative` with non-empty executive summary.
+  - Integrates with `ClaimGroundingValidator` to verify zero hallucinated IDs and consistent facts against raw evidence.
+  - Verifies graceful degradation fallback (`I-VEC-009`) when container endpoint is forcefully unreachable or times out.
+- [ ] `TASK-5.5` [GREEN]: Implement Testcontainers Ollama fixture & configuration:
+  - Add Ollama container configuration (`ollama/ollama:latest` with healthcheck on `/api/tags` and model pull/warmup).
+  - Configure Spring test property `fraud.investigation.ollama.base-url` pointing to Testcontainers mapped port.
+  - Configure execution tag `@Tag("integration-slm")` to allow running fast unit tests separate from heavy containerized SLM tests.
+- [ ] `TASK-5.6` [BENCHMARK]: Enhance `ModelEvaluationHarness` with `ModelCandidate` record:
+  - Add `ModelCandidate(String id, String backend, InferenceCapability capability)`.
+  - Support multi-candidate comparison (`smollm2:135m`, `smollm2:360m`, `smollm2:1.7b`).
+  - Generate comparative `ModelEvaluationReport` measuring schema validity, grounding accuracy, and latency trends across gold standard cases (`CASE-001` through `CASE-004`).
 
 ### Phase 6: Model Evaluation Harness & Benchmark Gate (`:fraud:investigation`)
 - [x] `TASK-6.1` [RED]: Create `ModelEvaluationHarnessTest` and gold-standard evaluation fixtures in `src/test/resources/fraud-investigation/`:

@@ -1,9 +1,9 @@
 # 📐 Architecture Plan: PLAN-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Investigation Intelligence
 
 - **Associated Spec**: [`SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
-- **Status**: Ready for Review & Ratification (Histories 20, 24, 25, 26, 27 & 28)
+- **Status**: Ready for Review & Ratification (Histories 20, 24, 25, 26, 27, 28, 29 & 30)
 - **Author**: Antigravity Financial & Risk Engineering Team
-- **Date**: 2026-09-02
+- **Date**: 2026-09-03
 - **Domain**: `br.com.wallet.fraud` (Fraud Intelligence, Embeddings & Investigation)
 - **Target Release**: Wallet Service V4.x — Phase 0.7
 
@@ -24,10 +24,12 @@ The **Behavioral Embeddings & Investigation Intelligence Engine** is structured 
    - Assembles an atomic, structured `InvestigationEvidence` from deterministic evidence (`GRAPH-001`, `TEMPORAL-014`, `ARCHETYPE-003`).
    - Evaluates `EVIDENCE_POLICY` to determine `RiskClassification` and allowable `RecommendedAction` sets without mutating or anticipating `final_risk` (`I-PROP-005`).
    - **Hard Sanitization Boundary**: Transforms `InvestigationEvidence` into `SanitizedInferenceContext` before invoking the model, ensuring unmasked PII can never reach inference.
-   - Pluggable `LocalInferenceClient` SPI for local inference (Ollama / vLLM / llama.cpp) configured with `InferenceCapability` (`FAST`, `BALANCED`, `HIGH_QUALITY`).
+   - **Minimum Viable Intelligence Strategy (History 29)**: Adopts compact SLM models (`smollm2:135m` for smoke/CI, `smollm2:360m-instruct-q5_K_M` as default production baseline, `llama3.2:1b` as high-quality fallback).
+   - **LLM as Structured Renderer**: 95% of intelligence is deterministic (facts, IDs, and action sets); 5% is language synthesis.
+   - **Cascading Fallback Architecture (Histories 27 & 29)**: `360M Default` $\rightarrow$ on validation failure/timeout $\rightarrow$ `Llama 3.2 1B Quality Retry` $\rightarrow$ on failure $\rightarrow$ **Deterministic Evidence-Only Dossier** (`INFERENCE_UNAVAILABLE`).
+   - Pluggable `LocalInferenceClient` SPI for local inference using Spring `RestClient` (HTTP/2 with Java 26 Virtual Threads).
    - Programmatic `ClaimGroundingValidator` enforcing structured claims (`ClaimType`, `evidenceReferences`).
-   - Graceful degradation (`I-VEC-009`): If the generative model fails or times out, the deterministic dossier (`evidence`, `classification`, `allowedActions`) is always returned with `InvestigationGenerationStatus.INFERENCE_UNAVAILABLE`.
-   - Reproducible `ModelEvaluationHarness` evaluating candidate models against gold-standard cases using configurable `InferenceBenchmarkThresholds`.
+   - Three-Tier Testing Architecture: Unit tests (`FakeInferenceClient`), Integration tests (`OllamaInferenceClientIT` with Testcontainers), and Benchmark evaluation gate (`ModelEvaluationHarness`).
 
 ```mermaid
 flowchart TD
@@ -50,11 +52,14 @@ flowchart TD
         ContextBuilder --> EvidenceBundle["InvestigationEvidence (Raw Facts)"]
         EvidenceBundle --> PiiMasker["PiiMaskingService (Hard Boundary)"]
         PiiMasker --> SanitizedContext["SanitizedInferenceContext"]
-        SanitizedContext --> InferenceSPI["LocalInferenceClient (SPI)\n(Ollama / vLLM / llama.cpp)"]
-        InferenceSPI --> SLM["Local SLM (Balanced Profile: 3B–7B)"]
-        SLM --> GroundingVal{"ClaimGroundingValidator\n(ClaimType Valid & Facts Match?)"}
+        SanitizedContext --> InferenceSPI["LocalInferenceClient (SPI)\n(Spring RestClient / HTTP/2)"]
+        InferenceSPI --> SLM_360M["SmolLM2 360M Instruct\n(Primary Baseline ~290MB)"]
+        SLM_360M --> GroundingVal{"ClaimGroundingValidator\n(ClaimType Valid & Facts Match?)"}
         GroundingVal -->|Valid| Dossier["FraudInvestigationDossier\n(Status: GENERATED)"]
-        GroundingVal -->|SLM Failure/Timeout| GracefulFallback["Graceful Degradation (I-VEC-009)\n(Status: INFERENCE_UNAVAILABLE\nDeterministic Evidence Preserved)"]
+        GroundingVal -->|Invalid / Timeout| Fallback_1B["Llama 3.2 1B Instruct\n(High Quality Fallback Retry)"]
+        Fallback_1B --> GroundingVal2{"ClaimGroundingValidator\n(Quality Gate)"}
+        GroundingVal2 -->|Valid| Dossier
+        GroundingVal2 -->|Fail / Unavailable| GracefulFallback["Graceful Degradation (I-VEC-009)\n(Status: INFERENCE_UNAVAILABLE\nDeterministic Evidence Preserved)"]
         GracefulFallback --> Dossier
     end
 ```
@@ -286,9 +291,15 @@ If the SLM backend is unreachable, times out, or fails schema validation:
 - **Phase 0.8 Agentic Roadmap**: **Model Context Protocol (MCP)** will be adopted for the LangGraph Agentic Investigation Engine to expose fraud intelligence tools (`graph-neighborhood`, `temporal-trace`, `behavioral-archetype`).
 - **GPU Cluster Roadmap**: **Async gRPC** over HTTP/2 with protobuf contracts for high-throughput vLLM / Triton deployments.
 
-### 6.5. Hardware-Aware Model Evaluation Harness
-Configurable benchmark thresholds:
+### 6.5. Hardware-Aware Model Evaluation Harness & Candidate Models
+Configurable benchmark thresholds and model candidate definitions:
 ```java
+public record ModelCandidate(
+    String id,
+    String backend,
+    InferenceCapability capability
+) {}
+
 public record InferenceBenchmarkThresholds(
     Duration maxP95Latency,
     Duration maxTimeout,
@@ -296,11 +307,47 @@ public record InferenceBenchmarkThresholds(
     double minGroundingValidityRate
 ) {}
 ```
-Evaluates candidate models against gold-standard fixtures:
+Evaluates candidate models (`smollm2:135m`, `smollm2:360m`, `llama3.2:1b`) against gold-standard fixtures:
 - `CASE-001-money-mule`
 - `CASE-002-smurfing`
 - `CASE-003-account-takeover`
 - `CASE-004-low-risk-neutral`
+
+### 6.6. Three-Tier Testing Architecture & Containerized Inference Integration (History 30)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ TIER 1: UNIT TESTS (Zero Docker, Fast, Deterministic)        │
+│ FakeInferenceClient / Mocks                                 │
+│ - Schema validation, PII masking, deterministic policies    │
+│ - ClaimGroundingValidator & Graceful Degradation (I-VEC-009)│
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│ TIER 2: INTEGRATION TESTS (Testcontainers + Real SLM)       │
+│ OllamaInferenceClientIT                                     │
+│ - Testcontainers Ollama (smollm2:360m-instruct-q5_K_M)      │
+│ - Real HTTP RestClient transport over Docker network        │
+│ - Real SLM JSON instruction following & grounding check     │
+└──────────────────────────────┬──────────────────────────────┘
+                               │
+┌──────────────────────────────▼──────────────────────────────┐
+│ TIER 3: BENCHMARK / QUALITY GATE (Comparative Evaluation)   │
+│ ModelEvaluationHarness                                      │
+│ - Multi-model comparison: 135M vs 360M vs 1B (Llama 3.2 1B) │
+│ - Gold-standard fixtures (CASE-001 to CASE-004)             │
+│ - ModelEvaluationReport (schema rate, grounding, P95, RAM)  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Testcontainers Ollama Strategy:
+- **Container Definition**: Isolated `GenericContainer("ollama/ollama:latest")` exposing port 11434.
+- **Model Provisioning**:
+  - *Option A (Pre-baked test image)*: Custom Docker image caching `smollm2:360m-instruct-q5_K_M` (~290MB) for instantaneous cold starts.
+  - *Option B (Dynamic pull with health check)*: Wait strategy polling `GET /api/tags` confirming `smollm2:360m-instruct-q5_K_M` is loaded before executing assertions.
+- **Disentangled SLA Policy**:
+  - Functional Gate (100% JSON valid, 100% evidence references valid, 0 invented IDs, 0 risk mutation) is mandatory and strictly enforced.
+  - Latency benchmarks (P50/P95, tokens/sec) are collected as informative metrics in CPU CI to track regression trends without causing brittle build failures.
 
 ---
 
@@ -319,16 +366,17 @@ Evaluates candidate models against gold-standard fixtures:
 
 ## 8. Verification & Test Plan
 
-1. **Unit Tests**:
+1. **Tier 1: Unit Tests (Fast / Zero Docker)**:
    - `FeatureVectorExtractorTest`: 16-D feature calculations across 7 domains.
    - `FeatureNormalizerTest`: Unit $L_2$ normalization, magnitude preservation, distinguishing low/high intensity profiles with identical direction, and zero-activity neutrality (`I-VEC-008`).
    - `ArchetypeCentroidMatcherTest`: Exact dot-product calculations, weight multipliers, exposing directional similarity and intensity.
    - `ClaimGroundingValidatorTest`: Structured `ClaimType` enforcement, reference integrity, rejecting hallucinated claims.
    - `RecommendedActionPolicyTest`: Deterministic action derivation.
-   - `DefaultInvestigationServiceTest`: Dossier generation, graceful degradation returning `INFERENCE_UNAVAILABLE`.
-2. **Integration Tests (Testcontainers PostgreSQL + pgvector)**:
+   - `DefaultInvestigationServiceTest`: Dossier generation with `FakeInferenceClient`, graceful degradation returning `INFERENCE_UNAVAILABLE` (`I-VEC-009`).
+2. **Tier 2: Integration Tests (Testcontainers)**:
    - `PostgresEntityFeaturesDaoIT`: Persistence of `vector(16)`, magnitude, and volumes.
-   - `PostgresArchetypeCentroidDaoIT`: Retrieval and SQL dot-product execution.
+   - `PostgresArchetypeCentroidDaoIT`: Retrieval and SQL dot-product execution with self-healing seeds.
    - `PostgresEmbeddingJobDaoIT`: Idempotent enqueue, `FOR UPDATE SKIP LOCKED` claims, and token lease renewals.
-3. **Model Evaluation Harness**:
-   - `ModelEvaluationHarnessTest`: Automated benchmark gate against gold-standard fixtures asserting 100% JSON validity, 100% grounding validity, and latency compliance against configured hardware thresholds.
+   - `OllamaInferenceClientIT` (`REQ-VEC-012`, `I-VEC-010`): Testcontainers Ollama container validating real HTTP communication, structured generation with `smollm2:360m-instruct-q5_K_M`, JSON parsing, and grounding validation inside Docker network boundaries.
+3. **Tier 3: Model Evaluation Harness & Comparative Gate**:
+   - `ModelEvaluationHarnessTest`: Automated comparative benchmark across model candidates (`smollm2:135m`, `smollm2:360m`, `llama3.2:1b`) against gold-standard fixtures asserting 100% JSON validity, 100% grounding validity, and reporting P50/P95 latency trends.

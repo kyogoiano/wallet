@@ -1,9 +1,9 @@
-# 📋 Specification: SPEC-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Investigation Intelligence (Histories 12, 13, 14, 15, 18, 19, 20, 24, 25, 26, 27, 28)
+# 📋 Specification: SPEC-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Investigation Intelligence (Histories 12, 13, 14, 15, 18, 19, 20, 24, 25, 26, 27, 28, 29, 30)
 
 - **Status**: Reviewed & Ratified
 - **Author**: Antigravity Financial & Risk Engineering Team
-- **Date**: 2026-09-02
-- **Source Reference**: [`.histories/history12.txt`](file:///.histories/history12.txt), [`.histories/history13.txt`](file:///.histories/history13.txt), [`.histories/history14.txt`](file:///.histories/history14.txt), [`.histories/history15.txt`](file:///.histories/history15.txt), [`.histories/history18.txt`](file:///.histories/history18.txt), [`.histories/history19.txt`](file:///.histories/history19.txt), [`.histories/history20.txt`](file:///.histories/history20.txt), [`.histories/history24.txt`](file:///.histories/history24.txt), [`.histories/history25.txt`](file:///.histories/history25.txt), [`.histories/history26.txt`](file:///.histories/history26.txt), [`.histories/history27.txt`](file:///.histories/history27.txt), [`.histories/history28.txt`](file:///.histories/history28.txt)
+- **Date**: 2026-09-03
+- **Source Reference**: [`.histories/history12.txt`](file:///.histories/history12.txt), [`.histories/history13.txt`](file:///.histories/history13.txt), [`.histories/history14.txt`](file:///.histories/history14.txt), [`.histories/history15.txt`](file:///.histories/history15.txt), [`.histories/history18.txt`](file:///.histories/history18.txt), [`.histories/history19.txt`](file:///.histories/history19.txt), [`.histories/history20.txt`](file:///.histories/history20.txt), [`.histories/history24.txt`](file:///.histories/history24.txt), [`.histories/history25.txt`](file:///.histories/history25.txt), [`.histories/history26.txt`](file:///.histories/history26.txt), [`.histories/history27.txt`](file:///.histories/history27.txt), [`.histories/history28.txt`](file:///.histories/history28.txt), [`.histories/history29.txt`](file:///.histories/history29.txt), [`.histories/history30.txt`](file:///.histories/history30.txt)
 - **Target Release / Milestone**: Wallet Service V4.x — Fraud Intelligence Evolution (Phase 0.7)
 - **Architectural Mantra**: *"Use deterministic behavioral embeddings and pgvector for quantitative fraud intelligence, with a pluggable local Small Language Model for constrained, evidence-grounded investigation synthesis."*
 
@@ -13,7 +13,7 @@
 
 Graph topology identifies *who is connected to whom*, while **Behavioral Vector Embeddings** identify *who acts like a fraudster*.
 
-Following the architectural consensus refined across **Histories 20, 24, 25, 26, 27, and 28**, this specification defines:
+Following the architectural consensus refined across **Histories 20, 24, 25, 26, 27, 28, 29, and 30**, this specification defines:
 1. **Behavioral Profile Feature Extraction (16-D Grouped, Bounded & Magnitude-Preserved)**:
    - Extracting 16 normalized transactional metrics organized into 7 semantic feature groups.
    - Dual representation: unit direction vector ($\|\vec{v}\|_2 = 1.0$) for directional similarity alongside `feature_magnitude` ($\|\vec{d}\|_2$) to retain behavioral intensity.
@@ -29,11 +29,24 @@ Following the architectural consensus refined across **Histories 20, 24, 25, 26,
 5. **Hard Sanitization Boundary & Evidence Grounding**:
    - `SanitizedInferenceContext` acts as an architectural air-gap preventing unmasked PII from ever reaching inference models.
    - Programmatic `ClaimGroundingValidator` verifies that every narrative claim maps to atomic evidence IDs (`GRAPH-001`, `TEMPORAL-014`).
-6. **Pluggable Local Inference SPI & Graceful Degradation**:
-   - Model-agnostic `LocalInferenceClient` SPI with configurable profiles (`FAST`, `BALANCED`, `HIGH_QUALITY`).
-   - If inference fails or times out, deterministic evidence and actions are returned with `InvestigationGenerationStatus.INFERENCE_UNAVAILABLE` (`I-VEC-009`).
-7. **Model Evaluation & Benchmark Gate**:
-   - Reproducible benchmark harness evaluating JSON Schema adherence, zero-hallucination rate, and hardware-profiled latency thresholds before model selection.
+6. **Minimum Viable Intelligence Strategy & Compact SLM Hierarchy (History 29)**:
+   - Start with the smallest model capable of meeting the contract, scaling only if benchmarks prove necessity.
+   - LLM operates strictly as a **Structured Renderer**: 95% of intelligence is deterministic (risk calculation, feature extraction, graph traversal, action policy ownership); 5% is language generation (human-readable grounded investigation narrative).
+   - Calibrated SLM ladder using the compact [SmolLM2](https://github.com/huggingface/smollm) family:
+     - `smollm2:135m`: Smoke tests, CI fast contract verification, prompt boundary stress testing.
+     - `smollm2:360m-instruct-q5_K_M` (🥇 **Default Production Baseline & Integration Target**): ~290MB footprint, capable instruction follower, strict JSON adherence, zero hallucinated IDs.
+     - `llama3.2:1b`: Quality fallback for complex multi-claim cases or grounding validation retries.
+     - `3B–7B`: Deferred until benchmark empirical evidence justifies the footprint.
+7. **Resilient Cascading Fallback Flow (Histories 27 & 29)**:
+   - `360M Default` $\rightarrow$ on timeout, schema violation, or ungrounded claims $\rightarrow$ `1.7B Quality Retry` $\rightarrow$ on failure $\rightarrow$ **Deterministic Evidence-Only Dossier** (`status = INFERENCE_UNAVAILABLE`).
+   - Investigation generation is **never blocked** by generative model downtime or generation failures.
+8. **Three-Tier Testing Taxonomy & Real Runtime Verification (Histories 29 & 30)**:
+   - **Tier 1 (Unit Tests)**: Fast, deterministic, zero Docker, using `FakeInferenceClient` to validate JSON schemas, grounding rules, action ownership, and degradation.
+   - **Tier 2 (Integration Tests with Testcontainers)**: Validates `OllamaInferenceClientIT` inside Docker network against real containerized Ollama running `smollm2:360m-instruct-q5_K_M`.
+   - **Tier 3 (Benchmark / Evaluation Gate)**: `ModelEvaluationHarness` executing comparative benchmarks across candidate models (`ModelCandidate`) against gold-standard fixtures.
+9. **Disentangled SLA Philosophy (History 30)**:
+   - **Functional Gates (Strict)**: 100% JSON Schema validity, 100% evidence reference fidelity, 0 invented IDs, 0 risk score mutation.
+   - **Performance Benchmarks (Informative in CPU CI)**: P50/P95 latency, tokens/sec, and RSS memory tracked for regression analysis without failing builds unless reference hardware is provisioned.
 
 ```mermaid
 flowchart TD
@@ -52,17 +65,20 @@ flowchart TD
         ContextBuilder --> EvidenceBundle[InvestigationEvidence Record]
     end
 
-    subgraph Synthesizer ["Evidence-Grounded Investigation Synthesis"]
+    subgraph Synthesizer ["Evidence-Grounded Cascading Synthesis (Histories 29 & 30)"]
         ContextBuilder & EvidencePolicy --> Sanitizer[PII Masking & Surrogate Tokenization]
-        Sanitizer --> InferenceSPI["LocalInferenceClient (SPI)\n(Ollama / vLLM / llama.cpp)"]
-        InferenceSPI --> SLM["Local SLM (Balanced Profile: 3B–7B)"]
-        SLM --> GroundingCheck{"ClaimGroundingValidator\n(IDs Valid & Facts Consistent?)"}
-        GroundingCheck -->|Yes: Valid| Narrative[InvestigationNarrative Record]
-        GroundingCheck -->|No: Ungrounded| Retry["Retry or Fallback to Quality Profile"]
-        Retry --> Narrative
+        Sanitizer --> InferenceSPI["LocalInferenceClient (SPI)\n(Spring RestClient / HTTP/2)"]
+        InferenceSPI --> SLM_360M["SmolLM2 360M Instruct\n(Primary Baseline ~290MB)"]
+        SLM_360M --> GroundingCheck{"ClaimGroundingValidator\n(IDs Valid & Facts Consistent?)"}
+        GroundingCheck -->|Valid| Narrative[InvestigationNarrative Record]
+        GroundingCheck -->|Invalid / Timeout| Fallback_17B["llama3.2:1b 1.3B Instruct\n(Quality Fallback Retry)"]
+        Fallback_17B --> GroundingCheck2{"ClaimGroundingValidator\n(Quality Gate)"}
+        GroundingCheck2 -->|Valid| Narrative
+        GroundingCheck2 -->|Fail / Unavailable| EvidenceOnly["Deterministic-Only Dossier\n(status: INFERENCE_UNAVAILABLE)"]
     end
 
     EvidenceBundle & Narrative & EvidencePolicy --> Dossier[FraudInvestigationDossier]
+    EvidenceBundle & EvidenceOnly & EvidencePolicy --> Dossier
 ```
 
 ---
@@ -96,6 +112,8 @@ flowchart TD
   - Closed enum `RecommendedAction` derived via deterministic policy before inference.
 - **`REQ-VEC-011` (Asynchronous Embedding Job Queue & Worker Pool - History 28)**:
   - Durable PostgreSQL job queue `fraud_embedding_jobs` (`status`, `as_of`, `worker_token`, `lease_until`, `available_at`) claimed via `SELECT ... FOR UPDATE SKIP LOCKED` by `EmbeddingJobWorker`, guaranteeing zero hot-path overhead (`I-VEC-007`).
+- **`REQ-VEC-012` (Containerized Local SLM Integration Testing with Testcontainers - History 30)**:
+  - Containerized integration test validating the real end-to-end inference path (`InvestigationContextBuilder` $\rightarrow$ `PiiMaskingService` $\rightarrow$ `StructuredInferenceRequest` $\rightarrow$ `OllamaInferenceClient` $\rightarrow$ Containerized Ollama `smollm2:360m-instruct-q5_K_M` $\rightarrow$ `ClaimGroundingValidator` $\rightarrow$ `FraudInvestigationDossier`) inside Docker network boundaries.
 
 ### Non-Goals
 - Allowing the LLM to classify risk scores, authorize transactions, or invent operational actions.
@@ -117,6 +135,7 @@ flowchart TD
 - **`I-VEC-007` (Zero Hot-Path Impact)**: Embedding extraction, centroid matching, and dossier generation MUST NOT execute in the synchronous transfer path.
 - **`I-VEC-008` (Zero Activity Neutrality - History 27)**: When an entity has zero transactional activity in the observation window ($M = \|\vec{d}\|_2 = 0.0$), the behavioral vector MUST evaluate to the inactive zero vector ($\vec{0}$), archetype matching MUST yield $\text{similarity} = 0.0$ and $\text{behavioral\_risk} = 0.0$, and the top archetype MUST be reported as `"NONE"`.
 - **`I-VEC-009` (Investigation Resilience & Graceful Degradation - History 27)**: If the local SLM is offline, times out, or fails schema validation, the system MUST still return the complete deterministic dossier (`evidence`, `classification`, `allowedActions`) with `status = INFERENCE_UNAVAILABLE` or `VALIDATION_FAILED`, guaranteeing that investigation availability is never blocked by generative model failures.
+- **`I-VEC-010` (Real Inference Path Verification - History 30)**: The production inference adapter MUST be verified against a real local inference runtime in an integration environment. Mock-based tests alone are insufficient to validate structured output, transport serialization, model instruction following, or grounding behavior.
 
 ---
 
@@ -239,21 +258,24 @@ fraud:
     inference:
       profile: balanced
       profiles:
-        fast:
-          model: llama3.2:1b
-          max-tokens: 256
+        efficient:
+          model: smollm2:135m
+          max-context-tokens: 2048
+          max-output-tokens: 384
           temperature: 0.0
-          timeout: 500ms
+          timeout: 1s
         balanced:
-          model: llama3.2:3b
-          max-tokens: 512
+          model: smollm2:360m-instruct-q5_K_M
+          max-context-tokens: 4096
+          max-output-tokens: 512
           temperature: 0.0
-          timeout: 2s
-        high-quality:
-          model: llama3.1:8b
-          max-tokens: 1024
+          timeout: 3s
+        quality:
+          model: llama3.2:1b
+          max-context-tokens: 8192
+          max-output-tokens: 768
           temperature: 0.0
-          timeout: 5s
+          timeout: 8s
 ```
 
 ### REQ-VEC-006 & REQ-VEC-010: Dossier Assembly, Graceful Degradation & Deterministic Actions (Histories 25, 26, 27)
@@ -352,9 +374,59 @@ Sample Structured Output:
   2. **Fact Consistency**: Statements referring to counts, windows, or archetypes must match the atomic attributes in `evidenceItems[id].facts`.
   3. Rejects hallucinated claims and triggers regeneration or fallback to quality profile.
 
-### REQ-VEC-007: Hardware-Aware Benchmark Gate (Histories 24, 25, 26)
-- Evaluates candidate models on reference hardware profiles (`reference-gpu`, `cpu-edge`):
-  - **Time to First Token (TTFT)**: P95 $< 150\text{ms}$.
-  - **Structured Completion**: P95 $< 1000\text{ms}$ (interactive) / P95 $< 5000\text{ms}$ (async dossier generation).
-  - **JSON Schema Validity**: 100%.
-  - **Claim Grounding Validity**: 100%.
+### REQ-VEC-007: Hardware-Aware Benchmark Gate & Model Candidates (Histories 24, 25, 26, 29, 30)
+- Evaluates configurable candidate models:
+  ```java
+  public record ModelCandidate(
+      String id,
+      String backend,
+      InferenceCapability capability
+  ) {}
+  ```
+- Evaluates candidate models against gold-standard fixtures (`CASE-001` through `CASE-004`).
+- **Disentangled SLA Philosophy (History 30)**:
+  - **Functional Gates (Mandatory / Build-Breaking)**:
+    - **JSON Schema Validity**: 100%.
+    - **Evidence Grounding Validity**: 100% (zero invented IDs or ungrounded claims).
+    - **Deterministic Boundary Invariant**: Zero mutation of risk classifications, scores, or allowed action sets.
+  - **Performance Benchmarks (Informative in CPU CI / Gated on Reference Hardware)**:
+    - P50 and P95 latency.
+    - Tokens per second.
+    - Cold-start time and RSS memory footprint.
+    - On provisioned reference hardware: P95 $< 1000\text{ms}$ (interactive) / P95 $< 5000\text{ms}$ (async dossier generation).
+
+### REQ-VEC-012: Containerized Local SLM Integration Testing with Testcontainers (History 30)
+- The system MUST provide an integration-test suite validating the complete local inference pipeline against a real containerized Small Language Model (SLM) executing inside Docker network boundaries.
+- **End-to-End Verification Pipeline**:
+  ```text
+  FraudInvestigationContext
+          ↓
+  PiiMaskingService
+          ↓
+  StructuredInferenceRequest
+          ↓
+  LocalInferenceClient (RestClient)
+          ↓
+  Containerized Ollama (smollm2:360m-instruct-q5_K_M)
+          ↓
+  Structured JSON Response
+          ↓
+  JSON Schema Validation
+          ↓
+  ClaimGroundingValidator
+          ↓
+  FraudInvestigationDossier
+  ```
+- **Three-Tier Testing Taxonomy**:
+  1. **Tier 1 (Unit Tests)**: Uses `FakeInferenceClient` (fast, deterministic, zero Docker) to test claim validation, prompt sanitization, action policies, and graceful degradation.
+  2. **Tier 2 (Integration Tests with Testcontainers)**: `OllamaInferenceClientIT` starts an isolated Ollama container, verifies model availability (`smollm2:360m-instruct-q5_K_M`), issues real HTTP requests, and validates schema compliance and grounding.
+  3. **Tier 3 (Benchmark / Evaluation Gate)**: `ModelEvaluationHarness` runs comparative evaluation across candidates (`smollm2:135m`, `smollm2:360m`, `llama3.2:1b`), producing a structured `BenchmarkReport`.
+- Configurable Integration Test Profiles:
+  ```yaml
+  fraud:
+    investigation:
+      integration-test:
+        enabled: true
+        runtime: ollama
+        model: smollm2:360m-instruct-q5_K_M
+  ```

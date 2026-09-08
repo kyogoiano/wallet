@@ -1,0 +1,402 @@
+Sim — **acho uma excelente estratégia**, especialmente para o estágio atual do Wallet Service. Eu até mudaria a filosofia do SPEC-000.7:
+
+> **Começar pelo menor modelo que consegue cumprir o contrato, e escalar somente se os benchmarks provarem necessidade.**
+
+A família [SmolLM2](https://github.com/huggingface/smollm/blob/main/text/README.md?utm_source=chatgpt.com) é particularmente interessante porque já oferece exatamente essa escada: **135M → 360M → 1.7B**. ([GitHub][1])
+
+## Minha recomendação
+
+### 🥇 Default inicial: SmolLM2 360M Instruct
+
+Eu começaria com **360M**, não 135M.
+
+| Modelo    | Papel recomendado            |
+| --------- | ---------------------------- |
+| **135M**  | Smoke tests / contract tests |
+| **360M**  | 🥇 Default para investigação |
+| **1.7B**  | Fallback de qualidade        |
+| **3B–7B** | Só se o benchmark justificar |
+
+O 360M é um ponto muito interessante porque ainda é extremamente compacto, mas oferece uma margem maior para:
+
+* seguir instruções;
+* produzir JSON estruturado;
+* resumir evidências;
+* manter referências `GRAPH-001`;
+* obedecer um vocabulário restrito;
+* gerar narrativas curtas e controladas.
+
+A própria família SmolLM2 foi desenhada para uso leve/on-device, com variantes 135M, 360M e 1.7B. ([GitHub][1])
+
+---
+
+# 🧪 Onde o 135M seria excelente
+
+Eu **não descartaria o 135M**. Pelo contrário.
+
+Usaria para desenvolvimento e testes rápidos:
+
+```text
+CI / Local Development
+        │
+        ▼
+SmolLM2-135M
+```
+
+Ele pode validar se nossa arquitetura realmente funciona com um modelo extremamente limitado.
+
+Por exemplo:
+
+```text
+FraudInvestigationContext
+        ↓
+Structured Prompt
+        ↓
+SmolLM2 135M
+        ↓
+JSON
+        ↓
+ClaimGroundingValidator
+```
+
+Se o 135M conseguir cumprir:
+
+* JSON válido;
+* IDs de evidência existentes;
+* nenhuma invenção estrutural;
+
+isso é um **ótimo sinal de que o nosso prompt/contexto está bem desenhado**.
+
+Mas eu não confiaria nele como modelo definitivo para produzir narrativas analíticas mais sofisticadas.
+
+---
+
+# 🎯 O ponto fundamental: nosso caso de uso é muito mais fácil que "chat"
+
+Isso é extremamente importante.
+
+Nós **não estamos pedindo**:
+
+> "Analise livremente esta conta e descubra se é fraude."
+
+Estamos fornecendo algo como:
+
+```json
+{
+  "classification": "HIGH",
+  "allowedActions": [
+    "MANUAL_REVIEW",
+    "TEMPORARY_OUTGOING_RESTRICTION"
+  ],
+  "evidence": [
+    {
+      "id": "GRAPH-001",
+      "type": "SHARED_DEVICE_CLUSTER",
+      "facts": {
+        "sharedAccountCount": 4
+      }
+    },
+    {
+      "id": "TEMPORAL-014",
+      "type": "RAPID_PASS_THROUGH",
+      "facts": {
+        "count": 12,
+        "maxDurationMinutes": 120
+      }
+    }
+  ]
+}
+```
+
+E pedimos apenas:
+
+> **Transforme fatos já calculados em uma narrativa estruturada.**
+
+Isso reduz drasticamente a necessidade de um modelo grande.
+
+---
+
+# 🧠 Eu faria o LLM trabalhar quase como um "structured renderer"
+
+Na prática:
+
+```text
+Deterministic Engine
+        │
+        │ 95% da inteligência
+        ▼
+Evidence Context
+        │
+        │ fatos + IDs + ações permitidas
+        ▼
+Tiny/Small LLM
+        │
+        │ 5% linguagem
+        ▼
+Human-readable Investigation
+```
+
+Essa arquitetura favorece muito modelos pequenos.
+
+---
+
+# 🚀 Minha nova hierarquia de inference profiles
+
+Eu alteraria o SPEC:
+
+```yaml
+fraud:
+  investigation:
+    inference:
+      profile: balanced
+
+      profiles:
+
+        efficient:
+          model: SmolLM2-135M-Instruct
+          max-context-tokens: 2048
+          max-output-tokens: 384
+          temperature: 0.0
+
+        balanced:
+          model: SmolLM2-360M-Instruct
+          max-context-tokens: 4096
+          max-output-tokens: 512
+          temperature: 0.0
+
+        quality:
+          model: SmolLM2-1.7B-Instruct
+          max-context-tokens: 8192
+          max-output-tokens: 768
+          temperature: 0.0
+```
+
+A família inclui explicitamente essas escalas compactas, e o 1.7B é a variante mais capaz da geração SmolLM2. ([GitHub][1])
+
+---
+
+# 🔥 Mas eu faria uma mudança ainda mais importante
+
+Eu **não usaria fallback automático baseado apenas em "modelo falhou"**.
+
+Hoje temos algo como:
+
+```text
+360M
+   │
+Invalid JSON
+   ▼
+Retry
+   │
+Still invalid
+   ▼
+1.7B
+```
+
+Eu faria:
+
+```text
+135M
+  │
+  ├── CI / smoke
+  │
+360M
+  │
+  ├── Normal production
+  │
+  ├── timeout
+  ├── invalid JSON
+  ├── grounding failure
+  │
+  ▼
+1.7B
+  │
+  ├── success → dossier
+  │
+  └── failure
+         │
+         ▼
+Deterministic-only dossier
+```
+
+Ou seja:
+
+```text
+           ┌──────────────┐
+           │ 360M Default │
+           └──────┬───────┘
+                  │
+             Validation
+             /        \
+          Valid      Invalid
+            │           │
+            ▼           ▼
+         Dossier      1.7B
+                         │
+                  /──────────\
+               Valid         Fail
+                 │             │
+                 ▼             ▼
+              Dossier   Evidence-only
+```
+
+**Nunca bloquear a investigação porque o modelo falhou.**
+
+---
+
+# 🧪 Isso torna o Benchmark Harness ainda mais importante
+
+Eu transformaria os modelos em candidatos configuráveis:
+
+```java
+public record ModelCandidate(
+    String id,
+    String backend,
+    InferenceCapability capability
+) {}
+```
+
+Por exemplo:
+
+```text
+Candidates:
+
+SmolLM2-135M-Instruct
+SmolLM2-360M-Instruct
+SmolLM2-1.7B-Instruct
+Qwen-class-small
+```
+
+E o benchmark produz:
+
+| Model | JSON Valid | Grounding | Unsupported Claims | P95 |
+| ----- | ---------: | --------: | -----------------: | --: |
+| 135M  |          ? |         ? |                  ? |   ? |
+| 360M  |          ? |         ? |                  ? |   ? |
+| 1.7B  |          ? |         ? |                  ? |   ? |
+
+A decisão passa a ser baseada em dados.
+
+---
+
+# ⚠️ Um detalhe importante sobre "500M"
+
+Eu não ficaria preso ao número **500M**.
+
+A regra deveria ser:
+
+> **Use o menor modelo que passa no nosso benchmark.**
+
+Então podemos ter:
+
+```text
+135M ❌
+360M ✅
+```
+
+E parar ali.
+
+Não existe benefício arquitetural em usar um modelo de 500M apenas porque parece uma faixa intermediária.
+
+---
+
+# Minha recomendação concreta para o projeto
+
+## Desenvolvimento / CI
+
+```text
+SmolLM2 135M
+```
+
+Para:
+
+* testes do SPI;
+* JSON schema;
+* parsing;
+* timeout handling;
+* fallback;
+* ClaimGroundingValidator.
+
+---
+
+## Produção default
+
+```text
+SmolLM2 360M
+```
+
+Para:
+
+* investigação normal;
+* executive summary;
+* evidence references;
+* narrative curta.
+
+---
+
+## Escala de qualidade
+
+```text
+SmolLM2 1.7B
+```
+
+Somente para:
+
+* retry após grounding failure;
+* casos complexos;
+* investigação manual profunda;
+* benchmark comparison.
+
+---
+
+## 3B+
+
+**Não colocaria no SPEC como default ainda.**
+
+Deixaria apenas como possibilidade:
+
+```text
+Future candidate
+```
+
+Se o benchmark provar que:
+
+```text
+360M < required quality
+```
+
+então subimos:
+
+```text
+360M → 1.7B → 3B
+```
+
+---
+
+## Minha opinião final
+
+Para **esse caso específico**, eu acho que começar com **SmolLM2-360M como baseline principal é uma decisão melhor do que assumir Llama 3B/Qwen 3B desde o início**.
+
+Porque nosso LLM:
+
+* não calcula risco;
+* não descobre fraude;
+* não decide ações;
+* não interpreta dados brutos;
+* não acessa ferramentas;
+* não recebe PII;
+* não toma decisões financeiras.
+
+Ele apenas faz:
+
+> **Evidence → Grounded structured narrative**
+
+Isso é exatamente o tipo de problema onde vale a pena tentar um SLM extremamente pequeno primeiro.
+
+Eu colocaria formalmente no PLAN-000.7:
+
+> **"Minimum Viable Intelligence Strategy: benchmark SmolLM2-135M and 360M first; promote the smallest model satisfying deterministic grounding and schema gates to the default inference profile."**
+
+Acho que isso deixa o SPEC muito mais alinhado com a filosofia do projeto: **mínima infraestrutura, máxima determinismo e só adicionar capacidade quando os dados provarem necessidade**. ([GitHub][1])
+
+[1]: https://github.com/huggingface/smollm/blob/main/text/README.md?utm_source=chatgpt.com "smollm/text/README.md at main · huggingface/smollm · GitHub"

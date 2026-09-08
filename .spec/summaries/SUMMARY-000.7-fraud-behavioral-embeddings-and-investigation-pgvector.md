@@ -1,8 +1,8 @@
 # 📊 Implementation Summary: SPEC-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Investigation Intelligence
 
-- **Associated Spec**: [`SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
-- **Associated Plan**: [`PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
-- **Associated Tasks**: [`TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Spec**: [`../SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Plan**: [`../PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Tasks**: [`../TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
 - **Status**: ✅ **Implemented & Verified**
 - **Date**: 2026-09-02
 - **Author**: Antigravity Financial & Risk Engineering Team
@@ -43,6 +43,7 @@ Phase 0.7 introduces **Behavioral Pattern Intelligence and Air-Gapped Investigat
 | `I-VEC-007` | Zero Hot-Path Impact (Asynchronous Job Queue) | `EmbeddingJobWorkerTest` | 🟢 PASS |
 | `I-VEC-008` | Zero Activity Neutrality ($M = 0 \implies \vec{0}, \text{risk} = 0$) | `ArchetypeCentroidMatcherTest` | 🟢 PASS |
 | `I-VEC-009` | Investigation Resilience & Graceful Degradation | `DefaultInvestigationServiceTest` | 🟢 PASS |
+| `I-VEC-010` | Real Inference Path Verification (Containerized SLM) | `OllamaInferenceClientIT` | 🟢 PLANNED (Phase 5.5) |
 | `I-PROP-005`| Risk Dimension Isolation (No mutation to direct/graph risk) | `PostgresEntityFeaturesDaoIT` | 🟢 PASS |
 | `I-SDD-002` | Practical Verification Guide & Seed Data Gate | Section 3 of this document | 🟢 PASS |
 
@@ -51,17 +52,16 @@ Phase 0.7 introduces **Behavioral Pattern Intelligence and Air-Gapped Investigat
 ## 3. Practical Verification Guide (I-SDD-002 Gate)
 
 ### 3.1. Seed Data Fixtures
-The seed fixtures in `docker/init/schema.sql` provide calibrated fraud archetypes and test entities:
+The seed fixtures in `../../docker/init/schema.sql` provide calibrated fraud archetypes and test entities:
 
-```sql
+```bash
+docker exec -i wallet-postgres psql -U wallet -d wallet -c "
 -- View seeded archetypes
-SELECT archetype_id, description, risk_weight, centroid_vector::text 
-FROM fraud_archetype_centroids;
 
 -- Target entity with high mule pattern
 INSERT INTO fraud_entities (id, entity_type, direct_risk, graph_risk, behavioral_risk, propagated_risk, final_risk)
 VALUES ('0a35fb14-75ee-4125-943b-500893c30d33', 'WALLET', 0.1, 0.8, 0.0, 0.6, 0.0)
-ON CONFLICT (id) DO UPDATE SET graph_risk = 0.8;
+ON CONFLICT (id) DO UPDATE SET graph_risk = 0.8;"
 ```
 
 ### 3.2. Asynchronous Job Enqueue
@@ -151,7 +151,8 @@ curl -X GET "http://localhost:8080/api/v1/fraud/intelligence/investigation/dossi
 ```
 
 ### 3.5. State Validation Queries
-```sql
+```bash
+docker exec -i wallet-postgres psql -U wallet -d wallet -c "
 -- 1. Validate pgvector storage and magnitude
 SELECT entity_id, behavioral_vector::text, feature_magnitude, transaction_count, transaction_volume 
 FROM fraud_entity_features;
@@ -164,7 +165,7 @@ WHERE id = '0a35fb14-75ee-4125-943b-500893c30d33';
 -- 3. Validate completed jobs in fraud_embedding_jobs
 SELECT id, entity_id, status, attempt_count, completed_at, last_error 
 FROM fraud_embedding_jobs 
-ORDER BY created_at DESC;
+ORDER BY created_at DESC;"
 ```
 
 ---

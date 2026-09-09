@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-000.2 — DLQ Resilience, EXHAUSTED Status & Spring Modulith Isolation
 
-- **Associated Spec**: [`SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md)
+- **Associated Spec**: [`../SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md)
 - **Status**: Approved
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-28
@@ -95,7 +95,7 @@ stateDiagram-v2
 
 ## 3. Data Model & Schema Changes
 
-### Schema Alterations in `docker/init/schema.sql`
+### Schema Alterations in `../../docker/init/schema.sql`
 
 ```sql
 ALTER TABLE dlq_operations DROP CONSTRAINT IF EXISTS dlq_status_chk;

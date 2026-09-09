@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-001.2 — Savings Plans and Dynamic Savings Rules Management
 
 - **Associated Spec**: [`SPEC-001.2-savings-plans-and-rules-management.md`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md)
-- **Associated Plan**: [`PLAN-001.2-savings-plans-and-rules-management.md`](file:///.spec/PLAN-001.2-savings-plans-and-rules-management.md)
-- **Associated Tasks**: [`TASKS-001.2-savings-plans-and-rules-management.md`](file:///.spec/TASKS-001.2-savings-plans-and-rules-management.md)
+- **Associated Plan**: [`PLAN-001.2-savings-plans-and-rules-management.md`](file:///.spec/plans/PLAN-001.2-savings-plans-and-rules-management.md)
+- **Associated Tasks**: [`TASKS-001.2-savings-plans-and-rules-management.md`](file:///.spec/tasks/TASKS-001.2-savings-plans-and-rules-management.md)
 - **Status**: Completed / Verified
 - **Execution Date**: 2026-08-26
 - **Author / Agent**: Antigravity Financial Architecture Team

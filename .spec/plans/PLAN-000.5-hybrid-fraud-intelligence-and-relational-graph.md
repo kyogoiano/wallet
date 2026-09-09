@@ -1,10 +1,10 @@
 # 📐 Architecture Plan: PLAN-000.5 — Hybrid Fraud Intelligence & Relational Graph Projection
 
-- **Associated Spec**: [`SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
+- **Associated Spec**: [`../SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
 - **Status**: Approved & Ready for Tasks Breakdown
 - **Author**: Antigravity Financial & Risk Engineering Team
 - **Date**: 2026-08-30
-- **Source Reference**: [`.histories/history12.txt`](file:///.histories/history12.txt), [`.histories/history13.txt`](file:///.histories/history13.txt), [`.histories/history14.txt`](file:///.histories/history14.txt), [`.histories/history15.txt`](file:///.histories/history15.txt), [`.histories/history16.txt`](file:///.histories/history16.txt)
+- **Source Reference**: [`../../.histories/history12.txt`](file:///.histories/history12.txt), [`../../.histories/history13.txt`](file:///.histories/history13.txt), [`../../.histories/history14.txt`](file:///.histories/history14.txt), [`../../.histories/history15.txt`](file:///.histories/history15.txt), [`../../.histories/history16.txt`](file:///.histories/history16.txt)
 
 ---
 

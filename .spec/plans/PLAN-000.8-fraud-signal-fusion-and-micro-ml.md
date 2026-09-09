@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-000.8 — Fraud Signal Fusion, Micro-ML & Hand-Rolled Investigation Orchestration
 
-- **Associated Spec**: [`SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)
+- **Associated Spec**: [`../SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)
 - **Status**: Ready for Implementation (Histories 15, 19, 21, 22, 31, 32, 33, 34)
 - **Author**: Antigravity Financial & Risk Engineering Team
 - **Date**: 2026-09-08
@@ -140,7 +140,7 @@ br.com.wallet.fraud.fusion
 
 ## 3. Data Model & Schema Changes
 
-### PostgreSQL Schema (`docker/init/schema.sql`)
+### PostgreSQL Schema (`../../docker/init/schema.sql`)
 
 ```sql
 -- 1. Hand-Rolled Durable Job Queue with Partial Unique Index Coalescing (REQ-FUSION-004, REQ-FUSION-009, REQ-FUSION-013)
@@ -249,7 +249,7 @@ For each active signal group $s \in \{\text{direct}, \text{graph-group}, \text{b
 
 ## 5. Pure Java Embedded Micro-ML Architecture & Feature Versioning
 
-- **Dependency**: `com.microsoft.onnxruntime:onnxruntime` in `fraud/build.gradle`.
+- **Dependency**: `com.microsoft.onnxruntime:onnxruntime` in `../../fraud/build.gradle`.
 - **Feature Contract Versioning (`I-FUSION-008`)**:
   ```java
   public record MlFeatureVector(int featureVersion, List<String> featureNames, float[] values) {}

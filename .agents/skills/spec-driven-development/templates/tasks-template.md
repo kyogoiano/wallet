@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-XXX — [Feature Title]
 
 - **Associated Spec**: [`SPEC-XXX.md`](file:///.spec/SPEC-XXX.md)
-- **Associated Plan**: [`PLAN-XXX.md`](file:///.spec/PLAN-XXX.md)
+- **Associated Plan**: [`PLAN-XXX.md`](file:///.spec/plans/PLAN-XXX.md)
 - **Status**: Not Started | In Progress | Completed
 - **Execution Rule**: Execute all `[MUST]` tasks first. `[SHOULD]` and `[COULD]` are locked until `[MUST]` criteria are green (`I-SDD-004`).
 

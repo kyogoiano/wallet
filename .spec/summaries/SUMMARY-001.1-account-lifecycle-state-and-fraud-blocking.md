@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-001.1 — Account Lifecycle State & Persistent Fraud Blocking Engine
 
 - **Associated Spec**: [`SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md)
-- **Associated Plan**: [`PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md)
-- **Associated Tasks**: [`TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md)
+- **Associated Plan**: [`PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/plans/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md)
+- **Associated Tasks**: [`TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/tasks/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md)
 - **Status**: Completed / Verified
 - **Execution Date**: 2026-08-23
 - **Author / Agent**: Antigravity Financial Architecture Team

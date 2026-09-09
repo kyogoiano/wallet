@@ -12,12 +12,15 @@ All initiatives follow a strict, deterministic four-artifact lifecycle:
 .spec/
 ├── ROADMAP.md                                   # Multi-Phase Strategic Architecture & Milestones
 ├── README.md                                    # This Master Taxonomy & Navigation Index
-├── SPEC-XXX-<slug>.md                           # Business Intent, Invariants, MoSCoW Requirements (<= 250 lines)
-├── PLAN-XXX-<slug>.md                           # Modulith Boundaries, ADRs, Concurrency & DB Schemas
-├── TASKS-XXX-<slug>.md                          # Atomic TDD Breakdown with Active Task Cards ([MUST] prioritized)
+├── SPEC-XXX-<slug>.md                           # Product & Tech Intent, Invariants, MoSCoW Requirements (<= 250 lines)
+├── plans/
+│   └── PLAN-XXX-<slug>.md                       # Modulith Boundaries, ADRs, Concurrency & DB Schemas
+├── tasks/
+│   └── TASKS-XXX-<slug>.md                      # Atomic TDD Breakdown with Active Task Cards ([MUST] prioritized)
 └── summaries/
     └── SUMMARY-XXX-<slug>.md                    # Traceability Audit, Test Coverage, Practical Verification Guide
 ```
+
 
 ---
 
@@ -27,11 +30,11 @@ All initiatives follow a strict, deterministic four-artifact lifecycle:
 
 | Phase | Module | Spec | Plan | Tasks | Summary | Status | Invariants Owned |
 | :--- | :--- | :--- | :--- | :--- | :--- | :---: | :--- |
-| **0.0** | `ledger` | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | [`PLAN-000`](file:///.spec/PLAN-000-architecture-alignment-modulith-baseline.md) | [`TASKS-000`](file:///.spec/TASKS-000-architecture-alignment-modulith-baseline.md) | [`SUMMARY-000`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md) | 🟢 Verified | `I-MODULITH-001`, `I-MODULITH-002` |
-| **0.1** | `fraud` / `infra` | [`SPEC-000.1`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md) | [`PLAN-000.1`](file:///.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md) | [`TASKS-000.1`](file:///.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md) | [`SUMMARY-000.1`](file:///.spec/summaries/SUMMARY-000.1-migrate-redis-to-dragonflydb.md) | 🟢 Verified | `I-DF-001` to `I-DF-005` |
-| **0.2** | `dlq` | [`SPEC-000.2`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md) | [`PLAN-000.2`](file:///.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md) | [`TASKS-000.2`](file:///.spec/TASKS-000.2-dlq-resilience-and-exhausted-operations.md) | [`SUMMARY-000.2`](file:///.spec/summaries/SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md) | 🟢 Verified | `I-DLQ-001` to `I-DLQ-004` |
-| **0.3** | `ledger` / `infra` | [`SPEC-000.3`](file:///.spec/SPEC-000.3-async-command-exception-handling.md) | [`PLAN-000.3`](file:///.spec/PLAN-000.3-async-command-exception-handling.md) | [`TASKS-000.3`](file:///.spec/TASKS-000.3-async-command-exception-handling.md) | [`SUMMARY-000.3`](file:///.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md) | 🟢 Verified | `I-OPS-001` to `I-OPS-004` |
-| **0.4** | `infra` / `core` | [`SPEC-000.4`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md) | [`PLAN-000.4`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) | [`TASKS-000.4`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) | [`SUMMARY-000.4`](file:///.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md) | 🟢 Verified | `I-OBS-001`, `I-OBS-002` |
+| **0.0** | `ledger` | [`SPEC-000`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md) | [`PLAN-000`](file:///.spec/plans/PLAN-000-architecture-alignment-modulith-baseline.md) | [`TASKS-000`](file:///.spec/tasks/TASKS-000-architecture-alignment-modulith-baseline.md) | [`SUMMARY-000`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md) | 🟢 Verified | `I-MODULITH-001`, `I-MODULITH-002` |
+| **0.1** | `fraud` / `infra` | [`SPEC-000.1`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md) | [`PLAN-000.1`](file:///.spec/plans/PLAN-000.1-migrate-redis-to-dragonflydb.md) | [`TASKS-000.1`](file:///.spec/tasks/TASKS-000.1-migrate-redis-to-dragonflydb.md) | [`SUMMARY-000.1`](file:///.spec/summaries/SUMMARY-000.1-migrate-redis-to-dragonflydb.md) | 🟢 Verified | `I-DF-001` to `I-DF-005` |
+| **0.2** | `dlq` | [`SPEC-000.2`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md) | [`PLAN-000.2`](file:///.spec/plans/PLAN-000.2-dlq-resilience-and-exhausted-operations.md) | [`TASKS-000.2`](file:///.spec/tasks/TASKS-000.2-dlq-resilience-and-exhausted-operations.md) | [`SUMMARY-000.2`](file:///.spec/summaries/SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md) | 🟢 Verified | `I-DLQ-001` to `I-DLQ-004` |
+| **0.3** | `ledger` / `infra` | [`SPEC-000.3`](file:///.spec/SPEC-000.3-async-command-exception-handling.md) | [`PLAN-000.3`](file:///.spec/plans/PLAN-000.3-async-command-exception-handling.md) | [`TASKS-000.3`](file:///.spec/tasks/TASKS-000.3-async-command-exception-handling.md) | [`SUMMARY-000.3`](file:///.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md) | 🟢 Verified | `I-OPS-001` to `I-OPS-004` |
+| **0.4** | `infra` / `core` | [`SPEC-000.4`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md) | [`PLAN-000.4`](file:///.spec/plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) | [`TASKS-000.4`](file:///.spec/tasks/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) | [`SUMMARY-000.4`](file:///.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md) | 🟢 Verified | `I-OBS-001`, `I-OBS-002` |
 
 ---
 
@@ -39,10 +42,10 @@ All initiatives follow a strict, deterministic four-artifact lifecycle:
 
 | Phase | Module | Spec | Plan | Tasks | Summary | Status | Invariants Owned |
 | :--- | :--- | :--- | :--- | :--- | :--- | :---: | :--- |
-| **0.5** | `fraud.intelligence` | [`SPEC-000.5`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | [`PLAN-000.5`](file:///.spec/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | [`TASKS-000.5`](file:///.spec/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | [`SUMMARY-000.5`](file:///.spec/summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | 🟢 Verified | `I-GRAPH-001` to `I-GRAPH-004` |
-| **0.6** | `fraud.propagation` | [`SPEC-000.6`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md) | [`PLAN-000.6`](file:///.spec/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md) | [`TASKS-000.6`](file:///.spec/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md) | [`SUMMARY-000.6`](file:///.spec/summaries/SUMMARY-000.6-fraud-risk-propagation-and-temporal-decay.md) | 🟢 Verified | `I-PROP-001` to `I-PROP-005` |
-| **0.7** | `fraud.embeddings` / `investigation` | [`SPEC-000.7`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | [`PLAN-000.7`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | [`TASKS-000.7`](file:///.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | [`SUMMARY-000.7`](file:///.spec/summaries/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | 🟢 Verified | `I-VEC-001` to `I-VEC-010` |
-| **0.8** | `fraud.fusion` | [`SPEC-000.8`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md) | [`PLAN-000.8`](file:///.spec/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md) | [`TASKS-000.8`](file:///.spec/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md) | [`SUMMARY-000.8`](file:///.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md) | 🟢 Verified | `I-FUSION-001` to `I-FUSION-005` |
+| **0.5** | `fraud.intelligence` | [`SPEC-000.5`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | [`PLAN-000.5`](file:///.spec/plans/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | [`TASKS-000.5`](file:///.spec/tasks/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | [`SUMMARY-000.5`](file:///.spec/summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md) | 🟢 Verified | `I-GRAPH-001` to `I-GRAPH-004` |
+| **0.6** | `fraud.propagation` | [`SPEC-000.6`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md) | [`PLAN-000.6`](file:///.spec/plans/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md) | [`TASKS-000.6`](file:///.spec/tasks/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md) | [`SUMMARY-000.6`](file:///.spec/summaries/SUMMARY-000.6-fraud-risk-propagation-and-temporal-decay.md) | 🟢 Verified | `I-PROP-001` to `I-PROP-005` |
+| **0.7** | `fraud.embeddings` / `investigation` | [`SPEC-000.7`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | [`PLAN-000.7`](file:///.spec/plans/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | [`TASKS-000.7`](file:///.spec/tasks/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | [`SUMMARY-000.7`](file:///.spec/summaries/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) | 🟢 Verified | `I-VEC-001` to `I-VEC-010` |
+| **0.8** | `fraud.fusion` | [`SPEC-000.8`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md) | [`PLAN-000.8`](file:///.spec/plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md) | [`TASKS-000.8`](file:///.spec/tasks/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md) | [`SUMMARY-000.8`](file:///.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md) | 🟢 Verified | `I-FUSION-001` to `I-FUSION-005` |
 
 ---
 
@@ -50,10 +53,10 @@ All initiatives follow a strict, deterministic four-artifact lifecycle:
 
 | Phase | Module | Spec | Plan | Tasks | Summary | Status | Invariants Owned |
 | :--- | :--- | :--- | :--- | :--- | :--- | :---: | :--- |
-| **1.0** | `savings` | [`SPEC-001`](file:///.spec/SPEC-001-smart-savings-automation.md) | [`PLAN-001`](file:///.spec/PLAN-001-smart-savings-automation.md) | [`TASKS-001`](file:///.spec/TASKS-001-smart-savings-automation.md) | [`SUMMARY-001`](file:///.spec/summaries/SUMMARY-001-smart-savings-automation.md) | 🟢 Verified | `I-SAVINGS-001`, `I-SAVINGS-002` |
-| **1.1** | `ledger` / `fraud` | [`SPEC-001.1`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md) | [`PLAN-001.1`](file:///.spec/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md) | [`TASKS-001.1`](file:///.spec/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md) | [`SUMMARY-001.1`](file:///.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md) | 🟢 Verified | `I-ACCOUNT-001`, `I-ACC-002` |
-| **1.2** | `savings` | [`SPEC-001.2`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md) | [`PLAN-001.2`](file:///.spec/PLAN-001.2-savings-plans-and-rules-management.md) | [`TASKS-001.2`](file:///.spec/TASKS-001.2-savings-plans-and-rules-management.md) | [`SUMMARY-001.2`](file:///.spec/summaries/SUMMARY-001.2-savings-plans-and-rules-management.md) | 🟢 Verified | `I-RULE-001` to `I-RULE-004` |
-| **2.0** | `goals` | [`SPEC-002`](file:///.spec/SPEC-002-financial-goal-engine.md) | [`PLAN-002`](file:///.spec/PLAN-002-financial-goal-engine.md) | [`TASKS-002`](file:///.spec/TASKS-002-financial-goal-engine.md) | [`SUMMARY-002`](file:///.spec/summaries/SUMMARY-002-financial-goal-engine.md) | 🟢 Verified | `I-GOAL-001` to `I-GOAL-005` |
+| **1.0** | `savings` | [`SPEC-001`](file:///.spec/SPEC-001-smart-savings-automation.md) | [`PLAN-001`](file:///.spec/plans/PLAN-001-smart-savings-automation.md) | [`TASKS-001`](file:///.spec/tasks/TASKS-001-smart-savings-automation.md) | [`SUMMARY-001`](file:///.spec/summaries/SUMMARY-001-smart-savings-automation.md) | 🟢 Verified | `I-SAVINGS-001`, `I-SAVINGS-002` |
+| **1.1** | `ledger` / `fraud` | [`SPEC-001.1`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md) | [`PLAN-001.1`](file:///.spec/plans/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md) | [`TASKS-001.1`](file:///.spec/tasks/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md) | [`SUMMARY-001.1`](file:///.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md) | 🟢 Verified | `I-ACCOUNT-001`, `I-ACC-002` |
+| **1.2** | `savings` | [`SPEC-001.2`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md) | [`PLAN-001.2`](file:///.spec/plans/PLAN-001.2-savings-plans-and-rules-management.md) | [`TASKS-001.2`](file:///.spec/tasks/TASKS-001.2-savings-plans-and-rules-management.md) | [`SUMMARY-001.2`](file:///.spec/summaries/SUMMARY-001.2-savings-plans-and-rules-management.md) | 🟢 Verified | `I-RULE-001` to `I-RULE-004` |
+| **2.0** | `goals` | [`SPEC-002`](file:///.spec/SPEC-002-financial-goal-engine.md) | [`PLAN-002`](file:///.spec/plans/PLAN-002-financial-goal-engine.md) | [`TASKS-002`](file:///.spec/tasks/TASKS-002-financial-goal-engine.md) | [`SUMMARY-002`](file:///.spec/summaries/SUMMARY-002-financial-goal-engine.md) | 🟢 Verified | `I-GOAL-001` to `I-GOAL-005` |
 
 ---
 

@@ -1,6 +1,6 @@
 # 🏛️ Architecture & Implementation Plan: PLAN-001.2 — Savings Plans and Dynamic Rules Management
 
-- **Specification Reference**: [`.spec/SPEC-001.2-savings-plans-and-rules-management.md`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md)
+- **Specification Reference**: [`../SPEC-001.2-savings-plans-and-rules-management.md`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md)
 - **Status**: Approved
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-25

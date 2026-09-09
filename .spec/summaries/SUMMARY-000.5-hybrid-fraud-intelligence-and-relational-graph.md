@@ -1,8 +1,8 @@
 # 📊 Implementation Summary: SPEC-000.5 — Hybrid Fraud Intelligence & Relational Graph Projection
 
 - **Spec Identifier**: [`SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
-- **Plan Identifier**: [`PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
-- **Tasks Completed**: [`TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
+- **Plan Identifier**: [`PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/plans/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
+- **Tasks Completed**: [`TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/tasks/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
 - **Status**: 🟢 **Completed & Verified**
 - **Date**: 2026-08-30
 

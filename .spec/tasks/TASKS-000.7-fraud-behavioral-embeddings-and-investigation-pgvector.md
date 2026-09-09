@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Investigation Intelligence
 
-- **Associated Spec**: [`SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
-- **Associated Plan**: [`PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Spec**: [`../SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Plan**: [`../plans/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/plans/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
 - **Status**: Ready for Implementation (Histories 20, 24, 25, 26, 27 & 28)
 - **Target Release**: Wallet Service V4.x — Phase 0.7
 
@@ -53,7 +53,7 @@
   - Table persistence of `fraud_entity_features` with `vector(16)`, `feature_magnitude`, count, and volume.
   - Seeding and retrieval of `fraud_archetype_centroids`.
   - Exact dot-product SQL execution.
-- [x] `TASK-2.2` [GREEN]: Update `docker/init/schema.sql`:
+- [x] `TASK-2.2` [GREEN]: Update `../../docker/init/schema.sql`:
   - Enable `vector` extension.
   - Create `fraud_entity_features` table with magnitude and volume columns.
   - Create `fraud_archetype_centroids` table and seed data (`MONEY_MULE_RAPID_DRAIN`, `SMURFING`, `ACCOUNT_TAKEOVER`).
@@ -134,7 +134,7 @@
 
 
 ### Phase 6: Model Evaluation Harness & Benchmark Gate (`:fraud:investigation`)
-- [x] `TASK-6.1` [RED]: Create `ModelEvaluationHarnessTest` and gold-standard evaluation fixtures in `src/test/resources/fraud-investigation/`:
+- [x] `TASK-6.1` [RED]: Create `ModelEvaluationHarnessTest` and gold-standard evaluation fixtures in `../../src/test/resources/fraud-investigation`:
   - `CASE-001-money-mule.json`
   - `CASE-002-smurfing.json`
   - `CASE-003-account-takeover.json`

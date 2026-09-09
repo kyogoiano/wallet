@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-000.1 — In-Memory Store Migration: Redis to DragonflyDB
 
 - **Associated Spec**: [`SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md)
-- **Associated Plan**: [`PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md)
-- **Associated Tasks**: [`TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md)
+- **Associated Plan**: [`PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/plans/PLAN-000.1-migrate-redis-to-dragonflydb.md)
+- **Associated Tasks**: [`TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/tasks/TASKS-000.1-migrate-redis-to-dragonflydb.md)
 - **Status**: Completed / Verified
 - **Execution Date**: 2026-08-26
 - **Author / Agent**: Antigravity Financial Architecture Team
@@ -31,8 +31,8 @@ All system invariants (`I-DF-001` through `I-DF-004`) were strictly verified:
 | [`.spec/ROADMAP.md`](file:///.spec/ROADMAP.md) | Modified | Updated roadmap with Phase 0.1 DragonflyDB migration and Phase 1 completion milestones. |
 | [`.spec/README.md`](file:///.spec/README.md) | Modified | Synchronized active specification index table. |
 | [`.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md) | Added | Formal specification for in-memory store migration. |
-| [`.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md) | Added | Architecture plan and Lua compatibility analysis. |
-| [`.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md) | Added | TDD task list with traceability matrix. |
+| [`../plans/PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/plans/PLAN-000.1-migrate-redis-to-dragonflydb.md) | Added | Architecture plan and Lua compatibility analysis. |
+| [`../tasks/TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/tasks/TASKS-000.1-migrate-redis-to-dragonflydb.md) | Added | TDD task list with traceability matrix. |
 
 ---
 

@@ -1,8 +1,8 @@
 # 📝 Task Breakdown: TASKS-000.4 — Outbox Observability, OpenObserve Pipeline & Source-Level Telemetry Optimization (History 11)
 
-- **Associated Spec**: [`SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)
-- **Associated Plan**: [`PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md)
-- **Source Reference**: [`.histories/history11-observability.txt`](file:///.histories/history11-observability.txt)
+- **Associated Spec**: [`../SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)
+- **Associated Plan**: [`../plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md)
+- **Source Reference**: [`../../.histories/history11-observability.txt`](file:///.histories/history11-observability.txt)
 
 - **Status**: Completed
 
@@ -16,7 +16,7 @@
 | `REQ-OBS-005` | `TracingAspectTest.shouldCreateBothOperationAndUserBaggage()` | `TASK-1.3` |
 | `REQ-OBS-001`, `I-OBS-001` | `OutboxEventProcessorTest`, `OutboxRelayTest` | `TASK-2.1`, `TASK-2.2` |
 | `REQ-OBS-003`, `REQ-OBS-004`, `I-OBS-004` | `OpenTelemetryConfiguration` MeterFilter and ObservationPredicate | `TASK-3.1` |
-| `REQ-OBS-006`, `REQ-OBS-007` | `docker/otel-collector-config.yml` (lightweight core) and `docker-compose.yaml` | `TASK-3.2`, `TASK-3.3` |
+| `REQ-OBS-006`, `REQ-OBS-007` | `../../docker/otel-collector-config.yml` (lightweight core) and `docker-compose.yaml` | `TASK-3.2`, `TASK-3.3` |
 | `I-OBS-003` | `OutboxIT` regression suite | `TASK-4.1` |
 
 ---
@@ -34,9 +34,9 @@
 
 ### Phase 3: Source-Level Telemetry Optimization & Lightweight Collector (History 11)
 - [x] `TASK-3.1` [GREEN]: Add `MeterFilter.ignoreTags("spring.bean.name")` and `ObservationPredicate` for `/actuator/health` in `OpenTelemetryConfiguration.java`.
-- [x] `TASK-3.2` [GREEN]: Configure `docker/otel-collector-config.yml` with ultra-light core `batch` processor and dual HTTP/gRPC receivers.
-- [x] `TASK-3.3` [GREEN]: Keep `docker-compose.yaml` with `otel/opentelemetry-collector:latest` (~35 MB) and `ZO_TELEMETRY=false`.
+- [x] `TASK-3.2` [GREEN]: Configure `../../docker/otel-collector-config.yml` with ultra-light core `batch` processor and dual HTTP/gRPC receivers.
+- [x] `TASK-3.3` [GREEN]: Keep `../../docker-compose.yaml` with `otel/opentelemetry-collector:latest` (~35 MB) and `ZO_TELEMETRY=false`.
 
 ### Phase 4: Verification & Summary
 - [x] `TASK-4.1`: Verify `TracingAspectTest`, `OutboxRelayTest`, `OutboxEventProcessorTest`.
-- [x] `TASK-4.2`: Generate `.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md`.
+- [x] `TASK-4.2`: Generate `../summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md`.

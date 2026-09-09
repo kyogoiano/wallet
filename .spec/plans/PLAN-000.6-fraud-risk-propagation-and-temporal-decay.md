@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-000.6 — Fraud Risk Propagation, Temporal Decay & Hardened Hand-Rolled Job Engine
 
-- **Associated Spec**: [`SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md)
+- **Associated Spec**: [`../SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md)
 - **Status**: Approved & Hardened (Histories 21, 22 & 23)
 - **Author**: Antigravity Financial & Risk Engineering Team
 - **Date**: 2026-09-01

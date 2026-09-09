@@ -1,7 +1,7 @@
 # 📋 Implementation Tasks: TASKS-001.2 — Savings Plans and Dynamic Rules Management
 
-- **Specification Reference**: [`.spec/SPEC-001.2-savings-plans-and-rules-management.md`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md)
-- **Architecture Plan**: [`.spec/PLAN-001.2-savings-plans-and-rules-management.md`](file:///.spec/PLAN-001.2-savings-plans-and-rules-management.md)
+- **Specification Reference**: [`../SPEC-001.2-savings-plans-and-rules-management.md`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md)
+- **Architecture Plan**: [`../plans/PLAN-001.2-savings-plans-and-rules-management.md`](file:///.spec/plans/PLAN-001.2-savings-plans-and-rules-management.md)
 - **Status**: Completed / Verified
 
 ---

@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000.6 — Fraud Risk Propagation, Temporal Decay & Hardened Hand-Rolled Job Engine
 
-- **Associated Spec**: [`SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md)
-- **Associated Plan**: [`PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md)
+- **Associated Spec**: [`../SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md)
+- **Associated Plan**: [`../plans/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/plans/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md)
 - **Status**: Not Started
 - **Target Release**: Wallet Service V4.x — Phase 0.6
 
@@ -46,7 +46,7 @@
   - Recursive CTE path traversal discovering multi-hop paths with temporal timestamps from `fraud_relationship_events.occurred_at <= as_of`.
   - Bounded hop traversal (`max-hops <= 3`) and acyclic path checks.
   - Updating `propagated_risk`, `propagation_model_version`, and `propagation_evaluated_at` on `fraud_entities` with zero mutation to `direct_risk`.
-- [x] `TASK-2.2` [GREEN]: Update `docker/init/schema.sql` (columns `propagation_model_version`, `propagation_evaluated_at`, `fraud_propagation_jobs` table, and partial unique index) and implement `PostgresRiskPropagationDao` with recursive path query and batch update operations.
+- [x] `TASK-2.2` [GREEN]: Update `../../docker/init/schema.sql` (columns `propagation_model_version`, `propagation_evaluated_at`, `fraud_propagation_jobs` table, and partial unique index) and implement `PostgresRiskPropagationDao` with recursive path query and batch update operations.
 - [x] `TASK-2.3` [REFACTOR]: Index optimization and query performance tuning.
 
 ### Phase 3: Hardened Job Queue & Worker Pool (`:fraud`)

@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000 — Architecture Alignment & Modulith Core Baseline
 
-- **Associated Spec**: [`SPEC-000-architecture-alignment-modulith-baseline.md`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md)
-- **Associated Plan**: [`PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/PLAN-000-architecture-alignment-modulith-baseline.md)
+- **Associated Spec**: [`../SPEC-000-architecture-alignment-modulith-baseline.md`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md)
+- **Associated Plan**: [`../plans/PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/plans/PLAN-000-architecture-alignment-modulith-baseline.md)
 - **Status**: Completed / Verified
 - **Author**: Antigravity Financial Architecture Team
 
@@ -27,7 +27,7 @@
 ## 2. Implementation Tasks
 
 ### Phase 1: Gradle & Modulith Dependencies Setup
-- [x] `TASK-0.1` Configure Spring Modulith dependencies (`spring-modulith-starter-core`, `spring-modulith-starter-test`, `spring-modulith-docs`) and JaCoCo in `build.gradle`.
+- [x] `TASK-0.1` Configure Spring Modulith dependencies (`spring-modulith-starter-core`, `spring-modulith-starter-test`, `spring-modulith-docs`) and JaCoCo in `../../build.gradle`.
 
 ### Phase 2: Core Domain Module Reorganization (`br.com.wallet.ledger`)
 - [x] `TASK-0.2` Structure `br.com.wallet.ledger.api` package:
@@ -58,7 +58,7 @@
 - [x] `TASK-0.8` Author isolated unit tests and run full test suite with JaCoCo:
   - Unit tests across `ledger` services, `fraud` rules, and `infrastructure`.
   - Testcontainers integration tests (PostgreSQL, Redis, NATS).
-- [x] `TASK-0.9` Generate SDD Execution Summary in `.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`.
+- [x] `TASK-0.9` Generate SDD Execution Summary in `../summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`.
 
 ---
 
@@ -66,6 +66,6 @@
 
 - [x] `ModulithArchitectureTest.verifyArchitecture()` passes cleanly (0 violations, 0 cycles).
 - [x] `./gradlew test` passes with zero failures or skipped critical tests.
-- [x] PlantUML architecture documentation generated under `build/spring-modulith-docs/`.
-- [x] JaCoCo coverage reports generated under `build/reports/jacoco/test/html/`.
+- [x] PlantUML architecture documentation generated under `../../build/spring-modulith-docs`.
+- [x] JaCoCo coverage reports generated under `../../build/reports/jacoco/test/html`.
 - [x] Zero functional regressions in financial ledger, balance calculation, or anti-fraud evaluation.

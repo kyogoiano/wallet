@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000.3 — Asynchronous Command Exception Handling & Operation Status Tracking
 
-- **Associated Spec**: [`SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md)
-- **Associated Plan**: [`PLAN-000.3-async-command-exception-handling.md`](file:///.spec/PLAN-000.3-async-command-exception-handling.md)
+- **Associated Spec**: [`../SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md)
+- **Associated Plan**: [`../plans/PLAN-000.3-async-command-exception-handling.md`](file:///.spec/plans/PLAN-000.3-async-command-exception-handling.md)
 - **Status**: Completed
 
 ---
@@ -22,7 +22,7 @@
 
 ### Phase 1: Database Schema & DAO
 - [x] `TASK-1.1` [RED]: Write unit test for `WalletOperationsDao.failOperation(...)` and `findOperation(...)`.
-- [x] `TASK-1.2` [GREEN]: Update `schema.sql` (`src/main/resources/schema.sql`, `src/test/resources/schema.sql`, `docker/init/schema.sql`) with `updated_at`, `error_message`, `failure_type`.
+- [x] `TASK-1.2` [GREEN]: Update `schema.sql` (`../../src/main/resources/schema.sql`, `src/test/resources/schema.sql`, `docker/init/schema.sql`) with `updated_at`, `error_message`, `failure_type`.
 - [x] `TASK-1.3` [GREEN]: Implement `failOperation` and `findOperation` in `WalletOperationsDao.java`.
 
 ### Phase 2: Consumer Exception Handling & State Transition
@@ -40,4 +40,4 @@
 ### Phase 5: End-to-End Verification & Convergence
 - [x] `TASK-5.1` [RED $\rightarrow$ GREEN]: Write integration test verifying that when an asynchronous transfer runs with insufficient funds, the consumer ACKs the message and the operation status is marked as `FAILED` with `error_message = "Insufficient funds"`.
 - [x] `TASK-5.2` [VERIFY]: Verify Modulith boundaries, API contracts, and schema migrations.
-- [x] `TASK-5.3` [SUMMARY]: Generate `.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md`.
+- [x] `TASK-5.3` [SUMMARY]: Generate `../summaries/SUMMARY-000.3-async-command-exception-handling.md`.

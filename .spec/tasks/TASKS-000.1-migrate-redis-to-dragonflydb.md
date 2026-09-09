@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000.1 — In-Memory Store Migration: Redis to DragonflyDB
 
-- **Associated Spec**: [`SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md)
-- **Associated Plan**: [`PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md)
+- **Associated Spec**: [`../SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md)
+- **Associated Plan**: [`../plans/PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/plans/PLAN-000.1-migrate-redis-to-dragonflydb.md)
 - **Status**: Completed / Verified
 
 ---
@@ -34,8 +34,8 @@
 - [x] `TASK-2.3` [RED]: Add concurrency and multi-threaded stress test executing concurrent Lua script evaluations across multiple threads.
 
 ### Phase 3: Docker Compose & Runtime Configuration
-- [x] `TASK-3.1`: Update `docker-compose.yaml` replacing Redis container with `docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1` with `--unixsocket=/var/run/redis/redis.sock`, `--unixsocketperm=777`, `--maxmemory=512mb`, and `--cache_mode=true`.
-- [x] `TASK-3.2`: Update `docker/init` / environment configs if applicable.
+- [x] `TASK-3.1`: Update `../../docker-compose.yaml` replacing Redis container with `docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1` with `--unixsocket=/var/run/redis/redis.sock`, `--unixsocketperm=777`, `--maxmemory=512mb`, and `--cache_mode=true`.
+- [x] `TASK-3.2`: Update `../../docker/init` / environment configs if applicable.
 
 ### Phase 4: Full Regression & Modulith Convergence
 - [x] `TASK-4.1`: Execute all fraud, account blocking, and ledger integration tests (`FraudIT`, `FraudReactionIT`, `AccountBlockingIT`, `BalanceIT`, `WithdrawFundsIT`, `TransferFundsIT`).
@@ -46,7 +46,7 @@
 
 ## 3. Convergence & Verification Checklist
 
-- [x] DragonflyDB running in Testcontainers and `docker-compose.yaml`
+- [x] DragonflyDB running in Testcontainers and `../../docker-compose.yaml`
 - [x] All Lua scripts validated against Dragonfly's multi-key lock manager
 - [x] Replay protection (`I-DF-004`) verified under concurrency
 - [x] Line coverage meets requirements ($\ge 70\%$ overall, $\ge 85\%$ core/fraud)

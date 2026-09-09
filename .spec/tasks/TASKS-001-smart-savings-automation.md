@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-001 — Smart Savings Automation (br.com.wallet.savings)
 
-- **Associated Spec**: [`SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md)
-- **Associated Plan**: [`PLAN-001-smart-savings-automation.md`](file:///.spec/PLAN-001-smart-savings-automation.md)
+- **Associated Spec**: [`../SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md)
+- **Associated Plan**: [`../plans/PLAN-001-smart-savings-automation.md`](file:///.spec/plans/PLAN-001-smart-savings-automation.md)
 - **Status**: Completed / Verified
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-23
@@ -103,7 +103,7 @@
 
 ### Phase 3: Persistence & Deduplication Schema
 - [x] `TASK-1.6` Database Migration & JDBC DAOs:
-  - Add tables `savings_plans`, `savings_rules`, `savings_execution_history` with `UNIQUE(operation_id)` in `docker/init/schema.sql` (and test schema).
+  - Add tables `savings_plans`, `savings_rules`, `savings_execution_history` with `UNIQUE(operation_id)` in `../../docker/init/schema.sql` (and test schema).
   - Implement `SavingsPlanDao`, `SavingsRuleDao`, `SavingsExecutionHistoryDao`.
   - Author DAO unit/slice tests.
 
@@ -133,7 +133,7 @@
 - [x] `TASK-1.12` Verification, Coverage & Execution Summary:
   - Run full test suite with JaCoCo (`./gradlew test jacocoTestReport`).
   - Verify line coverage meets $\ge 85\%$ for `savings` domain and rule engine.
-  - Author `.spec/summaries/SUMMARY-001-smart-savings-automation.md`.
+  - Author `../summaries/SUMMARY-001-smart-savings-automation.md`.
 
 ---
 
@@ -143,4 +143,4 @@
 - [x] `ModulithArchitectureTest.verifyArchitecture()` passes with zero boundary violations.
 - [x] `./gradlew test` passes 100% with zero regressions.
 - [x] JaCoCo coverage $\ge 85\%$ on `br.com.wallet.savings`.
-- [x] Summary written to `.spec/summaries/SUMMARY-001-smart-savings-automation.md`.
+- [x] Summary written to `../summaries/SUMMARY-001-smart-savings-automation.md`.

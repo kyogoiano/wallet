@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-002 — Financial Goal & Cashflow Strategy Engine (br.com.wallet.goals)
 
-- **Associated Spec**: [`SPEC-002-financial-goal-engine.md`](file:///.spec/SPEC-002-financial-goal-engine.md)
-- **Associated Plan**: [`PLAN-002-financial-goal-engine.md`](file:///.spec/PLAN-002-financial-goal-engine.md)
+- **Associated Spec**: [`../SPEC-002-financial-goal-engine.md`](file:///.spec/SPEC-002-financial-goal-engine.md)
+- **Associated Plan**: [`../plans/PLAN-002-financial-goal-engine.md`](file:///.spec/plans/PLAN-002-financial-goal-engine.md)
 - **Status**: Ready for TDD Implementation
 
 ---
@@ -40,7 +40,7 @@
 - [x] `TASK-2.5` [GREEN]: Implement `GoalStrategyUseCase` and `GoalStrategyService` integrating with `BalanceUseCase.getBalance()`.
 
 ### Phase 3: Persistence & Database Schema
-- [x] `TASK-3.1` [GREEN]: Add `goals` and `cashflow_profiles` tables with constraints and indexes to `docker/init/schema.sql`.
+- [x] `TASK-3.1` [GREEN]: Add `goals` and `cashflow_profiles` tables with constraints and indexes to `../../docker/init/schema.sql`.
 - [x] `TASK-3.2` [RED]: Write integration tests for `FinancialGoalDao` and `CashflowProfileDao` using Testcontainers PostgreSQL.
 - [x] `TASK-3.3` [GREEN]: Implement `FinancialGoalDao` and `CashflowProfileDao` with Spring JDBC `JdbcTemplate` / `RowMapper`.
 
@@ -58,4 +58,4 @@
 ### Phase 5: Architecture Verification & Convergence
 - [x] `TASK-5.1` [GREEN]: Add `package-info.java` for `br.com.wallet.goals` and verify `ModulithArchitectureTest.verifyArchitecture()` with 0 violations.
 - [x] `TASK-5.2` [GREEN]: Run full test suite (`./gradlew test jacocoTestReport`) and verify coverage $\ge 90\%$ for `goals`.
-- [x] `TASK-5.3` [GREEN]: Author `.spec/summaries/SUMMARY-002-financial-goal-engine.md`.
+- [x] `TASK-5.3` [GREEN]: Author `../summaries/SUMMARY-002-financial-goal-engine.md`.

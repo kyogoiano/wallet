@@ -1,8 +1,8 @@
 # 🏁 Execution Summary: SUMMARY-000.3 — Asynchronous Command Exception Handling & Operation Status Tracking
 
 - **Associated Spec**: [`SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md)
-- **Associated Plan**: [`PLAN-000.3-async-command-exception-handling.md`](file:///.spec/PLAN-000.3-async-command-exception-handling.md)
-- **Associated Tasks**: [`TASKS-000.3-async-command-exception-handling.md`](file:///.spec/TASKS-000.3-async-command-exception-handling.md)
+- **Associated Plan**: [`PLAN-000.3-async-command-exception-handling.md`](file:///.spec/plans/PLAN-000.3-async-command-exception-handling.md)
+- **Associated Tasks**: [`TASKS-000.3-async-command-exception-handling.md`](file:///.spec/tasks/TASKS-000.3-async-command-exception-handling.md)
 - **Status**: 🟢 **Completed & Verified**
 - **Date**: 2026-08-29
 

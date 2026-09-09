@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-002 — Financial Goal & Cashflow Strategy Engine (br.com.wallet.goals)
 
-- **Associated Spec**: [`SPEC-002-financial-goal-engine.md`](file:///.spec/SPEC-002-financial-goal-engine.md)
+- **Associated Spec**: [`../SPEC-002-financial-goal-engine.md`](file:///.spec/SPEC-002-financial-goal-engine.md)
 - **Status**: Approved (Lean Architecture)
 - **Date**: 2026-08-27
 - **Target Release / Milestone**: Wallet Service V4 — Phase 2
@@ -94,7 +94,7 @@ br.com.wallet.goals
 
 ## 3. Data Model & Schema Changes
 
-### 3.1 Database DDL (`docker/init/schema.sql`)
+### 3.1 Database DDL (`../../docker/init/schema.sql`)
 
 ```sql
 -- 1. Goals Table

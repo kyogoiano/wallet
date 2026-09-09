@@ -1,6 +1,6 @@
 # 🏗️ Architecture Plan: PLAN-001 — Smart Savings Automation (br.com.wallet.savings)
 
-- **Associated Spec**: [`SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md)
+- **Associated Spec**: [`../SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md)
 - **Status**: Approved / Implemented
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-22

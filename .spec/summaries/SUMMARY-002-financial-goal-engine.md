@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-002 — Financial Goal & Cashflow Strategy Engine (br.com.wallet.goals)
 
 - **Associated Spec**: [`SPEC-002-financial-goal-engine.md`](file:///.spec/SPEC-002-financial-goal-engine.md)
-- **Associated Plan**: [`PLAN-002-financial-goal-engine.md`](file:///.spec/PLAN-002-financial-goal-engine.md)
-- **Associated Tasks**: [`TASKS-002-financial-goal-engine.md`](file:///.spec/TASKS-002-financial-goal-engine.md)
+- **Associated Plan**: [`PLAN-002-financial-goal-engine.md`](file:///.spec/plans/PLAN-002-financial-goal-engine.md)
+- **Associated Tasks**: [`TASKS-002-financial-goal-engine.md`](file:///.spec/tasks/TASKS-002-financial-goal-engine.md)
 - **Status**: Completed & Verified (Lean Architecture)
 - **Execution Date**: 2026-08-27
 - **Author**: Antigravity Financial Architecture Team

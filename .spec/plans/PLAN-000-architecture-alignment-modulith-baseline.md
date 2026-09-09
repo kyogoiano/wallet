@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-000 — Architecture Alignment & Modulith Core Baseline
 
-- **Associated Spec**: [`SPEC-000-architecture-alignment-modulith-baseline.md`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md)
+- **Associated Spec**: [`../SPEC-000-architecture-alignment-modulith-baseline.md`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md)
 - **Status**: Approved
 - **Date**: 2026-08-22
 - **Author**: Antigravity Financial Architecture Team
@@ -68,7 +68,7 @@ flowchart TD
 
 ## 2. Spring Modulith Dependency Configuration
 
-We update the root `build.gradle` to import the **Spring Modulith BOM** and starters:
+We update the root `../../build.gradle` to import the **Spring Modulith BOM** and starters:
 
 ```groovy
 ext {
@@ -179,7 +179,7 @@ class ModulithArchitectureTest {
 ## 6. Verification and Regression Prevention Strategy
 
 1. **Step-by-Step Migration**:
-   - Update `build.gradle` with Modulith dependencies.
+   - Update `../../build.gradle` with Modulith dependencies.
    - Refactor packages and update import statements systematically.
    - Run `ModulithArchitectureTest` to assert clean verification.
    - Run existing unit tests (`TransferFundsServiceTest`, `LedgerValidationServiceTest`, `SlidingWindowRuleTest`).

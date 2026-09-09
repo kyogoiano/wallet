@@ -1,10 +1,10 @@
 # 📐 Architecture Plan: PLAN-000.4 — Outbox Observability, OpenObserve Pipeline & Source-Level Telemetry Optimization (History 11)
 
-- **Associated Spec**: [`SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)
+- **Associated Spec**: [`../SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)
 - **Status**: Completed & Verified
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-30
-- **Source Reference**: [`.histories/history11-observability.txt`](file:///.histories/history11-observability.txt)
+- **Source Reference**: [`../../.histories/history11-observability.txt`](file:///.histories/history11-observability.txt)
 
 
 ---
@@ -97,7 +97,7 @@ try {
 - `OutboxEventProcessor` annotated with `@Traceable("outbox.relay.event")`.
 - `OutboxRelay` delegates batch processing to `eventProcessor.processEvent(event, now)`.
 
-### 2.4. `docker/otel-collector-config.yml` (Ultra-Lightweight Core Config)
+### 2.4. `../../docker/otel-collector-config.yml` (Ultra-Lightweight Core Config)
 ```yaml
 receivers:
   otlp:

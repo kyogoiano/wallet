@@ -148,8 +148,8 @@ gantt
 - **Intent**: Refactor and align the existing codebase into a verified Spring Modulith baseline with `ledger.api` (published interface) and `ledger.internal` (sealed implementation), fixing package typos and ensuring zero regression on existing tests.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000-architecture-alignment-modulith-baseline.md`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md)
-  - [`.spec/PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/PLAN-000-architecture-alignment-modulith-baseline.md)
-  - [`.spec/TASKS-000-architecture-alignment-modulith-baseline.md`](file:///.spec/TASKS-000-architecture-alignment-modulith-baseline.md)
+  - [`plans/PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/plans/PLAN-000-architecture-alignment-modulith-baseline.md)
+  - [`tasks/TASKS-000-architecture-alignment-modulith-baseline.md`](file:///.spec/tasks/TASKS-000-architecture-alignment-modulith-baseline.md)
   - [`.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md`](file:///.spec/summaries/SUMMARY-000-architecture-alignment-modulith-baseline.md)
 
 ---
@@ -167,8 +167,8 @@ gantt
   - **Dedicated Test Suite**: `DragonflyLuaCompatibilityIT` testing replay detection and threshold blocking under concurrency.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md) (Ratified)
-  - [`.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md) (Approved)
-  - [`.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md) (Completed)
+  - [`plans/PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/plans/PLAN-000.1-migrate-redis-to-dragonflydb.md) (Approved)
+  - [`tasks/TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/tasks/TASKS-000.1-migrate-redis-to-dragonflydb.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/summaries/SUMMARY-000.1-migrate-redis-to-dragonflydb.md) (Verified)
 
 ---
@@ -181,8 +181,8 @@ gantt
 - **Intent**: Refactor DLQ subsystem into a first-class Spring Modulith capability module (`br.com.wallet.dlq`), enforce bounded automatic replays capped at 3 retries (`I-DLQ-001`), transition unrecoverable messages to `EXHAUSTED` (`I-DLQ-002`), and provide operator REST APIs under `/dlq/operations` (`I-DLQ-003`).
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md) (Ratified)
-  - [`.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md) (Approved)
-  - [`.spec/TASKS-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/TASKS-000.2-dlq-resilience-and-exhausted-operations.md) (Completed)
+  - [`plans/PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/plans/PLAN-000.2-dlq-resilience-and-exhausted-operations.md) (Approved)
+  - [`tasks/TASKS-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/tasks/TASKS-000.2-dlq-resilience-and-exhausted-operations.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/summaries/SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md) (Verified)
 
 ---
@@ -195,8 +195,8 @@ gantt
 - **Intent**: Capture background consumer business exceptions, persist `FAILED` operation state with diagnostic error messages in PostgreSQL, expose `GET /operations/{operationId}` query API, and preserve `202 ACCEPTED` contracts for command endpoints.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md) (Ratified)
-  - [`.spec/PLAN-000.3-async-command-exception-handling.md`](file:///.spec/PLAN-000.3-async-command-exception-handling.md) (Approved)
-  - [`.spec/TASKS-000.3-async-command-exception-handling.md`](file:///.spec/TASKS-000.3-async-command-exception-handling.md) (Completed)
+  - [`plans/PLAN-000.3-async-command-exception-handling.md`](file:///.spec/plans/PLAN-000.3-async-command-exception-handling.md) (Approved)
+  - [`tasks/TASKS-000.3-async-command-exception-handling.md`](file:///.spec/tasks/TASKS-000.3-async-command-exception-handling.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md`](file:///.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md) (Verified)
 
 ---
@@ -209,8 +209,8 @@ gantt
 - **Intent**: Propagate `operationId` baggage in `OutboxRelay` background processing, eliminate span leak in `TracingAspect`, optimize telemetry at the source (`MeterFilter`, `ObservationPredicate`), and tune OTel Collector batching and OpenObserve storage.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md) (Ratified)
-  - [`.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) (Approved)
-  - [`.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) (Completed)
+  - [`plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) (Approved)
+  - [`tasks/TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/tasks/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md) (Verified)
 
 ---
@@ -223,8 +223,8 @@ gantt
 - **Intent**: Capture entities (`USER`, `WALLET`, `DEVICE`, `IP`) and relationships asynchronously via NATS JetStream, project two-tier relational graph facts in PostgreSQL (`fraud_relationships` aggregate + `fraud_relationship_events` temporal evidence), detect circular flows ($A \to B \to C \to A$), fan-in/fan-out, and shared devices, and materialize computed `graph_risk` into DragonflyDB hot cache (`user:{id}:graph_risk`) for synchronous $O(1)$ gate consumption.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Ratified)
-  - [`.spec/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Approved)
-  - [`.spec/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Completed)
+  - [`plans/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/plans/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Approved)
+  - [`tasks/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/tasks/TASKS-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md) (Verified)
 
 ---
@@ -237,8 +237,8 @@ gantt
 - **Intent**: Propagate risk scores across connected graph paths using temporal evidence from `fraud_relationship_events.occurred_at` and exponential decay ($I(p, t) = R_{\text{source}}(v) \cdot \prod w(e) \cdot \prod e^{-\lambda \Delta t_e}$), resolve multi-path convergence via probabilistic union without double-counting, execute through an idempotent hand-rolled PostgreSQL job queue (`fraud_propagation_jobs` with `FOR UPDATE SKIP LOCKED`), and publish `EntityRiskPropagationDetectedEvent`.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md) (Ratified)
-  - [`.spec/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md) (Approved)
-  - [`.spec/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md) (Completed)
+  - [`plans/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/plans/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md) (Approved)
+  - [`tasks/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/tasks/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/summaries/SUMMARY-000.6-fraud-risk-propagation-and-temporal-decay.md) (Verified)
 
 ---
@@ -251,8 +251,8 @@ gantt
 - **Intent**: Store $L_2$-normalized behavioral feature vectors with scalar intensity magnitude in PostgreSQL using `pgvector`, match calibrated fraud archetypes via exact dot products ($O(N)$), process updates asynchronously via a durable job queue (`fraud_embedding_jobs`), and synthesize explainable investigation dossiers via a pluggable local inference SPI (`LocalInferenceClient`) using Small Language Models with deterministic risk ownership, zero cloud egress, hard sanitization boundary, claim grounding validation, and graceful degradation.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
-  - [`.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
-  - [`.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Completed)
+  - [`plans/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/plans/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
+  - [`tasks/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/tasks/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/summaries/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Verified)
 
 
@@ -266,8 +266,8 @@ gantt
 - **Intent**: Fuse deterministic rules, graph topology, temporal risk propagation, behavioral vector anomalies, and micro-ML shadow scores into an explainable final risk score ($R_{\text{final}}$), orchestrate deep asynchronous investigations and analyst reviews via a LangGraph StateGraph workflow, and materialize hot risk state into DragonflyDB for sub-millisecond $O(1)$ Fraud Gate V4 execution.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md) (Ratified)
-  - [`.spec/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md) (Approved)
-  - [`.spec/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md) (Completed)
+  - [`plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md) (Approved)
+  - [`tasks/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/tasks/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md) (Verified)
 
 ---
@@ -284,8 +284,8 @@ gantt
   - **Balance Ceiling Sweep**: Automatic sweeping of funds exceeding target liquidity limits.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md) (Ratified)
-  - [`.spec/PLAN-001-smart-savings-automation.md`](file:///.spec/PLAN-001-smart-savings-automation.md) (Approved)
-  - [`.spec/TASKS-001-smart-savings-automation.md`](file:///.spec/TASKS-001-smart-savings-automation.md) (Completed)
+  - [`plans/PLAN-001-smart-savings-automation.md`](file:///.spec/plans/PLAN-001-smart-savings-automation.md) (Approved)
+  - [`tasks/TASKS-001-smart-savings-automation.md`](file:///.spec/tasks/TASKS-001-smart-savings-automation.md) (Completed)
   - [`.spec/summaries/SUMMARY-001-smart-savings-automation.md`](file:///.spec/summaries/SUMMARY-001-smart-savings-automation.md) (Verified)
 
 ---
@@ -304,8 +304,8 @@ gantt
   - **Administrative Management**: `AccountStateUseCase` (`blockAccount`, `unblockAccount`, `getAccountStatus`).
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md) (Ratified)
-  - [`.spec/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md) (Approved)
-  - [`.spec/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md) (Completed)
+  - [`plans/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/plans/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md) (Approved)
+  - [`tasks/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/tasks/TASKS-001.1-account-lifecycle-state-and-fraud-blocking.md) (Completed)
   - [`.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md) (Verified)
 
 ---
@@ -323,8 +323,8 @@ gantt
   - **Savings Metrics**: Query aggregated savings metrics and breakdown by rule type.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-001.2-savings-plans-and-rules-management.md`](file:///.spec/SPEC-001.2-savings-plans-and-rules-management.md) (Ratified)
-  - [`.spec/PLAN-001.2-savings-plans-and-rules-management.md`](file:///.spec/PLAN-001.2-savings-plans-and-rules-management.md) (Approved)
-  - [`.spec/TASKS-001.2-savings-plans-and-rules-management.md`](file:///.spec/TASKS-001.2-savings-plans-and-rules-management.md) (Completed)
+  - [`plans/PLAN-001.2-savings-plans-and-rules-management.md`](file:///.spec/plans/PLAN-001.2-savings-plans-and-rules-management.md) (Approved)
+  - [`tasks/TASKS-001.2-savings-plans-and-rules-management.md`](file:///.spec/tasks/TASKS-001.2-savings-plans-and-rules-management.md) (Completed)
   - [`.spec/summaries/SUMMARY-001.2-savings-plans-and-rules-management.md`](file:///.spec/summaries/SUMMARY-001.2-savings-plans-and-rules-management.md) (Verified)
 
 ---
@@ -337,8 +337,8 @@ gantt
 - **Intent**: Goal-oriented financial strategy calculation, cashflow capacity modeling, and pure stateless feasibility simulation (`ON_TRACK`, `AT_RISK`, `UNACHIEVABLE`, `ACHIEVED`) with multi-goal waterfall prioritization.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-002-financial-goal-engine.md`](file:///.spec/SPEC-002-financial-goal-engine.md) (Ratified)
-  - [`.spec/PLAN-002-financial-goal-engine.md`](file:///.spec/PLAN-002-financial-goal-engine.md) (Approved)
-  - [`.spec/TASKS-002-financial-goal-engine.md`](file:///.spec/TASKS-002-financial-goal-engine.md) (Completed)
+  - [`plans/PLAN-002-financial-goal-engine.md`](file:///.spec/plans/PLAN-002-financial-goal-engine.md) (Approved)
+  - [`tasks/TASKS-002-financial-goal-engine.md`](file:///.spec/tasks/TASKS-002-financial-goal-engine.md) (Completed)
   - [`.spec/summaries/SUMMARY-002-financial-goal-engine.md`](file:///.spec/summaries/SUMMARY-002-financial-goal-engine.md) (Verified)
 
 ---

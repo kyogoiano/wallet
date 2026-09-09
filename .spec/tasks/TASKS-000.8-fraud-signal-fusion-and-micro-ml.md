@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000.8 — Fraud Signal Fusion, Micro-ML & Hand-Rolled Investigation Orchestration
 
-- **Associated Spec**: [`SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)
-- **Associated Plan**: [`PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md)
+- **Associated Spec**: [`../SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)
+- **Associated Plan**: [`../plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md)
 - **Status**: Ready for Implementation (Stage 4 — Tasks Ratified with History 34)
 - **Author**: Antigravity Financial & Risk Engineering Team
 - **Date**: 2026-09-08
@@ -54,7 +54,7 @@
   - Test events arriving while `RUNNING` cleanly insert a new `PENDING` job for subsequent execution.
   - Test worker acquisition using `SELECT FOR UPDATE SKIP LOCKED`.
   - Test `FusionJobRecoveryService`: detects expired `RUNNING` jobs (`lease_expires_at < NOW()`) and applies backoff (`5s`, `30s`, `2m`, `10m`) up to `MAX_ATTEMPTS = 5` before marking `FAILED`.
-- [x] `TASK-2.2` [GREEN]: Add DDL in `docker/init/schema.sql` for `fraud_fusion_jobs` with partial unique index `CREATE UNIQUE INDEX uq_fusion_job_pending_entity ON fraud_fusion_jobs (entity_id) WHERE status = 'PENDING'`. Implement `PostgresFusionJobDao`, `FusionEvaluationDispatcher`, `FusionJobWorker`, and `FusionJobRecoveryService`.
+- [x] `TASK-2.2` [GREEN]: Add DDL in `../../docker/init/schema.sql` for `fraud_fusion_jobs` with partial unique index `CREATE UNIQUE INDEX uq_fusion_job_pending_entity ON fraud_fusion_jobs (entity_id) WHERE status = 'PENDING'`. Implement `PostgresFusionJobDao`, `FusionEvaluationDispatcher`, `FusionJobWorker`, and `FusionJobRecoveryService`.
 - [x] `TASK-2.3` [REFACTOR]: Optimize transaction isolation and polling indexes.
 
 ### Phase 3: Embedded Pure Java ONNX Micro-ML & Feature Versioning (`br.com.wallet.fraud.fusion.internal.ml`)
@@ -62,7 +62,7 @@
   - Feature vector schema validation (`I-FUSION-008`): throws `IncompatibleFeatureSchemaException` on version mismatch or count mismatch.
   - Observable degradation (`I-FUSION-010`): returns `MlRiskResult.Unavailable` when model is missing or fails (no synthetic proxies).
   - Basic scoring test with valid feature vector.
-- [x] `TASK-3.2` [GREEN]: Add dependency `com.microsoft.onnxruntime:onnxruntime` to `fraud/build.gradle`. Implement `OnnxModelLoader`, `FraudFeatureMapper`, `MlFeatureVector`, `OnnxModelMetadata`, `MlRiskResult`, and `OnnxRiskModelEvaluator`. Place sample pre-trained tabular ONNX model in `fraud/src/main/resources/models/fraud_risk_tabular_v1.onnx`.
+- [x] `TASK-3.2` [GREEN]: Add dependency `com.microsoft.onnxruntime:onnxruntime` to `../../fraud/build.gradle`. Implement `OnnxModelLoader`, `FraudFeatureMapper`, `MlFeatureVector`, `OnnxModelMetadata`, `MlRiskResult`, and `OnnxRiskModelEvaluator`. Place sample pre-trained tabular ONNX model in `fraud/src/main/resources/models/fraud_risk_tabular_v1.onnx`.
 - [x] `TASK-3.3` [BENCHMARK]: Implement `OnnxRiskModelBenchmark` (dedicated performance gate task) verifying P95 $< 2\text{ms}$ on CPU.
 
 ### Phase 4: Differentiated Decision Policy & Phase 0.7 Investigation Delegation (`br.com.wallet.fraud.fusion.internal.policy`)
@@ -94,6 +94,6 @@
 - [x] Modulith architecture verification passes (`ModulithArchitectureTest.verifyArchitecture()`)
 - [x] Zero compiler / linter warnings
 - [x] OpenTelemetry traces verified
-- [x] Seed data added/updated in `docker/init/schema.sql`
+- [x] Seed data added/updated in `../../docker/init/schema.sql`
 - [x] Author Practical Verification Guide & Seed Data in `SUMMARY-000.8.md` (`I-SDD-002`)
 - [x] Traceability report generated: 100% of requirements verified

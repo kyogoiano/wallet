@@ -33,16 +33,17 @@ flowchart LR
 - Review open questions, edge cases, failure modes, and performance trade-offs with the user.
 - Resolve any ambiguities before committing to the architectural plan.
 
-### Stage 3: Architecture Planning (`.spec/PLAN-XXX-<feature>.md`)
-- Create `.spec/PLAN-XXX-<feature>.md` using [`.agents/skills/spec-driven-development/templates/plan-template.md`](file:///.agents/skills/spec-driven-development/templates/plan-template.md).
+### Stage 3: Architecture Planning (`.spec/plans/PLAN-XXX-<feature>.md`)
+- Create `.spec/plans/PLAN-XXX-<feature>.md` using [`.agents/skills/spec-driven-development/templates/plan-template.md`](file:///.agents/skills/spec-driven-development/templates/plan-template.md).
 - Document Spring Modulith module boundaries, package visibility (`.api` vs `.internal`), and `@NamedInterface` declarations (`RULE-CAP-001` - `RULE-CAP-007`).
 - Define SQL DDL migrations, PostgreSQL/Dragonfly data structures, Lua scripts, and entity relationships.
 - Detail concurrency strategy: deterministic locking order (`I-CONCURRENCY-001`), row locks, and idempotency (`I-IDEMPOTENCY-001`).
 - Provide ADRs (Architecture Decision Records) with alternatives considered.
 - **GATE 2 (Human Sign-off)**: Present architecture plan to the user for formal sign-off.
 
-### Stage 4: Task Breakdown & Active Task Cards (`.spec/TASKS-XXX-<feature>.md`)
-- Create `.spec/TASKS-XXX-<feature>.md` using [`.agents/skills/spec-driven-development/templates/tasks-template.md`](file:///.agents/skills/spec-driven-development/templates/tasks-template.md).
+### Stage 4: Task Breakdown & Active Task Cards (`.spec/tasks/TASKS-XXX-<feature>.md`)
+- Create `.spec/tasks/TASKS-XXX-<feature>.md` using [`.agents/skills/spec-driven-development/templates/tasks-template.md`](file:///.agents/skills/spec-driven-development/templates/tasks-template.md).
+
 - Build the **Traceability Matrix**: Map every `REQ-XXX` and `I-XXX` directly to planned verification tests and task IDs.
 - Structure tasks strictly in TDD order: Domain Primitives $\rightarrow$ Persistence / DAOs $\rightarrow$ Application Services $\rightarrow$ API / Integration.
 - Prioritize all `[MUST]` tasks first (`I-SDD-004`).

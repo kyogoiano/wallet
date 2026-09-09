@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-000.3 — Asynchronous Command Exception Handling & Operation Status Tracking
 
-- **Associated Spec**: [`SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md)
+- **Associated Spec**: [`../SPEC-000.3-async-command-exception-handling.md`](file:///.spec/SPEC-000.3-async-command-exception-handling.md)
 - **Status**: Approved
 - **Date**: 2026-08-29
 

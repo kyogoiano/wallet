@@ -41,7 +41,8 @@ These core invariants and architectural principles are **non-negotiable** and mu
 
 ## 4. Engineering & Governance Invariants
 
-- **`I-SDD-001` (Specification First)**: Code implementation must not begin without an approved Specification (`.spec/SPEC-XXX.md`), Architecture Plan (`.spec/PLAN-XXX.md`), and Task List (`.spec/TASKS-XXX.md`).
+- **`I-SDD-001` (Specification First)**: Code implementation must not begin without an approved Specification (`.spec/SPEC-XXX.md`), Architecture Plan (`.spec/plans/PLAN-XXX.md`), and Task List (`.spec/tasks/TASKS-XXX.md`).
+
 - **`I-SDD-002` (Practical Verification & Seed Data Gate)**: Every completed specification and summary (`SUMMARY-XXX.md`) MUST include a Practical Verification Guide with reproducible CLI/cURL commands, seed data fixtures, state validation queries, and expected outputs to facilitate immediate manual and automated testing.
 - **`I-SDD-003` (Bi-directional Equivalence Gate & Zero Spec-Drift)**: Before any phase is certified complete, bidirectional reconciliation must prove 100% congruence between implementation code, database schemas, and documentation (`SPEC-XXX`, `PLAN-XXX`, `TASKS-XXX`). Undocumented code drift is strictly forbidden; any technical adjustments discovered during implementation must be backported immediately.
 - **`I-SDD-004` (MoSCoW Prioritization Gate)**: Every requirement in a specification MUST be tagged with MoSCoW (`[MUST]`, `[SHOULD]`, `[COULD]`, `[WON'T]`). Implementation tasks MUST execute and pass all `[MUST]` invariants first. `[SHOULD]` and `[COULD]` items are strictly locked until all `[MUST]` criteria are green and verified.

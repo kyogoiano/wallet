@@ -1,8 +1,8 @@
 # 🏁 Implementation Summary: SPEC-000.6 — Fraud Risk Propagation, Temporal Decay & Hardened Hand-Rolled Job Engine
 
 - **Spec Reference**: [`SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/SPEC-000.6-fraud-risk-propagation-and-temporal-decay.md)
-- **Plan Reference**: [`PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md)
-- **Tasks Reference**: [`TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md)
+- **Plan Reference**: [`PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/plans/PLAN-000.6-fraud-risk-propagation-and-temporal-decay.md)
+- **Tasks Reference**: [`TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md`](file:///.spec/tasks/TASKS-000.6-fraud-risk-propagation-and-temporal-decay.md)
 - **Author**: Antigravity Financial & Risk Engineering Team
 - **Date**: 2026-09-01
 - **Status**: 🟢 **Implemented & Verified**

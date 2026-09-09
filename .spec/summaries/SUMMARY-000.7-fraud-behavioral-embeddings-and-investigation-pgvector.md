@@ -1,8 +1,8 @@
 # 📊 Implementation Summary: SPEC-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Investigation Intelligence
 
 - **Associated Spec**: [`../SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
-- **Associated Plan**: [`../PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
-- **Associated Tasks**: [`../TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Plan**: [`../plans/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/plans/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Tasks**: [`../tasks/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/tasks/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
 - **Status**: ✅ **Implemented & Verified**
 - **Date**: 2026-09-02
 - **Author**: Antigravity Financial & Risk Engineering Team

@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-XXX — [Feature Title]
 
 - **Associated Spec**: [`SPEC-XXX.md`](file:///.spec/SPEC-XXX.md)
-- **Associated Plan**: [`PLAN-XXX.md`](file:///.spec/PLAN-XXX.md)
-- **Associated Tasks**: [`TASKS-XXX.md`](file:///.spec/TASKS-XXX.md)
+- **Associated Plan**: [`PLAN-XXX.md`](file:///.spec/plans/PLAN-XXX.md)
+- **Associated Tasks**: [`TASKS-XXX.md`](file:///.spec/tasks/TASKS-XXX.md)
 - **Status**: Completed / Verified
 - **Execution Date**: YYYY-MM-DD
 - **Author / Agent**: [Author / Agent]

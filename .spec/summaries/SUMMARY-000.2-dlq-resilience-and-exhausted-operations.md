@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-000.2 — DLQ Resilience, EXHAUSTED Status & Spring Modulith Isolation
 
 - **Associated Spec**: [`SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md)
-- **Associated Plan**: [`PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md)
-- **Associated Tasks**: [`TASKS-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/TASKS-000.2-dlq-resilience-and-exhausted-operations.md)
+- **Associated Plan**: [`PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/plans/PLAN-000.2-dlq-resilience-and-exhausted-operations.md)
+- **Associated Tasks**: [`TASKS-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/tasks/TASKS-000.2-dlq-resilience-and-exhausted-operations.md)
 - **Status**: Completed & Verified
 - **Execution Date**: 2026-08-28
 - **Author**: Antigravity Financial Architecture Team

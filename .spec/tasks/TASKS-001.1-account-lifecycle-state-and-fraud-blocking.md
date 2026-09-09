@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-001.1 — Account Lifecycle State & Persistent Fraud Blocking Engine
 
-- **Associated Spec**: [`SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md)
-- **Associated Plan**: [`PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md)
+- **Associated Spec**: [`../SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md)
+- **Associated Plan**: [`../plans/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/plans/PLAN-001.1-account-lifecycle-state-and-fraud-blocking.md)
 - **Status**: Completed / Verified
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-23
@@ -29,7 +29,7 @@
 
 ### Phase 1: Database DDL & Core Foundation
 - [x] `TASK-1.1.1` Schema Migration:
-  - Add `status`, `blocked_at`, `blocked_reason` to `accounts` table in `docker/init/schema.sql`.
+  - Add `status`, `blocked_at`, `blocked_reason` to `accounts` table in `../../docker/init/schema.sql`.
 - [x] `TASK-1.1.2` Implement `AccountBlockedException`:
   - Create `br.com.wallet.core.exceptions.AccountBlockedException`.
 
@@ -62,4 +62,4 @@
   - `FraudReactionIT`: Verify that a fraud-blocked transaction marks the account `BLOCKED` persistently in PostgreSQL.
 - [x] `TASK-1.1.10` Convergence & Summary:
   - Run full test suite (`./gradlew test`).
-  - Author `.spec/summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md`.
+  - Author `../summaries/SUMMARY-001.1-account-lifecycle-state-and-fraud-blocking.md`.

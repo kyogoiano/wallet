@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000.5 — Hybrid Fraud Intelligence & Relational Graph Projection
 
-- **Associated Spec**: [`SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
-- **Associated Plan**: [`PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
+- **Associated Spec**: [`../SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/SPEC-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
+- **Associated Plan**: [`../plans/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md`](file:///.spec/plans/PLAN-000.5-hybrid-fraud-intelligence-and-relational-graph.md)
 - **Status**: Ready for Human Review & TDD Execution
 - **Architectural Mantra**: *"Keep the synchronous financial path O(1) in DragonflyDB while projecting relational graph facts asynchronously in PostgreSQL."*
 
@@ -23,7 +23,7 @@
 ## 2. Implementation Tasks (TDD Order)
 
 ### Phase 1: Database Schema, Entities & Relational Graph Persistence
-- [x] `TASK-1.1` [RED]: Create Flyway/schema migration `docker/init/schema.sql` and write failing integration test `FraudRelationshipDaoIT` testing entity creation, aggregate edge upsert (`ON CONFLICT`), and immutable event insertion.
+- [x] `TASK-1.1` [RED]: Create Flyway/schema migration `../../docker/init/schema.sql` and write failing integration test `FraudRelationshipDaoIT` testing entity creation, aggregate edge upsert (`ON CONFLICT`), and immutable event insertion.
 - [x] `TASK-1.2` [GREEN]: Implement `FraudEntity`, `FraudRelationship`, `FraudRelationshipEvent`, `EntityType`, `RelationshipType` in `br.com.wallet.fraud.intelligence.domain` and `PostgresFraudRelationshipDao` in `br.com.wallet.fraud.intelligence.internal.persistence`.
 
 ### Phase 2: Graph Pattern Detection & Deterministic Scoring Engine
@@ -41,4 +41,4 @@
 ### Phase 4: Historical Replay, Rebuild & Architecture Convergence
 - [x] `TASK-4.1` [RED]: Write integration test `GraphRebuildServiceIT` testing full reconstruction of `fraud_relationships` and Dragonfly hot cache from historical `fraud_relationship_events`.
 - [x] `TASK-4.2` [GREEN]: Implement `GraphRebuildService`.
-- [x] `TASK-4.3`: Verification of Spring Modulith boundaries and generation of `.spec/summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md`.
+- [x] `TASK-4.3`: Verification of Spring Modulith boundaries and generation of `../summaries/SUMMARY-000.5-hybrid-fraud-intelligence-and-relational-graph.md`.

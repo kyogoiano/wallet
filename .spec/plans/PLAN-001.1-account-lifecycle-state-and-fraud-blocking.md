@@ -1,6 +1,6 @@
 # 🏗️ Architecture Plan: PLAN-001.1 — Account Lifecycle State & Persistent Fraud Blocking Engine
 
-- **Associated Spec**: [`SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md)
+- **Associated Spec**: [`../SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md`](file:///.spec/SPEC-001.1-account-lifecycle-state-and-fraud-blocking.md)
 - **Status**: Approved / Implemented
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-23
@@ -52,7 +52,7 @@ flowchart TD
 
 ---
 
-## 2. Database Schema DDL Migration (`docker/init/schema.sql`)
+## 2. Database Schema DDL Migration (`../../docker/init/schema.sql`)
 
 ```sql
 -- Migration: Account Lifecycle State & Persistent Blocking Metadata

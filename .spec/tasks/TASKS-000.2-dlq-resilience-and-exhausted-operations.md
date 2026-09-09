@@ -1,7 +1,7 @@
 # 📝 Task Breakdown: TASKS-000.2 — DLQ Resilience, EXHAUSTED Status & Spring Modulith Isolation
 
-- **Associated Spec**: [`SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md)
-- **Associated Plan**: [`PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md)
+- **Associated Spec**: [`../SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md)
+- **Associated Plan**: [`../plans/PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/plans/PLAN-000.2-dlq-resilience-and-exhausted-operations.md)
 - **Status**: 🟢 Completed & Verified
 
 ---
@@ -28,7 +28,7 @@
 - [x] `TASK-1.3`: Define Use Case interfaces in `br.com.wallet.dlq.api`: `DlqManagementUseCase` and `DlqQueryUseCase`.
 
 ### Phase 2: Schema & Persistence
-- [x] `TASK-2.1`: Update `docker/init/schema.sql` `dlq_operations` check constraint with `EXHAUSTED` and `DISCARDED`.
+- [x] `TASK-2.1`: Update `../../docker/init/schema.sql` `dlq_operations` check constraint with `EXHAUSTED` and `DISCARDED`.
 - [x] `TASK-2.2`: Implement/Relocate `DlqOperationsDao` to `br.com.wallet.dlq.internal.persistence` with 3-retry cap logic (`retry_count < 3` and transition to `EXHAUSTED`).
 - [x] `TASK-2.3`: Write/Update `DlqOperationsDaoIT` to verify automatic transition to `EXHAUSTED` on 3rd failure.
 

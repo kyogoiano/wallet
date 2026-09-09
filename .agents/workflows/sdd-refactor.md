@@ -11,7 +11,8 @@ This workflow guides architectural and structural refactoring with strict behavi
 - If test coverage is incomplete or lacks negative scenarios, write characterization tests first.
 - Confirm all existing tests pass green (`./gradlew test`) before altering any structure.
 
-### Step 1: Architecture Plan (`.spec/PLAN-XXX-refactor.md`)
+### Step 1: Architecture Plan (`.spec/plans/PLAN-XXX-refactor.md`)
+
 - Document current vs. target architecture, package restructuring, and dependency flows.
 - Confirm compliance with Spring Modulith capability boundaries (`RULE-CAP-001` - `RULE-CAP-007`).
 - Identify all affected published interfaces (`.api.*`) and verify backward compatibility.

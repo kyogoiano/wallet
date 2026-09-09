@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-000.1 — In-Memory Store Migration: Redis to DragonflyDB
 
-- **Associated Spec**: [`SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md)
+- **Associated Spec**: [`../SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md)
 - **Status**: Executed / Verified
 - **Date**: 2026-08-26
 - **Author**: Antigravity Financial Architecture Team
@@ -45,7 +45,7 @@ flowchart TD
 
 ## 2. Component & Configuration Changes
 
-### 1. `docker-compose.yaml` Service Upgrade
+### 1. `../../docker-compose.yaml` Service Upgrade
 Replace `redis:8.10.1-alpine` with DragonflyDB:
 ```yaml
   dragonfly:
@@ -124,4 +124,4 @@ Both Lua scripts in [`RedisScripts.java`](file:///home/leandro/Code/wallet/src/m
 
 - **Concurrency**: Dragonfly's lock manager handles transaction serialization with fine-grained lock striping, eliminating global lock contention.
 - **Persistence & Eviction**: Configured with `--maxmemory=512mb` and `--cache_mode=true` to automatically evict stale velocity entries under memory pressure using LRU.
-- **Zero Rollback Risk**: Because wire protocol is 100% identical, reverting to Redis if ever needed requires only a single line image change in `docker-compose.yaml` with zero application code changes.
+- **Zero Rollback Risk**: Because wire protocol is 100% identical, reverting to Redis if ever needed requires only a single line image change in `../../docker-compose.yaml` with zero application code changes.

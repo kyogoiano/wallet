@@ -1,8 +1,8 @@
 # 🏁 Execution Summary: SUMMARY-000.4 — Outbox Observability, OpenObserve Pipeline & Source-Level Telemetry Optimization (History 11)
 
 - **Associated Spec**: [`SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)
-- **Associated Plan**: [`PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md)
-- **Associated Tasks**: [`TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md)
+- **Associated Plan**: [`PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md)
+- **Associated Tasks**: [`TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/tasks/TASKS-000.4-observability-outbox-and-openobserve-optimization.md)
 - **Source Reference**: [`.histories/history11-observability.txt`](file:///.histories/history11-observability.txt)
 
 - **Status**: 🟢 **Completed & Verified**
@@ -59,6 +59,6 @@ Implemented source-level telemetry optimization (History 11), declarative `@Trac
 - [`src/test/java/br/com/wallet/unit/ledger/outbox/OutboxEventProcessorTest.java`](file:///home/leandro/Code/wallet/src/test/java/br/com/wallet/unit/ledger/outbox/OutboxEventProcessorTest.java)
 - [`src/test/java/br/com/wallet/unit/ledger/outbox/OutboxRelayTest.java`](file:///home/leandro/Code/wallet/src/test/java/br/com/wallet/unit/ledger/outbox/OutboxRelayTest.java)
 - [`.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)
-- [`.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md)
-- [`.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md)
+- [`../plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md)
+- [`../tasks/TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/tasks/TASKS-000.4-observability-outbox-and-openobserve-optimization.md)
 - [`.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md)

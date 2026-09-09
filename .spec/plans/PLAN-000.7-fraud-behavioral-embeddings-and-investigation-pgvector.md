@@ -1,6 +1,6 @@
 # 📐 Architecture Plan: PLAN-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Investigation Intelligence
 
-- **Associated Spec**: [`SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
+- **Associated Spec**: [`../SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md)
 - **Status**: Ready for Review & Ratification (Histories 20, 24, 25, 26, 27, 28, 29 & 30)
 - **Author**: Antigravity Financial & Risk Engineering Team
 - **Date**: 2026-09-03
@@ -147,7 +147,7 @@ br.com.wallet.fraud.investigation/
 
 ## 3. Database Schema & Migration Specification
 
-### 3.1. DDL Migration (`docker/init/schema.sql`)
+### 3.1. DDL Migration (`../../docker/init/schema.sql`)
 ```sql
 -- 1. Enable pgvector extension
 CREATE EXTENSION IF NOT EXISTS vector;

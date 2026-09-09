@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-001 — Smart Savings Automation (br.com.wallet.savings)
 
 - **Associated Spec**: [`SPEC-001-smart-savings-automation.md`](file:///.spec/SPEC-001-smart-savings-automation.md)
-- **Associated Plan**: [`PLAN-001-smart-savings-automation.md`](file:///.spec/PLAN-001-smart-savings-automation.md)
-- **Associated Tasks**: [`TASKS-001-smart-savings-automation.md`](file:///.spec/TASKS-001-smart-savings-automation.md)
+- **Associated Plan**: [`PLAN-001-smart-savings-automation.md`](file:///.spec/plans/PLAN-001-smart-savings-automation.md)
+- **Associated Tasks**: [`TASKS-001-smart-savings-automation.md`](file:///.spec/tasks/TASKS-001-smart-savings-automation.md)
 - **Status**: Completed / Verified
 - **Execution Date**: 2026-08-23
 - **Author / Agent**: Antigravity Financial Architecture Team

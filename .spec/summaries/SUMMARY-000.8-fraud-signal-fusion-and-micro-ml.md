@@ -1,8 +1,8 @@
 # 📊 Implementation Summary: SPEC-000.8 — Fraud Signal Fusion, Micro-ML & Hand-Rolled Investigation Orchestration
 
 - **Associated Spec**: [`../SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)
-- **Associated Plan**: [`../PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md)
-- **Associated Tasks**: [`../TASKS-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md)
+- **Associated Plan**: [`../plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md)
+- **Associated Tasks**: [`../tasks/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/tasks/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md)
 - **Status**: ✅ **Implemented & Verified**
 - **Date**: 2026-09-08
 - **Author**: Antigravity Financial & Risk Engineering Team

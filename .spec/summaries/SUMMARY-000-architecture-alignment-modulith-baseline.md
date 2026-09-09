@@ -1,8 +1,8 @@
 # 📊 Execution Summary: SUMMARY-000 — Architecture Alignment & Modulith Core Baseline
 
 - **Associated Spec**: [`SPEC-000-architecture-alignment-modulith-baseline.md`](file:///.spec/SPEC-000-architecture-alignment-modulith-baseline.md)
-- **Associated Plan**: [`PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/PLAN-000-architecture-alignment-modulith-baseline.md)
-- **Associated Tasks**: [`TASKS-000-architecture-alignment-modulith-baseline.md`](file:///.spec/TASKS-000-architecture-alignment-modulith-baseline.md)
+- **Associated Plan**: [`PLAN-000-architecture-alignment-modulith-baseline.md`](file:///.spec/plans/PLAN-000-architecture-alignment-modulith-baseline.md)
+- **Associated Tasks**: [`TASKS-000-architecture-alignment-modulith-baseline.md`](file:///.spec/tasks/TASKS-000-architecture-alignment-modulith-baseline.md)
 - **Status**: Completed / Verified
 - **Execution Date**: 2026-08-22
 - **Author / Agent**: Antigravity Financial Architecture Team

@@ -15,9 +15,23 @@ flowchart LR
     Red["1. Write Failing Test (Red)"] --> Green["2. Minimal Implementation (Green)"] --> Refactor["3. Refactor & Clean"]
 ```
 
-1. **Red**: Write a test defining the requirement, invariant, or edge case. Run it and verify that it fails for the expected reason.
+1. **Red**: Write a test defining the requirement, invariant, or edge case. Run it and verify that it fails for the expected domain reason (not compilation error).
 2. **Green**: Write the minimal production code necessary to make the test pass.
 3. **Refactor**: Clean up implementation without altering observable behavior, maintaining all tests green.
+
+---
+
+## 1.1 Zero "Vibe Coding" Principles (`I-TDD-002`)
+
+"Vibe coding" (writing code on intuition, loose assertions, synthetic mock shortcuts, or retrofitting tests after coding) is strictly forbidden in financial engineering. Adhere to the following deterministic rules:
+
+- **Exact Monetary Arithmetic**: Never use `float` or `double` in tests. Assert all monetary figures using `BigDecimal` scale 2 via `isEqualByComparingTo()`.
+- **Mandatory Test Triad**: Every functional requirement (`REQ-XXX`) must have at least 3 test scenarios:
+  1. **Canonical Positive Path**: Expected happy path with full state assertions (balance, hash chain, outbox event).
+  2. **Invalid Input / Validation Gate**: Rejection on invalid inputs (negative amounts, zero step, past target dates, empty IDs).
+  3. **Domain Boundary / Rejection Gate**: Rejection on financial invariant breach (insufficient balance, non-active account status, fraud gate `HARD_BLOCK` or `RESTRICT`).
+- **Assertion Rigor**: Prohibit weak assertions (`assertNotNull(result)`, `assertTrue(success)` without state checks). Every assertion must verify specific IDs, calculated values, and state transitions.
+- **Contract Fidelity**: Unit test mocks must strictly mimic production semantics (e.g. throwing `AccountBlockedException` instead of returning null).
 
 ---
 

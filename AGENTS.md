@@ -6,7 +6,7 @@ Welcome to the **Wallet Service** codebase. This repository uses **Spec-Driven D
 
 ## 🧠 Context Hierarchy & Progressive Disclosure
 
-To maximize reasoning efficiency and prevent context window degradation, follow the **5-layer cache hierarchy**:
+To maximize reasoning efficiency and prevent context window degradation ("lost in the middle" problem), follow the **5-layer cache hierarchy**:
 
 | Layer | Type | Location | Purpose |
 | :--- | :--- | :--- | :--- |
@@ -16,26 +16,38 @@ To maximize reasoning efficiency and prevent context window degradation, follow 
 | **L3: Specifications**| Working Set | [`.spec/`](file:///.spec/) | Feature requirements, invariant definitions, tasks & plans. |
 | **L4: Source Code** | Implementation Evidence | [`src/`](file:///src/), [`core/`](file:///core/), [`fraud/`](file:///fraud/) | Targeted files modified strictly within specification bounds. |
 
-> **Rule of Thumb**: Never load more context into memory than needed for the active step. Read references only when specifically relevant.
+> **Context Hygiene Rule**: Never load entire classes or massive command outputs into memory. When executing a task, isolate focus using the **Active Task Card Protocol**.
 
 ---
 
-## 🔄 Spec-Driven Development (SDD) Pipeline
+## 🔄 Spec-Driven Development (SDD) Pipeline — V2 Deterministic Edition
 
-Every significant feature, refactor, or architectural change follows the **Spec Kit Pipeline**:
+Every significant feature, refactor, or architectural change follows the **8-Stage Spec Kit Pipeline**:
 
 ```mermaid
 flowchart LR
-    Specify --> Clarify --> Plan --> Tasks --> Analyze --> Implement --> Converge
+    PreFlight[0. Pre-Flight] --> Specify[1. Specify] --> Clarify[2. Clarify] --> Plan[3. Plan] --> Tasks[4. Tasks] --> Analyze[5. Analyze] --> Implement[6. Implement] --> Converge[7. Converge]
 ```
 
-1. **Specify** (`.spec/SPEC-XXX.md`): Define user intent, functional requirements, non-goals, and **mathematical invariants**.
-2. **Clarify**: Resolve ambiguities and edge cases with the human engineer.
-3. **Plan** (`.spec/PLAN-XXX.md`): Architecture decisions, interface contracts, module boundaries, data structures.
-4. **Tasks** (`.spec/TASKS-XXX.md`): TDD tasks, implementation order, verification plan.
-5. **Analyze**: Verify consistency across Spec, Plan, and Tasks before writing code.
-6. **Implement**: TDD execution (Red $\rightarrow$ Green $\rightarrow$ Refactor) in bounded increments.
-7. **Converge**: Traceability verification (every requirement mapped to passing tests and zero orphan code).
+1. **Pre-Flight**: Audit `.histories/` and preceding `SUMMARY-*.md` for past ADRs and established invariants.
+2. **Specify** (`.spec/SPEC-XXX.md`): Define user intent, atomic slice ($\le 250$ lines), **MoSCoW requirements** (`[MUST]`, `[SHOULD]`, `[COULD]`, `[WON'T]`), **Cross-Feature Impact Matrix**, and **mathematical invariants**.
+3. **Clarify**: Resolve ambiguities, trade-offs, and edge cases with the human engineer.
+4. **Plan** (`.spec/PLAN-XXX.md`): Modulith boundaries, interface contracts, ADRs, and concurrency strategy.
+5. **Tasks** (`.spec/TASKS-XXX.md`): Prioritized atomic TDD task breakdown with Active Task Cards (`[MUST]` tasks executed first).
+6. **Analyze**: Pre-implementation consistency gate verifying 100% traceability between Spec, Plan, and Tasks.
+7. **Implement**: TDD execution (Red $\rightarrow$ Green $\rightarrow$ Refactor) with Zero Vibe Coding (exact `BigDecimal` scale 2 arithmetic, mandatory test triads).
+8. **Converge**: Bi-directional equivalence verification (zero spec-code drift), architecture test pass, coverage verification, and Practical Verification Guide with seed data (`I-SDD-002`, `I-SDD-003`).
+
+---
+
+## 👥 Strategic Subagent Team Topology
+
+To protect the orchestrator's context window from pollution, delegate work across specialized subagent roles:
+
+- **System Researcher** (Read-Only): Performs pre-flight audits, inspects code, builds cross-feature impact matrices.
+- **Spec Analyst** (Read-Only): Analyzes Spec ↔ Plan ↔ Tasks consistency at the Stage 5 gate.
+- **TDD Implementer** (Write / Branch): Executes Red $\to$ Green $\to$ Refactor cycles on an isolated task card in a dedicated workspace.
+- **Convergence Auditor** (Command): Runs `./gradlew test` and Modulith architecture checks, asserting zero drift before summary authoring.
 
 ---
 
@@ -46,10 +58,10 @@ flowchart LR
 - [`project-context.md`](file:///.agents/rules/project-context.md) — Architecture overview, tech stack, and module boundaries.
 - [`capability-boundaries.md`](file:///.agents/rules/capability-boundaries.md) — Architectural mantra, Spring Modulith boundaries, and capability rules.
 - [`coding-standards.md`](file:///.agents/rules/coding-standards.md) — Modern Java 26 patterns, immutability, zero boilerplate.
-- [`testing-standards.md`](file:///.agents/rules/testing-standards.md) — TDD methodology, Testcontainers, resilience, and ledger validation.
+- [`testing-standards.md`](file:///.agents/rules/testing-standards.md) — TDD methodology, Zero Vibe Coding, Testcontainers, and test triads.
 
 ### Skills ([`.agents/skills/`](file:///.agents/skills/))
-- [`spec-driven-development`](file:///.agents/skills/spec-driven-development/SKILL.md) — Spec Kit orchestration, templates, and verification.
+- [`spec-driven-development`](file:///.agents/skills/spec-driven-development/SKILL.md) — Spec Kit orchestration, templates, MoSCoW, and verification.
 - [`capability-driven-development`](file:///.agents/skills/capability-driven-development/SKILL.md) — Spring Modulith capability building, action lifecycle, and boundaries.
 - [`ledger-engineering`](file:///.agents/skills/ledger-engineering/SKILL.md) — Hash-chained tamper detection, atomic transfers, ledger reconstruction.
 - [`antifraud-engineering`](file:///.agents/skills/antifraud-engineering/SKILL.md) — Multi-tier fraud detection, sliding windows, Lua scripts, Caffeine/Redis caching.

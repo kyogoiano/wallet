@@ -3,80 +3,138 @@ name: spec-driven-development
 description: GitHub Spec Kit (Spec-Driven Design) workflow orchestrator. Use when specifying, planning, analyzing, implementing, or verifying new features, refactors, or bugfixes.
 ---
 
-# 📐 Spec-Driven Development (SDD) Skill
+# 📐 Spec-Driven Development (SDD) Skill — V2 Deterministic Edition
 
 ## 1. Identity & Objective
 
-This skill implements the **GitHub Spec Kit** methodology adapted for financial and transactional systems. It orchestrates the lifecycle from user intent down to verified, production-ready code with complete mathematical traceability.
+This skill implements the **GitHub Spec Kit** methodology rigorously adapted for financial engineering, high-throughput transactional ledgers, and distributed risk systems. It eliminates **"vibe coding"**, prevents **spec-implementation drift**, safeguards against the **"lost in the middle"** LLM context degradation problem, and guarantees mathematical determinism through strict TDD verification.
 
 ---
 
 ## 2. When to Activate
 
-- Creating a new feature, use case, or API endpoint.
-- Performing an architectural migration or refactoring.
-- Fixing complex domain bugs with regression prevention.
-- Creating formal specifications (`.spec/SPEC-XXX.md`), architecture plans (`.spec/PLAN-XXX.md`), or task lists (`.spec/TASKS-XXX.md`).
+- Defining a new capability module, domain use case, or API endpoint.
+- Executing an architectural refactoring, migration, or boundary shift.
+- Diagnosing or fixing financial domain bugs with regression prevention.
+- Authoring or auditing `.spec/SPEC-XXX.md`, `.spec/PLAN-XXX.md`, `.spec/TASKS-XXX.md`, or `.spec/summaries/SUMMARY-XXX.md`.
 
 ---
 
-## 3. The 7-Stage SDD Pipeline
+## 3. The 8-Stage Enhanced SDD Pipeline
 
 ```text
-1. SPECIFY   → Author .spec/SPEC-XXX.md (Intent, Invariants, Requirements)
-2. CLARIFY   → Identify ambiguities, open questions, and domain edge cases
-3. PLAN      → Author .spec/PLAN-XXX.md (Architecture, ADRs, Data Models)
-4. TASKS     → Author .spec/TASKS-XXX.md (TDD step breakdown, Traceability)
-5. ANALYZE   → Cross-check Spec ↔ Plan ↔ Tasks for consistency & gaps
-6. IMPLEMENT → Execute tasks in TDD order (Red → Green → Refactor)
-7. CONVERGE  → Generate Traceability Report and verify all acceptance criteria
+0. PRE-FLIGHT  → Audit .histories/ and prior SUMMARY-*.md for past ADRs and invariants
+1. SPECIFY     → Author .spec/SPEC-XXX.md (DDD Slice, MoSCoW, Cross-Feature Impact Matrix)
+2. CLARIFY     → Resolve domain ambiguities, edge cases, and human alignment
+3. PLAN        → Author .spec/PLAN-XXX.md (Architecture, Modulith Boundaries, ADRs)
+4. TASKS       → Author .spec/TASKS-XXX.md (Atomic TDD task cards, [MUST] prioritized)
+5. ANALYZE     → Pre-implementation consistency gate (Spec ↔ Plan ↔ Tasks traceability)
+6. IMPLEMENT   → Red → Green → Refactor (Zero Vibe Coding, Exact BigDecimal math)
+7. CONVERGE    → Zero Spec-Drift Reconciliation, Modulith verification, Practical Guide
 ```
 
 ---
 
-## 4. Stage Procedures
+## 4. Stage Procedures & Governance Gates
 
-### Stage 1: Specify
-- Create `.spec/SPEC-XXX-<name>.md` using [`templates/spec-template.md`](file:///.agents/skills/spec-driven-development/templates/spec-template.md).
-- Formulate requirements with unique IDs (`REQ-XXX`).
-- Formulate mathematical system invariants (`I-XXX`).
-- Define practical verification scenarios and seed data prerequisites.
-- List non-goals and out-of-scope items explicitly.
+### Stage 0: Pre-Flight History & Context Audit
+- **Goal**: Intentional curation avoiding regression of past architectural decisions.
+- **Actions**:
+  1. Inspect `.histories/` for preceding discussions and design tradeoffs in the domain.
+  2. Review relevant `.spec/summaries/SUMMARY-*.md` documents.
+  3. Identify foundational invariants (`constitution.md`) that constrain the new feature.
+
+### Stage 1: Specify (`I-SDD-004`, `I-SDD-005`, `I-SDD-006`)
+- **Goal**: Formulate user intent with mathematical precision within a bounded context.
+- **Actions**:
+  1. Create `.spec/SPEC-XXX-<name>.md` using [`templates/spec-template.md`](templates/spec-template.md).
+  2. **Atomic Spec Slicing (`I-SDD-006`)**: Limit spec to a single Bounded Context and $\le 250$ lines. Decompose large features into sequential dot-releases (`SPEC-XXX.1`, `SPEC-XXX.2`).
+  3. **MoSCoW Prioritization (`I-SDD-004`)**: Tag every requirement explicitly:
+     - `[MUST]`: Essential architectural/financial invariants and core contracts.
+     - `[SHOULD]`: Operational resilience, retries, exponential backoff, telemetry counters.
+     - `[COULD]`: Ergonomic shortcuts, optional filters, human-friendly formatting.
+     - `[WON'T]`: Explicitly out-of-scope boundaries for this iteration.
+  4. **Cross-Feature Impact Matrix (`I-SDD-005`)**: Systematically map impacts across `ledger`, `fraud`, `savings`, `goals`, `dlq`, and `messaging`.
+  5. Define system invariants (`I-XXX`) using formal mathematical notation.
 
 ### Stage 2: Clarify
-- Review specification with human engineer.
-- Resolve any open questions or assumptions.
-- Do not proceed to planning until requirements and invariants are ratified.
+- **Goal**: Human alignment before architectural commitment.
+- **Actions**:
+  1. Present open trade-offs and edge cases to the human engineer.
+  2. Resolve ambiguous domain policies. Do not proceed until requirements and invariants are ratified.
 
 ### Stage 3: Plan
-- Create `.spec/PLAN-XXX-<name>.md` using [`templates/plan-template.md`](file:///.agents/skills/spec-driven-development/templates/plan-template.md).
-- Define technical architecture, module boundaries, and interfaces.
-- Reference applicable Architecture Decision Records (ADRs).
-- Detail data migrations, seed data additions, concurrency strategy, and failure handling.
+- **Goal**: Architecture decisions, Modulith module boundaries, data structures, and failure semantics.
+- **Actions**:
+  1. Create `.spec/PLAN-XXX-<name>.md` using [`templates/plan-template.md`](templates/plan-template.md).
+  2. Define package topology conforming to Spring Modulith (`api` vs `internal`).
+  3. Document ADRs, sequence diagrams, and concurrency strategy (`SELECT FOR UPDATE` deterministic ordering).
+  4. Specify database DDL migrations, check constraints, indexes, and cache TTLs.
 
-### Stage 4: Tasks
-- Create `.spec/TASKS-XXX-<name>.md` using [`templates/tasks-template.md`](file:///.agents/skills/spec-driven-development/templates/tasks-template.md).
-- Break implementation into small, atomic TDD tasks.
-- Every task must link to at least one requirement ID (`REQ-XXX`) or invariant (`I-XXX`).
-- Include explicit task for authoring the Practical Verification Guide & Seed Data in the summary.
+### Stage 4: Tasks (Active Task Cards)
+- **Goal**: Atomic, sequence-ordered TDD task decomposition mapped 1-to-1 to requirements.
+- **Actions**:
+  1. Create `.spec/TASKS-XXX-<name>.md` using [`templates/tasks-template.md`](templates/tasks-template.md).
+  2. Group tasks strictly by MoSCoW tier: **Phase 1 executes `[MUST]` tasks only**.
+  3. Ensure every task points to its target requirement ID (`REQ-XXX`) or invariant (`I-XXX`).
 
 ### Stage 5: Analyze (Pre-Implementation Gate)
-Verify the following consistency rules:
-- Every `REQ-XXX` has corresponding tasks in `TASKS-XXX.md`.
-- Every `I-XXX` has explicit validation or test coverage planned.
-- No orphan tasks exist that lack specification backing.
-- Concurrency, locking, seed data, and error paths are planned.
+- **Goal**: Automated consistency verification before a single line of production code is written.
+- **Actions**:
+  1. Verify: Every `REQ-XXX [MUST]` has corresponding test tasks in `TASKS-XXX.md`.
+  2. Verify: Every `I-XXX` invariant maps to an explicit assertion test.
+  3. Verify: Zero orphan tasks exist without specification backing.
+  4. Verify: Concurrency, error paths, and seed data prerequisites are fully specified.
 
-### Stage 6: Implement (TDD Execution)
-- Follow the task list strictly in sequence.
-- Write failing unit/integration tests first (`Red`).
-- Implement minimal code to pass (`Green`).
-- Refactor for clarity and performance while tests remain green.
+### Stage 6: Implement (Zero Vibe Coding — `I-TDD-002`)
+- **Goal**: Deterministic Red $\to$ Green $\to$ Refactor execution.
+- **Actions**:
+  1. **Red**: Write a failing unit/integration test. Verify that it fails for the expected domain reason.
+  2. **Mandatory Test Triad**: Positive path + Invalid input gate + Invariant breach rejection.
+  3. **Exact Arithmetic**: Canonical `BigDecimal` scale 2 via `isEqualByComparingTo()`. Zero floats/doubles.
+  4. **Green**: Write the minimal production code necessary to pass.
+  5. **Refactor**: Clean up and optimize while all tests remain green.
 
-### Stage 7: Converge (Verification, Coverage & Reconciliation Gate)
-- **Build & Test**: Run full test suite (`./gradlew test jacocoTestReport`).
-- **Architecture Verification**: Ensure `ModulithArchitectureTest.verifyArchitecture()` passes with 0 violations and 0 cycles.
-- **Coverage Check**: Verify line coverage meets minimum thresholds ($\ge 70\%$ overall, $\ge 85\%$ core services/fraud rules).
-- **Zero Spec-Drift Reconciliation**: Compare actual implemented code, package names, and interfaces against `SPEC-XXX` and `PLAN-XXX`. If technical realities or ADRs required adjustments, reconcile `SPEC-XXX` and `PLAN-XXX` immediately so that Spec, Plan, Tasks, and Code remain 100% congruent.
-- **Practical Verification Guide (`I-SDD-002`)**: Author complete, reproducible manual/CLI testing instructions with seed data fixtures, `curl` commands, NATS events, and SQL/Redis assertion queries.
-- **Execution Summary**: Author `.spec/summaries/SUMMARY-XXX-<name>.md` using [`templates/summary-template.md`](file:///.agents/skills/spec-driven-development/templates/summary-template.md) recording metrics, code changes, invariant verification evidence, and the Practical Verification Guide.
+### Stage 7: Converge (`I-SDD-002`, `I-SDD-003`)
+- **Goal**: Bi-directional equivalence certification, zero-drift verification, and operational documentation.
+- **Actions**:
+  1. **Build & Test**: Run `./gradlew test jacocoTestReport`.
+  2. **Modulith Verification**: Run `ModulithArchitectureTest.verifyArchitecture()` (0 violations, 0 cycles).
+  3. **Coverage Check**: Verify line coverage meets thresholds ($\ge 70\%$ overall, $\ge 85\%$ core domain/fraud).
+  4. **Zero Spec-Drift Reconciliation (`I-SDD-003`)**: Reconcile all class names, package paths, and DDL schemas in `SPEC-XXX` and `PLAN-XXX` to match the final codebase 100%. Update all checkboxes in `TASKS-XXX` to `[x]`.
+  5. **Practical Verification Guide (`I-SDD-002`)**: Author complete manual testing guide with seed data, CLI `curl` commands, NATS events, and SQL/Dragonfly assertion queries in `SUMMARY-XXX.md`.
+
+---
+
+## 5. Context Hygiene & "Lost in the Middle" Mitigation
+
+To prevent context window degradation and LLM recall loss over long sessions:
+
+### 5.1 The Active Task Card Protocol
+When implementing, bring **only** the active task into the working set:
+```markdown
+### 🎯 Active Task Card: TASK-X.Y
+- **Target Invariant**: I-XXX-001
+- **Target Requirement**: REQ-XXX-001 [MUST]
+- **Target Files**: <DomainService>.java, <DomainServiceTest>.java
+- **In-Scope Contracts**: Inputs -> CommandDTO, Output -> ResultRecord
+- **Forbidden Boundary**: Do not modify database schemas or unrelated services.
+```
+
+### 5.2 Progressive Context Loading (L0–L4 Hierarchy)
+- Never view entire multi-thousand line files. Use line slices (`StartLine`/`EndLine`).
+- Never run commands producing multi-megabyte terminal outputs.
+- Close subagent contexts after isolated tasks finish to reclaim attention capacity.
+
+---
+
+## 6. Strategic Subagent Team Topology
+
+When executing complex phases, delegate to specialized subagents:
+
+| Subagent Role | Type Name | Tools / Mode | Primary Responsibility |
+| :--- | :--- | :--- | :--- |
+| **System Researcher** | `research` | Read-only | Explore codebase, review `.histories/`, build cross-feature impact matrices. |
+| **Spec Analyst** | `research` | Read-only | Stage 5 Pre-Implementation Gate: audit Spec ↔ Plan ↔ Tasks consistency. |
+| **TDD Implementer** | `self` | Write / Branch | Red $\to$ Green $\to$ Refactor execution for a single Active Task Card. |
+| **Convergence Auditor** | `self` | Read / Command | Run `./gradlew test`, check Modulith compliance, assert Zero Spec-Drift. |

@@ -30,7 +30,7 @@ flowchart TD
         SavingsRuleDao["SavingsRuleDao\n(JDBC)"]
     end
 
-    subgraph DB [(PostgreSQL)]
+    subgraph DB [PostgreSQL]
         savings_plans["savings_plans"]
         savings_rules["savings_rules"]
     end

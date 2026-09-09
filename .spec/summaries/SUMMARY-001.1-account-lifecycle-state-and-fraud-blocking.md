@@ -16,7 +16,7 @@ The **`SPEC-001.1`** initiative successfully resolved the critical architectural
 ```mermaid
 flowchart TD
     Trigger["Fraud Rule Trigger (BLOCK) / Admin Block"] -->|1. Update status = 'BLOCKED'| DB["PostgreSQL (accounts table)"]
-    Trigger -->|2. Sync Redis cache (TTL=10m)| Redis["Redis user:{userId}:blocked"]
+    Trigger -->|2. Sync Redis cache TTL=10m| Redis["Redis user:{userId}:blocked"]
     
     Tx["Financial Transaction (Transfer/Deposit/Withdraw/Sweep)"] -->|SELECT FOR UPDATE| Lock["AccountDao Row Lock"]
     Lock -->|Check status| Gate{"status == 'ACTIVE'?"}

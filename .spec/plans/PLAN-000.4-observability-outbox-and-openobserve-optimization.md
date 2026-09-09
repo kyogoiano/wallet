@@ -17,7 +17,7 @@ flowchart TD
         MF[MeterFilter: Ignore spring.bean.name]
         OP[ObservationPredicate: Suppress /actuator/health]
         OE[OutboxEvent implements TraceContext]
-        OEP[OutboxEventProcessor @Traceable outbox.relay.event]
+        OEP[OutboxEventProcessor Traceable outbox.relay.event]
         TA[TracingAspect: Tag operation.id, user.id & close scopes]
     end
 

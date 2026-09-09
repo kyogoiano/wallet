@@ -113,6 +113,9 @@ gantt
     title Wallet Service Evolution Roadmap
     dateFormat  YYYY-MM-DD
     section Phase 0 Baseline & Infrastructure
+    SPEC-000.01 Core Ledger Engine      :done, p00_01, 2026-08-15, 3d
+    SPEC-000.02 Transactional Outbox    :done, p00_02, 2026-08-18, 2d
+    SPEC-000.03 Anti-Fraud & Velocity   :done, p00_03, 2026-08-20, 2d
     SPEC-000 Architecture Alignment     :done, p00_1, 2026-08-22, 2d
     TASKS-000 & Modulith Baseline       :done, p00_2, after p00_1, 2d
     SPEC-000.1 DragonflyDB Migration    :done, p00_3, 2026-08-26, 2d
@@ -137,6 +140,48 @@ gantt
     SPEC-004 MCP Server & AI Copilot    :p4_1, after p3_2, 4d
     TASKS-004 & Tool Protocol Delivery  :p4_2, after p4_1, 5d
 ```
+
+---
+
+### 🔹 Phase 000.01: Core Transactional Ledger & Double-Entry Engine
+**Spec Identifier**: [`SPEC-000.01-core-transactional-ledger-and-double-entry`](file:///.spec/SPEC-000.01-core-transactional-ledger-and-double-entry.md)  
+**Status**: 🟢 **Completed & Verified (Reverse-Engineered)**  
+**Core Abstraction**: `Double-Entry Accounting & Hash-Chained Ledger (br.com.wallet.ledger)`
+
+- **Intent**: Formalize the baseline transactional ledger, cryptographic SHA-256 hash chains (`I-LEDGER-001`, `I-LEDGER-002`), mathematical balance projection equality (`I-BALANCE-001`), non-negative balance invariant (`I-BALANCE-002`), deterministic lexicographical UUID row-lock ordering for deadlock elimination (`I-CONCURRENCY-001`), and ledger replay balance reconstruction.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.01-core-transactional-ledger-and-double-entry.md`](file:///.spec/SPEC-000.01-core-transactional-ledger-and-double-entry.md) (Ratified)
+  - [`plans/PLAN-000.01-core-transactional-ledger-and-double-entry.md`](file:///.spec/plans/PLAN-000.01-core-transactional-ledger-and-double-entry.md) (Approved)
+  - [`tasks/TASKS-000.01-core-transactional-ledger-and-double-entry.md`](file:///.spec/tasks/TASKS-000.01-core-transactional-ledger-and-double-entry.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.01-core-transactional-ledger-and-double-entry.md`](file:///.spec/summaries/SUMMARY-000.01-core-transactional-ledger-and-double-entry.md) (Verified)
+
+---
+
+### 🔹 Phase 000.02: Transactional Outbox Pattern & Event Streaming
+**Spec Identifier**: [`SPEC-000.02-transactional-outbox-and-event-streaming`](file:///.spec/SPEC-000.02-transactional-outbox-and-event-streaming.md)  
+**Status**: 🟢 **Completed & Verified (Reverse-Engineered)**  
+**Core Abstraction**: `Reliable Asynchronous Messaging (br.com.wallet.ledger.internal.outbox / messaging)`
+
+- **Intent**: Formalize transactional outbox event capture (`I-OUTBOX-001`), non-blocking PostgreSQL batch claiming via `SKIP LOCKED` (`I-CONCURRENCY-002`), deterministic exponential retry backoff ($2^{\text{retry\_count} + 1}\text{s}$) (`I-RETRY-001`), dead-letter quarantine after 10 attempts (`I-RETRY-002`), and NATS JetStream server-side deduplication via `Nats-Msg-Id` (`I-DEDUP-001`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.02-transactional-outbox-and-event-streaming.md`](file:///.spec/SPEC-000.02-transactional-outbox-and-event-streaming.md) (Ratified)
+  - [`plans/PLAN-000.02-transactional-outbox-and-event-streaming.md`](file:///.spec/plans/PLAN-000.02-transactional-outbox-and-event-streaming.md) (Approved)
+  - [`tasks/TASKS-000.02-transactional-outbox-and-event-streaming.md`](file:///.spec/tasks/TASKS-000.02-transactional-outbox-and-event-streaming.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.02-transactional-outbox-and-event-streaming.md`](file:///.spec/summaries/SUMMARY-000.02-transactional-outbox-and-event-streaming.md) (Verified)
+
+---
+
+### 🔹 Phase 000.03: Deterministic Anti-Fraud Pre-Execution Gate & Velocity Rules
+**Spec Identifier**: [`SPEC-000.03-deterministic-anti-fraud-and-velocity-rules`](file:///.spec/SPEC-000.03-deterministic-anti-fraud-and-velocity-rules.md)  
+**Status**: 🟢 **Completed & Verified (Reverse-Engineered)**  
+**Core Abstraction**: `Pre-Execution Risk Gate & Velocity Engine (br.com.wallet.fraud / ledger.api.guard)`
+
+- **Intent**: Formalize the pre-execution anti-fraud gate with zero ledger mutation (`I-FRAUD-001`), sub-millisecond $O(1)$ evaluation using Caffeine ring buffers and DragonflyDB atomic Lua scripts (`I-FRAUD-002`), deterministic score thresholds (`I-FRAUD-003`), dual-store PostgreSQL/Redis account locking (`I-FRAUD-004`), and replay-neutral velocity scoring (`I-FRAUD-005`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.03-deterministic-anti-fraud-and-velocity-rules.md`](file:///.spec/SPEC-000.03-deterministic-anti-fraud-and-velocity-rules.md) (Ratified)
+  - [`plans/PLAN-000.03-deterministic-anti-fraud-and-velocity-rules.md`](file:///.spec/plans/PLAN-000.03-deterministic-anti-fraud-and-velocity-rules.md) (Approved)
+  - [`tasks/TASKS-000.03-deterministic-anti-fraud-and-velocity-rules.md`](file:///.spec/tasks/TASKS-000.03-deterministic-anti-fraud-and-velocity-rules.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.03-deterministic-anti-fraud-and-velocity-rules.md`](file:///.spec/summaries/SUMMARY-000.03-deterministic-anti-fraud-and-velocity-rules.md) (Verified)
 
 ---
 

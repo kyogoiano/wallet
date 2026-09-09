@@ -57,9 +57,9 @@ public class OnnxRiskModelEvaluator {
             float[][] inputMatrix = new float[1][features.values().length];
             System.arraycopy(features.values(), 0, inputMatrix[0], 0, features.values().length);
 
-            try (OnnxTensor inputTensor = OnnxTensor.createTensor(loader.env(), inputMatrix)) {
+            try (final OnnxTensor inputTensor = OnnxTensor.createTensor(loader.env(), inputMatrix)) {
                 String inputName = loader.session().getInputNames().iterator().next();
-                try (OrtSession.Result result = loader.session().run(Map.of(inputName, inputTensor))) {
+                try (final OrtSession.Result result = loader.session().run(Map.of(inputName, inputTensor))) {
                     float[][] outputMatrix = (float[][]) result.get(0).getValue();
                     double rawScore = outputMatrix[0][0];
                     double score = Math.clamp(rawScore, 0.0, 1.0);

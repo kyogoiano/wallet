@@ -4,7 +4,6 @@ import br.com.wallet.fraud.fusion.api.model.FraudDecision;
 import br.com.wallet.fraud.fusion.api.model.RiskProfile;
 import br.com.wallet.fraud.fusion.api.model.RiskSubject;
 import br.com.wallet.fraud.fusion.api.model.RiskSubjectType;
-import br.com.wallet.fraud.fusion.internal.persistence.RedisRiskProfileStore;
 import br.com.wallet.fraud.fusion.internal.persistence.RiskProfileStore;
 import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.IntegrationTestBase;

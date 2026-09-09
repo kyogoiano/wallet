@@ -75,7 +75,7 @@ public class FraudSignalFusionService {
             1.0
         );
         MlRiskResult mlResult = onnxEvaluator.evaluate(featureVector);
-
+        log.info("Onnx Ml result: {}", mlResult);
         // 2. Build multi-signal set
         FraudSignalSet signals = new FraudSignalSet(
             entity.directRisk(),

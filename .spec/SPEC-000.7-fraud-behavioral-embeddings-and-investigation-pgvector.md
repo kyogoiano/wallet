@@ -54,7 +54,7 @@ flowchart TD
         Hist[30-Day Transaction History] --> FeatExt[16-D Feature Extractor]
         FeatExt --> Norm[L2 Normalization: unit vector v + magnitude d]
         Norm --> DB_Feat[(pgvector: fraud_entity_features)]
-        Centroids[(pgvector: fraud_archetype_centroids)] --> ExactMatcher[Exact Dot Product: v · centroid_i]
+        Centroids[(pgvector: fraud_archetype_centroids)] --> ExactMatcher[Exact Dot Product: v * centroid_i]
         DB_Feat --> ExactMatcher
         ExactMatcher --> Score[behavioral_risk = max sim * w_i]
     end

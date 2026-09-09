@@ -46,8 +46,7 @@ public class OnnxModelLoader implements AutoCloseable {
     }
 
     private void init() {
-        try {
-            InputStream is = getClass().getClassLoader().getResourceAsStream(modelResourcePath);
+        try (final var is = getClass().getClassLoader().getResourceAsStream(modelResourcePath)){
             if (is == null) {
                 this.available = false;
                 this.unavailableReason = "ONNX_MODEL_UNAVAILABLE: Resource not found at " + modelResourcePath;

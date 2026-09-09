@@ -28,21 +28,16 @@ public class PostgresCheckpointDao implements CheckpointRepository {
         this.jdbcTemplate = Objects.requireNonNull(jdbcTemplate, "jdbcTemplate cannot be null");
     }
 
-    private static final RowMapper<CheckpointRecord> CHECKPOINT_ROW_MAPPER = new RowMapper<>() {
-        @Override
-        public CheckpointRecord mapRow(ResultSet rs, int rowNum) throws SQLException {
-            return new CheckpointRecord(
-                rs.getObject("checkpoint_id", UUID.class),
-                rs.getObject("entity_id", UUID.class),
-                rs.getString("status"),
-                rs.getString("state_payload"),
-                rs.getDouble("final_risk"),
-                rs.getString("risk_classification"),
-                rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant()
-            );
-        }
-    };
+    private static final RowMapper<CheckpointRecord> CHECKPOINT_ROW_MAPPER = (rs, rowNum) -> new CheckpointRecord(
+        rs.getObject("checkpoint_id", UUID.class),
+        rs.getObject("entity_id", UUID.class),
+        rs.getString("status"),
+        rs.getString("state_payload"),
+        rs.getDouble("final_risk"),
+        rs.getString("risk_classification"),
+        rs.getTimestamp("created_at").toInstant(),
+        rs.getTimestamp("updated_at").toInstant()
+    );
 
     @Override
     @NonNull

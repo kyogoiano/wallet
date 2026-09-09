@@ -152,9 +152,10 @@ Response 200 OK:
 
 ## 8. Acceptance Criteria
 
-- [ ] `br.com.wallet.dlq` created as independent Spring Modulith module.
-- [ ] `DlqStatus` enum contains `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `EXHAUSTED`, `DISCARDED`.
-- [ ] Automatic `DlqReplayEngine` halts after 3 attempts and marks record as `EXHAUSTED`.
-- [ ] REST API endpoints `/dlq/operations` tested and documented with OpenAPI.
-- [ ] Modulith architecture verification passes (`ModulithArchitectureTest`).
-- [ ] 100% unit and integration tests passing.
+- [x] `br.com.wallet.dlq` created as independent Spring Modulith module.
+- [x] `DlqStatus` enum contains `PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `EXHAUSTED`, `DISCARDED`.
+- [x] Automatic `DlqReplayEngine` halts after 3 attempts and marks record as `EXHAUSTED`.
+- [x] REST API endpoints `/dlq/operations` tested and documented with OpenAPI.
+- [x] Modulith architecture verification passes (`ModulithArchitectureTest`).
+- [x] 100% unit and integration tests passing.
+

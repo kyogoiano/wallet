@@ -2,7 +2,7 @@
 
 - **Associated Spec**: [`SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md)
 - **Associated Plan**: [`PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md)
-- **Status**: In Progress
+- **Status**: 🟢 Completed & Verified
 
 ---
 
@@ -23,35 +23,36 @@
 ## 2. Implementation Tasks (TDD Order)
 
 ### Phase 1: Modulith Package Structure & Domain Models
-- [ ] `TASK-1.1`: Create `br.com.wallet.dlq` module structure: `package-info.java`, `api/package-info.java`, `api/model/*` (`DlqEvent`, `DlqStatus`, `DlqFailureType`), `api/dto/*` (`DlqOperationResponse`, `DlqQueryFilter`, `DiscardDlqCommand`).
-- [ ] `TASK-1.2`: Update `DlqStatus` enum with `EXHAUSTED` and `DISCARDED`.
-- [ ] `TASK-1.3`: Define Use Case interfaces in `br.com.wallet.dlq.api`: `DlqManagementUseCase` and `DlqQueryUseCase`.
+- [x] `TASK-1.1`: Create `br.com.wallet.dlq` module structure: `package-info.java`, `api/package-info.java`, `api/model/*` (`DlqEvent`, `DlqStatus`, `DlqFailureType`), `api/dto/*` (`DlqOperationResponse`, `DlqQueryFilter`, `DiscardDlqCommand`).
+- [x] `TASK-1.2`: Update `DlqStatus` enum with `EXHAUSTED` and `DISCARDED`.
+- [x] `TASK-1.3`: Define Use Case interfaces in `br.com.wallet.dlq.api`: `DlqManagementUseCase` and `DlqQueryUseCase`.
 
 ### Phase 2: Schema & Persistence
-- [ ] `TASK-2.1`: Update `docker/init/schema.sql` `dlq_operations` check constraint with `EXHAUSTED` and `DISCARDED`.
-- [ ] `TASK-2.2`: Implement/Relocate `DlqOperationsDao` to `br.com.wallet.dlq.internal.persistence` with 3-retry cap logic (`retry_count < 3` and transition to `EXHAUSTED`).
-- [ ] `TASK-2.3`: Write/Update `DlqOperationsDaoIT` to verify automatic transition to `EXHAUSTED` on 3rd failure.
+- [x] `TASK-2.1`: Update `docker/init/schema.sql` `dlq_operations` check constraint with `EXHAUSTED` and `DISCARDED`.
+- [x] `TASK-2.2`: Implement/Relocate `DlqOperationsDao` to `br.com.wallet.dlq.internal.persistence` with 3-retry cap logic (`retry_count < 3` and transition to `EXHAUSTED`).
+- [x] `TASK-2.3`: Write/Update `DlqOperationsDaoIT` to verify automatic transition to `EXHAUSTED` on 3rd failure.
 
 ### Phase 3: Application Services & Replay Engine
-- [ ] `TASK-3.1` [RED]: Write unit tests for `DlqManagementService`, `DlqQueryService`, and updated `DlqReplayEngine`.
-- [ ] `TASK-3.2` [GREEN]: Implement `DlqManagementService`, `DlqQueryService`, and relocate `DlqReplayEngine` to `br.com.wallet.dlq.internal.engine`.
+- [x] `TASK-3.1` [RED]: Write unit tests for `DlqManagementService`, `DlqQueryService`, and updated `DlqReplayEngine`.
+- [x] `TASK-3.2` [GREEN]: Implement `DlqManagementService`, `DlqQueryService`, and relocate `DlqReplayEngine` to `br.com.wallet.dlq.internal.engine`.
 
 ### Phase 4: REST API Exposure & Infrastructure Integration
-- [ ] `TASK-4.1` [RED]: Write MockMvc tests `DlqControllerTest` for `/dlq/operations` endpoints.
-- [ ] `TASK-4.2` [GREEN]: Implement `DlqApi` and `DlqController` in `br.com.wallet.infrastructure.rest`.
-- [ ] `TASK-4.3`: Update `DlqConsumer` and `DlqPublisher` to reference `br.com.wallet.dlq.api`.
-- [ ] `TASK-4.4`: Update `infrastructure/package-info.java` allowedDependencies.
+- [x] `TASK-4.1` [RED]: Write MockMvc tests `DlqControllerTest` for `/dlq/operations` endpoints.
+- [x] `TASK-4.2` [GREEN]: Implement `DlqApi` and `DlqController` in `br.com.wallet.infrastructure.rest`.
+- [x] `TASK-4.3`: Update `DlqConsumer` and `DlqPublisher` to reference `br.com.wallet.dlq.api`.
+- [x] `TASK-4.4`: Update `infrastructure/package-info.java` allowedDependencies.
 
 ### Phase 5: Verification & Post-Mortem Summary
-- [ ] `TASK-5.1`: Verify Spring Modulith architectural boundaries (`ModulithArchitectureTest`).
-- [ ] `TASK-5.2`: Run full test suite (`./gradlew test`).
-- [ ] `TASK-5.3`: Author `SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md`.
+- [x] `TASK-5.1`: Verify Spring Modulith architectural boundaries (`ModulithArchitectureTest`).
+- [x] `TASK-5.2`: Run full test suite (`./gradlew test`).
+- [x] `TASK-5.3`: Author `SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md`.
 
 ---
 
 ## 3. Convergence & Verification Checklist
 
-- [ ] All unit tests pass
-- [ ] All integration tests pass
-- [ ] Zero Spring Modulith boundary violations
-- [ ] Traceability report generated: 100% of requirements verified
+- [x] All unit tests pass
+- [x] All integration tests pass
+- [x] Zero Spring Modulith boundary violations
+- [x] Traceability report generated: 100% of requirements verified
+

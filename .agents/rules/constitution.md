@@ -33,7 +33,8 @@ These core invariants and architectural principles are **non-negotiable** and mu
 ## 3. Anti-Fraud & Reliability Invariants
 
 - **`I-FRAUD-001` (Pre-Execution Gate)**: The anti-fraud engine acts as an evaluation gate before domain logic execution. The fraud engine must **never** mutate the ledger or account balances.
-- **`I-FRAUD-002` ($O(1)$ Hot Path)**: Fraud rule evaluation on the transaction path must complete in $O(1)$ time without scanning tables, utilizing Caffeine local windows and Redis distributed state.
+- **`I-FRAUD-002` ($O(1)$ Hot Path)**: Fraud rule evaluation on the transaction path must complete in $O(1)$ time without scanning tables, utilizing Caffeine local windows and DragonflyDB distributed state.
+
 - **`I-OUTBOX-001` (Guaranteed Event Delivery)**: Domain events must be inserted into the `outbox` table within the same transaction as ledger writes. The Outbox Relay publishes events to NATS JetStream asynchronously with exponential backoff retries.
 
 ---

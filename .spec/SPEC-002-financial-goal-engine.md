@@ -400,11 +400,12 @@ Response: 200 OK (GoalStrategyResponse)
 
 ## 11. Acceptance Criteria
 
-- [ ] `br.com.wallet.goals` application module created with Modulith `@ApplicationModule` configuration.
-- [ ] `goals` and `cashflow_profiles` tables created in schema with check constraints and indexes.
-- [ ] Pure deterministic strategy engine (`GoalStrategyEngine`, `ContributionCalculator`, `CashflowCapacityCalculator`) implemented with explicit `evaluationDate` and `HALF_EVEN` rounding.
-- [ ] Feasibility classifications (`ON_TRACK`, `AT_RISK`, `UNACHIEVABLE`, `ACHIEVED`) verified across parameterized unit tests.
-- [ ] Multi-goal waterfall priority evaluation verified with unit tests.
-- [ ] Stateless simulation (`POST /goals/simulate`) and live strategy queries exposed via REST API.
-- [ ] `ModulithArchitectureTest.verifyArchitecture()` passes with 0 violations and 0 cycles.
-- [ ] JaCoCo test coverage exceeds $\ge 90\%$ for `goals` domain and strategy engine.
+- [x] `br.com.wallet.goals` application module created with Modulith `@ApplicationModule` configuration.
+- [x] `goals` and `cashflow_profiles` tables created in schema with check constraints and indexes.
+- [x] Pure deterministic strategy engine (`GoalStrategyEngine`, `ContributionCalculator`, `CashflowCapacityCalculator`) implemented with explicit `evaluationDate` and `HALF_EVEN` rounding.
+- [x] Feasibility classifications (`ON_TRACK`, `AT_RISK`, `UNACHIEVABLE`, `ACHIEVED`) verified across parameterized unit tests.
+- [x] Multi-goal waterfall priority evaluation verified with unit tests.
+- [x] Stateless simulation (`POST /goals/simulate`) and live strategy queries exposed via REST API.
+- [x] `ModulithArchitectureTest.verifyArchitecture()` passes with 0 violations and 0 cycles.
+- [x] JaCoCo test coverage exceeds $\ge 90\%$ for `goals` domain and strategy engine.
+

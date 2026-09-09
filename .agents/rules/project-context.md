@@ -11,51 +11,75 @@ trigger: always_on
 The Wallet Service follows **Modular Monolith (Spring Modulith)** and **Clean Architecture / DDD** principles:
 
 ```
-┌────────────────────────────────────────────────────────┐
-│             br.com.wallet.infrastructure               │
-│    (REST Controllers, NATS JetStream, Config, DLQ)     │
-└──────────────┬───────────┬───────────────┬─────────────┘
-               │           │               │ depends on
-               ▼           ▼               ▼
-┌────────────────────────────┐    ┌──────────────────────┐
-│    br.com.wallet.ledger    │───>│ br.com.wallet.fraud  │
-│ (Use Cases, Ledger, Outbox)│    │(Engine, Rules, State)│
-└──────────────┬─────────────┘    └──────────┬───────────┘
-               │ depends on                  │ depends on
-               └───────────────┬─────────────┘
-                               ▼
-                ┌────────────────────────────┐
-                │    br.com.wallet.core      │
-                │(TraceContext, FraudContext)│
-                └────────────────────────────┘
+┌────────────────────────────────────────────────────────────────────────┐
+│                      br.com.wallet.infrastructure                      │
+│             (REST Controllers, NATS JetStream, Config)                 │
+└───────┬──────────────┬───────────────┬────────────────┬────────────────┘
+        │              │               │                │
+        ▼              ▼               ▼                ▼
+┌──────────────┐ ┌─────────────┐ ┌─────────────┐ ┌──────────────┐
+│br.com.wallet.│ │br.com.wallet│ │br.com.wallet│ │br.com.wallet.│
+│   savings    │ │    goals    │ │     dlq     │ │    ledger    │
+└───────┬──────┘ └──────┬──────┘ └──────┬──────┘ └──────┬───────┘
+        │               │               │               │
+        │ observes      │ evaluates     │ recovers      │ depends on
+        ▼               ▼               ▼               ▼
+┌───────────────────────────────────────────────────────────────┐
+│                      br.com.wallet.fraud                      │
+│ (Fusion Gate, Rules, Intelligence, Propagation, Vectors, SLM) │
+└───────────────────────────────┬───────────────────────────────┘
+                                │ depends on
+                                ▼
+┌───────────────────────────────────────────────────────────────┐
+│                      br.com.wallet.core                       │
+│     (TraceContext, FraudContext, Exceptions, Traceable)       │
+└───────────────────────────────────────────────────────────────┘
 ```
 
 ### Module Structure
 - **`:core` (`br.com.wallet.core`)**: Shared foundational types: `TraceContext`, `FraudContext` (implements `TraceContext`), `OperationOrigin`, `Traceable`, `TracingAspect`, `IdempotencyException`, `AccountBlockedException`. Zero outgoing dependencies.
-- **`:fraud` (`br.com.wallet.fraud`)**: Anti-fraud & risk scoring engine, sliding windows, rules (`UserBlockRule`, `GlobalVelocityRule`), and state stores (Caffeine + Redis).
+- **`:fraud` (`br.com.wallet.fraud`)**: Anti-fraud & risk scoring engine:
+  - `fusion`: `FraudGate` pre-execution evaluation ($P99 < 2\text{ms}$ hot cache lookup in DragonflyDB), multi-signal fusion, micro-ML ONNX scoring, and LangGraph agentic investigation workflows.
+  - `rules`: Deterministic rules (`UserBlockRule`, `GlobalVelocityRule`), Caffeine local sliding windows, and Dragonfly velocity counters.
+  - `intelligence`: Two-tier relational graph projection (`fraud_relationships` + `fraud_relationship_events`) and cycle detection.
+  - `propagation`: Path-influence risk propagation with temporal exponential decay and PostgreSQL `SKIP LOCKED` job queue.
+  - `embeddings`: 16-dimensional behavioral profile vectorization and archetype centroid matching via PostgreSQL `pgvector`.
+  - `investigation`: Air-gapped investigation synthesizer with `LocalInferenceClient` SPI (Ollama SLM), PII masking, and claim grounding validation.
 - **`br.com.wallet.ledger` (in root)**: Transactional ledger & core banking domain (`TransferFundsUseCase`, `DepositFundsUseCase`, `WithdrawFundsUseCase`, `BalanceUseCase`, `ValidateLedgerUseCase`, `AccountStateUseCase`), `AccountDao`, `LedgerDao`, `OutboxDao`, and `FraudCheckHelper`.
 - **`br.com.wallet.savings` (in root)**: Smart Savings capability module (`SavingsPlanUseCase`, `SavingsQueryUseCase`, `SavingsRuleEngine`, `SavingsEventListener`) reacting to banking events via `@ApplicationModuleListener`.
-- **`br.com.wallet.infrastructure` (in root)**: REST controllers, NATS JetStream workers, DLQ persistence (`DlqOperationsDao`), and Spring configuration.
+- **`br.com.wallet.goals` (in root)**: Financial Goal & Cashflow Strategy Engine (`GoalUseCase`, `GoalStrategyEngine`, `ContributionCalculator`, `CashflowCapacityCalculator`) providing deterministic feasibility simulations and multi-goal waterfall prioritization.
+- **`br.com.wallet.dlq` (in root)**: Dead Letter Queue resilience capability module (`DlqManagementUseCase`, `DlqQueryUseCase`, `DlqReplayEngine`, `DlqOperationsDao`), enforcing bounded replays capped at 3 retries, transition to `EXHAUSTED`, and operator REST endpoints.
+- **`br.com.wallet.infrastructure` (in root)**: REST controllers (`TransferController`, `DepositController`, `WithdrawController`, `SavingsController`, `GoalController`, `DlqController`, `FraudInvestigationController`), NATS JetStream workers, and Spring configuration.
 
 ---
 
 ## 2. Technology Stack
 
 - **Runtime & Language**: Java 26, Spring Boot 4.1.0, Gradle 9.7.1
-- **Database**: PostgreSQL 17/19 with schema migrations in `docker/init/schema.sql`
-- **Cache & Distributed State**: Redis (Lettuce client with RESP3, Epoll Unix Domain Sockets & TCP fallback)
+- **Database**: PostgreSQL 17/19 with schema migrations in `docker/init/schema.sql` and `pgvector` extension (`vector(16)`, `vector(128)`).
+- **In-Memory Store & Distributed State**: DragonflyDB v1.40.1 (multi-threaded, Redis-compatible, RESP3, Epoll Unix Domain Sockets `/var/run/redis/redis.sock` & TCP `6379` fallback).
 - **Messaging & Event Streaming**: NATS JetStream (`events.*`, `commands.*`, `commands.dlq.*`)
-- **Observability**: OpenTelemetry Java SDK, OpenObserve OTLP backend (Traces, Metrics, Logs)
-- **Testing**: JUnit 5, AssertJ, Mockito, Testcontainers (PostgreSQL, Redis, NATS)
+- **Micro-ML & Local SLM**: ONNX Runtime Java for shadow behavioral risk scoring; local containerized Ollama for evidence-grounded investigation narratives.
+- **Observability**: OpenTelemetry Java SDK, OpenObserve OTLP backend (Traces, Metrics, Logs) with `operation_id` baggage propagation.
+- **Testing**: JUnit 5, AssertJ, Mockito, Testcontainers (PostgreSQL with pgvector, DragonflyDB, NATS).
 
 ---
 
 ## 3. Data & Storage Model
 
-1. **`accounts`**: Fast projection table holding current balances. Updated synchronously with `SELECT FOR UPDATE` locking.
-2. **`ledger`**: Append-only tamper-evident log containing cryptographic SHA-256 hash chains.
+1. **`accounts`**: Fast projection table holding current balances and lifecycle status (`ACTIVE`, `BLOCKED`, `SUSPENDED`, `FROZEN`). Updated synchronously with `SELECT FOR UPDATE` locking.
+2. **`ledger`**: Append-only tamper-evident log containing cryptographic SHA-256 hash chains (`hash_n = SHA256(...)`).
 3. **`outbox`**: Transactional outbox table storing serialized domain events for asynchronous relay.
-4. **Redis**: High-speed ephemeral state, velocity counters, Lua scripts for atomic risk updates, and blocklist caches.
+4. **`dlq_operations`**: Dead-letter storage tracking retry counts, failure categories, and statuses (`PENDING`, `PROCESSING`, `COMPLETED`, `FAILED`, `EXHAUSTED`, `DISCARDED`).
+5. **`savings_plans` / `savings_rules` / `savings_executions`**: Smart savings plan configurations and sweep execution history.
+6. **`goals` / `cashflow_profiles`**: Financial goals, target horizons, and user cashflow capacity profiles.
+7. **`fraud_relationships` / `fraud_relationship_events`**: Relational entity graph facts, topologies, and temporal interaction records.
+8. **`fraud_entity_features`**: PostgreSQL `pgvector(16)` behavioral profile vectors and magnitude scalar.
+9. **`fraud_propagation_jobs` / `fraud_embedding_jobs`**: Hand-rolled PostgreSQL `SKIP LOCKED` durable asynchronous task queues.
+10. **DragonflyDB**: High-speed ephemeral state:
+    - `risk_profile:USER:{id}`: Hash containing `graph_risk`, `temporal_risk`, `vector_risk`, `fused_score`, and status.
+    - `user:{id}:graph_risk`, `user:{id}:temporal_risk`: Materialized risk metrics for sub-millisecond fraud gate evaluation.
+    - Sliding windows and rate-limiting counters evaluated atomically via Lua scripts.
 
 ---
 
@@ -63,8 +87,13 @@ The Wallet Service follows **Modular Monolith (Spring Modulith)** and **Clean Ar
 
 - **Write Path (Transfer/Deposit/Withdraw)**:
   1. API Controller receives request with `Idempotency-Key` / `operation_id`.
-  2. Fraud Engine evaluates $O(1)$ local Caffeine window & Redis global velocity/blocklist.
-  3. Domain Use Case locks accounts in deterministic order (`SELECT FOR UPDATE`).
-  4. Balance checked $\rightarrow$ account balances updated $\rightarrow$ ledger entry inserted with next hash $\rightarrow$ outbox event recorded.
-  5. Transaction commits atomically.
-  6. Outbox Relay scans pending outbox events every 10s and publishes to NATS JetStream with exponential backoff retries.
+  2. **Fraud Gate Evaluation**:
+     - `FraudGate.evaluateAuthorization(userId, amount)` queries DragonflyDB hot cache ($P99 < 2\text{ms}$). Rejects with `FraudBlockedException` if `decision == HARD_BLOCK`.
+     - Legacy/Hot velocity rules evaluate local Caffeine window & Dragonfly sliding counters via atomic Lua scripts.
+  3. Domain Use Case locks participating accounts in deterministic lexicographical order (`SELECT FOR UPDATE`).
+  4. Account lifecycle checked: participating accounts must be `ACTIVE` (`I-ACCOUNT-001`).
+  5. Balance checked $\rightarrow$ account balances updated $\rightarrow$ ledger entry inserted with next cryptographic hash $\rightarrow$ outbox event recorded.
+  6. Transaction commits atomically.
+  7. In-process Modulith listeners (`@ApplicationModuleListener`) notify `savings` and `goals` without blocking the ledger transaction.
+  8. Outbox Relay scans pending outbox events every 10s and publishes to NATS JetStream with exponential backoff retries.
+

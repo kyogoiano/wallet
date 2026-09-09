@@ -46,7 +46,8 @@ Phase 0.5 implements the **Hybrid Fraud Intelligence & Relational Graph Projecti
 | [`GraphRiskCalculatorTest`](file:///src/test/java/br/com/wallet/unit/fraud/intelligence/GraphRiskCalculatorTest.java) | `GraphRiskSignals.calculateCompositeScore()` weight validation and unit bounding $[0.0, 1.0]$ | 🟢 Passed |
 | [`GraphPatternEngineTest`](file:///src/test/java/br/com/wallet/unit/fraud/intelligence/GraphPatternEngineTest.java) | Feature provider pattern evaluation and signal calculation | 🟢 Passed |
 | [`RelationalGraphProjectorTest`](file:///src/test/java/br/com/wallet/unit/fraud/intelligence/RelationalGraphProjectorTest.java) | Event projection, entity registration, edge upsert, and hot risk materialization | 🟢 Passed |
-| [`FraudGraphConsumerTest`](file:///src/test/java/br/com/wallet/unit/infrastructure/messaging/FraudGraphEventListenerTest.java) | NATS `events.transfer` consumer, `AccountUseCase` lookup, and fallback handling | 🟢 Passed |
+| [`FraudGraphConsumerTest`](file:///src/test/java/br/com/wallet/unit/infrastructure/messaging/FraudGraphConsumerTest.java) | NATS `events.transfer` consumer, `AccountUseCase` lookup, and fallback handling | 🟢 Passed |
+
 | [`GraphRebuildServiceIT`](file:///src/test/java/br/com/wallet/integration/fraud/GraphRebuildServiceIT.java) | Replay from historical events and Dragonfly hot state restoration (`I-FRAUD-007`) | 🟢 Passed |
 
 ---

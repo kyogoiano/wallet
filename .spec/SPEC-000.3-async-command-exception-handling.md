@@ -116,9 +116,10 @@ GET /operations/{operationId}
 
 ## 8. Acceptance Criteria
 
-- [ ] `wallet_operations` table altered with `error_message`, `failure_type`, and `updated_at`.
-- [ ] `WalletOperationsDao.failOperation(...)` updates status to `FAILED`.
-- [ ] `AbstractCommandsConsumer` updates operation state to `FAILED` upon non-retriable exceptions.
-- [ ] `GET /operations/{operationId}` returns correct operation status and failure diagnostics.
-- [ ] Integration tests verify end-to-end failure recording when transferring with insufficient funds.
-- [ ] All command endpoints continue returning `202 ACCEPTED`.
+- [x] `wallet_operations` table altered with `error_message`, `failure_type`, and `updated_at`.
+- [x] `WalletOperationsDao.failOperation(...)` updates status to `FAILED`.
+- [x] `AbstractCommandsConsumer` updates operation state to `FAILED` upon non-retriable exceptions.
+- [x] `GET /operations/{operationId}` returns correct operation status and failure diagnostics.
+- [x] Integration tests verify end-to-end failure recording when transferring with insufficient funds.
+- [x] All command endpoints continue returning `202 ACCEPTED`.
+

@@ -19,3 +19,5 @@ These rules govern the development of all wallet capabilities, application modul
 - **`RULE-CAP-005` (Mandatory Idempotency Key)**: All commands dispatched to `ledger.api` MUST carry an explicit `operation_id` derived deterministically from the root trigger event or proposal.
 - **`RULE-CAP-006` (Automated Architecture Verification)**: The test suite MUST execute `ApplicationModules.of(WalletApplication.class).verify()`. Any PR or commit that introduces forbidden module coupling MUST fail the build.
 - **`RULE-CAP-007` (Transport Agnosticism)**: Capabilities MUST remain completely decoupled from their transport implementations (HTTP, NATS, MCP, SSE). External controllers/tools adapt requests into domain module calls.
+- **`RULE-CAP-008` (Fraud Gate API Boundary)**: Cross-module consumers of the fraud and risk engine (e.g. `ledger.internal.guard.FraudCheckHelper`) MUST interact exclusively via published interfaces (`br.com.wallet.fraud.fusion.api.FraudGate`), never importing internal classes (`br.com.wallet.fraud.fusion.internal.*`).
+

@@ -93,8 +93,9 @@ As transaction volume scales, single-threaded Redis architecture becomes a bottl
 
 ## 8. Acceptance Criteria
 
-- [ ] `docker-compose.yaml` configured with DragonflyDB (`docker.dragonflydb.io/dragonflydb/dragonfly:v1.28.0`) with UDS and TCP support.
-- [ ] `IntegrationTestBase.java` upgraded to spin up DragonflyDB for Testcontainers integration tests.
-- [ ] All existing fraud rules (`UserBlockRule`, `GlobalVelocityRule`, `SlidingWindowRule`, `NewRecipientRule`) pass 100% of unit and integration tests.
-- [ ] Dedicated test suite `DragonflyLuaCompatibilityIT` verifies `REVIEW_COUNT_PROTECTED_SCRIPT` and `BLOCK_PROTECTED_SCRIPT` concurrency and replay protection.
-- [ ] `AccountBlockingIT`, `FraudIT`, and `FraudReactionIT` pass green with DragonflyDB.
+- [x] `docker-compose.yaml` configured with DragonflyDB (`docker.dragonflydb.io/dragonflydb/dragonfly:v1.28.0`) with UDS and TCP support.
+- [x] `IntegrationTestBase.java` upgraded to spin up DragonflyDB for Testcontainers integration tests.
+- [x] All existing fraud rules (`UserBlockRule`, `GlobalVelocityRule`, `SlidingWindowRule`, `NewRecipientRule`) pass 100% of unit and integration tests.
+- [x] Dedicated test suite `DragonflyLuaCompatibilityIT` verifies `REVIEW_COUNT_PROTECTED_SCRIPT` and `BLOCK_PROTECTED_SCRIPT` concurrency and replay protection.
+- [x] `AccountBlockingIT`, `FraudIT`, and `FraudReactionIT` pass green with DragonflyDB.
+

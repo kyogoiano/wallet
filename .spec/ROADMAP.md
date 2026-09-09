@@ -253,7 +253,8 @@ gantt
   - [`.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SPEC-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
   - [`.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/PLAN-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Ratified)
   - [`.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/TASKS-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Completed)
-  - [`summaries/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Verified)
+  - [`.spec/summaries/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md`](file:///.spec/summaries/SUMMARY-000.7-fraud-behavioral-embeddings-and-investigation-pgvector.md) (Verified)
+
 
 ---
 

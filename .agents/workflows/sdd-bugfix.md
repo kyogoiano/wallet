@@ -1,25 +1,34 @@
-# 🐛 SDD Bugfix Workflow
+# 🐛 SDD Bugfix Workflow (V2 Deterministic Edition)
 
-This workflow ensures bugs are diagnosed, reproduced with failing tests, and fixed without regression.
+This workflow ensures bugs are diagnosed, reproduced with deterministic tests, and resolved with zero regression or spec drift.
 
 ---
 
 ## Steps
 
-### Step 1: Issue Analysis & Invariant Identification
-- Identify the violated invariant (`I-XXX`) or functional expectation (`REQ-XXX`).
-- Create or update the incident record in `.spec/` if the bug is high impact.
+### Step 0: Invariant & History Audit
+- Identify the violated invariant (`I-XXX`) from [`.agents/rules/constitution.md`](file:///.agents/rules/constitution.md) or functional requirement (`REQ-XXX`).
+- Audit preceding `.spec/summaries/SUMMARY-*.md` to review the original design contracts and known edge cases.
+- If the bug introduces an architectural change or affects core invariants, create an incident issue note in the relevant `.spec/` artifact.
 
-### Step 2: Write Failing Reproduction Test (RED)
-- Write an automated unit or integration test that reproduces the exact bug scenario.
-- Run test to confirm it fails specifically due to the reported issue.
+### Step 1: Write Failing Reproduction Test (RED — Zero Vibe Coding)
+- Write an automated unit or integration test reproducing the exact failure mode.
+- Adhere to **Zero Vibe Coding (`I-TDD-002`)**:
+  - Assert exact monetary figures using `BigDecimal` scale 2 arithmetic (`isEqualByComparingTo()`).
+  - Formulate the **Test Triad**: (1) Failing edge case, (2) Boundary verification, (3) Post-failure state check (e.g. zero partial ledger mutation).
+- Run the test to confirm it fails specifically due to the reported issue and not due to compilation or setup errors.
 
-### Step 3: Implement Fix (GREEN)
+### Step 2: Implement Minimal Fix (GREEN)
 - Apply the minimal corrective code change in the targeted layer (`:core`, `:fraud`, or root application).
-- Run the reproduction test and confirm it passes.
+- Maintain all existing architectural boundaries (`RULE-CAP-001` - `RULE-CAP-007`).
+- Confirm the reproduction test passes.
 
-### Step 4: Regression Check
-- Run the full test suite (`./gradlew test`) to ensure zero collateral regressions.
+### Step 3: Refactor & Regression Gate
+- Clean up the fix, removing any temporary debugging code.
+- Run the full test suite (`./gradlew test`) to guarantee zero collateral regressions.
+- Verify Spring Modulith boundaries (`ModulithArchitectureTest.verifyArchitecture()`).
 
-### Step 5: Document Post-Mortem
-- Document root cause and preventive measures in the associated specification.
+### Step 4: Bi-directional Reconciliation & Invariant Update (CONVERGE)
+- Enforce **Bi-directional Equivalence (`I-SDD-003`)**: If the bug revealed an underspecified requirement or invalid assumption, update the corresponding `SPEC-XXX.md`, `PLAN-XXX.md`, or `constitution.md`.
+- Document the post-mortem, root cause, and regression test reference in the active spec or summary.
+

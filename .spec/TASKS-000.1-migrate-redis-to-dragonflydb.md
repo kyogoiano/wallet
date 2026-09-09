@@ -46,8 +46,9 @@
 
 ## 3. Convergence & Verification Checklist
 
-- [ ] DragonflyDB running in Testcontainers and `docker-compose.yaml`
-- [ ] All Lua scripts validated against Dragonfly's multi-key lock manager
-- [ ] Replay protection (`I-DF-004`) verified under concurrency
-- [ ] Line coverage meets requirements ($\ge 70\%$ overall, $\ge 85\%$ core/fraud)
-- [ ] Zero Modulith architecture violations
+- [x] DragonflyDB running in Testcontainers and `docker-compose.yaml`
+- [x] All Lua scripts validated against Dragonfly's multi-key lock manager
+- [x] Replay protection (`I-DF-004`) verified under concurrency
+- [x] Line coverage meets requirements ($\ge 70\%$ overall, $\ge 85\%$ core/fraud)
+- [x] Zero Modulith architecture violations
+

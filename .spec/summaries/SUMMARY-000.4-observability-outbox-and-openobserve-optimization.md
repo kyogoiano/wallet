@@ -3,7 +3,8 @@
 - **Associated Spec**: [`SPEC-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md)
 - **Associated Plan**: [`PLAN-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/PLAN-000.4-observability-outbox-and-openobserve-optimization.md)
 - **Associated Tasks**: [`TASKS-000.4-observability-outbox-and-openobserve-optimization.md`](file:///.spec/TASKS-000.4-observability-outbox-and-openobserve-optimization.md)
-- **Source Reference**: [`.histories/hitstory11-observability.txt`](file:///.histories/hitstory11-observability.txt)
+- **Source Reference**: [`.histories/history11-observability.txt`](file:///.histories/history11-observability.txt)
+
 - **Status**: 🟢 **Completed & Verified**
 - **Date**: 2026-08-30
 

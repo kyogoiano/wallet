@@ -3,7 +3,8 @@
 - **Status**: Completed & Verified
 - **Author**: Antigravity Financial Architecture Team
 - **Date**: 2026-08-30
-- **Source Reference**: [`.histories/hitstory11-observability.txt`](file:///.histories/hitstory11-observability.txt)
+- **Source Reference**: [`.histories/history11-observability.txt`](file:///.histories/history11-observability.txt)
+
 - **Target Release / Milestone**: Wallet Service V4 — Phase 0.4 (Observability & Reliability Baseline)
 - **Architectural Mantra**: *"Zero blind spots with zero bloat: filter and tag at the source, keep the collector ultralight, and correlate 100% of operations to deterministic operationId and userId."*
 

@@ -1,0 +1,1076 @@
+Sim — **o PLAN-000.8 está muito mais maduro e coerente** com a evolução que fizemos no 000.7. A principal mudança conceitual — sair do “LangGraph obrigatório” para uma **orquestração Java durável, determinística e hand-rolled** — foi, na minha opinião, a decisão correta para este Wallet Service.
+
+Mas eu faria alguns ajustes antes de considerar o plano realmente **Ready for Ratification**.
+
+---
+
+# ✅ Avaliação geral
+
+Minha avaliação:
+
+| Área                            | Avaliação                        |
+| ------------------------------- | -------------------------------- |
+| Separação hot path / async path | 🟢 Excelente                     |
+| Fórmula de fusion               | 🟢 Muito boa                     |
+| Correlação Graph + Propagation  | 🟢 Boa                           |
+| Direct rule primacy             | 🟢 Excelente                     |
+| ONNX embedded Java              | 🟢 Excelente                     |
+| Feature versioning              | 🟢 Muito importante e correto    |
+| Durable queue                   | 🟢 Boa escolha                   |
+| Job coalescing                  | 🟢 Excelente                     |
+| LOO attribution                 | 🟢 Excelente para auditabilidade |
+| Reuso do SPEC-000.7             | 🟢 Muito correto                 |
+| Hot risk profile                | 🟢 Boa abstração                 |
+| Human review                    | 🟢 Correto                       |
+| DDL da fila                     | 🟡 Tem um problema importante    |
+| Ownership dos sinais            | 🟡 Precisa ficar mais explícito  |
+| Fallback do ONNX                | 🟡 Eu mudaria                    |
+| SLA `< 1ms`                     | 🟡 Precisa ser melhor definido   |
+
+---
+
+# 🔴 Ponto mais importante: `UNIQUE(entity_id, status)` está perigoso
+
+Este trecho:
+
+```sql
+CONSTRAINT uq_fusion_job_pending UNIQUE (entity_id, status)
+```
+
+não implementa exatamente o comportamento desejado.
+
+Ele impede que exista mais de um:
+
+```text
+entity_id = X
+status = PENDING
+```
+
+o que parece correto inicialmente.
+
+Mas também cria problemas porque:
+
+* depois você só pode ter um `RUNNING` por entidade;
+* um job `COMPLETED` impediria outro `COMPLETED`;
+* um `FAILED` impediria outro `FAILED`.
+
+Ou seja:
+
+```text
+UNIQUE(entity_id, status)
+```
+
+é **restritivo demais**.
+
+## Melhor solução: Partial Unique Index
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fusion_job_pending_entity
+ON fraud_fusion_jobs(entity_id)
+WHERE status = 'PENDING';
+```
+
+Assim garantimos:
+
+> existe no máximo um job pendente por entidade.
+
+Enquanto podemos ter histórico:
+
+```text
+entity A
+├── COMPLETED
+├── COMPLETED
+├── FAILED
+└── PENDING   ← único ativo pendente
+```
+
+### ⭐ Eu consideraria essa mudança obrigatória.
+
+---
+
+# 🟢 Job coalescing: eu melhoraria o algoritmo
+
+O dispatcher deveria fazer algo próximo de:
+
+```sql
+INSERT INTO fraud_fusion_jobs (
+    job_id,
+    entity_id,
+    model_version,
+    status,
+    as_of,
+    payload,
+    created_at,
+    updated_at
+)
+VALUES (
+    :jobId,
+    :entityId,
+    :modelVersion,
+    'PENDING',
+    :asOf,
+    CAST(:payload AS jsonb),
+    NOW(),
+    NOW()
+)
+ON CONFLICT (entity_id)
+WHERE status = 'PENDING'
+DO UPDATE SET
+    as_of = EXCLUDED.as_of,
+    payload = EXCLUDED.payload,
+    model_version = EXCLUDED.model_version,
+    updated_at = NOW();
+```
+
+Isso implementa exatamente:
+
+> **latest state wins while pending**
+
+Que é ideal para fraude comportamental.
+
+Você não precisa calcular:
+
+```text
+evento 1
+evento 2
+evento 3
+evento 4
+```
+
+se todos chegaram antes do worker processar.
+
+Você processa:
+
+```text
+estado da entidade após evento 4
+```
+
+---
+
+# 🔴 Outro ponto: precisamos definir o comportamento durante `RUNNING`
+
+Imagine:
+
+```text
+Worker:
+entity A → RUNNING
+```
+
+Durante a execução:
+
+```text
+Event 1
+Event 2
+Event 3
+```
+
+Não podemos atualizar silenciosamente o job `RUNNING`.
+
+Minha recomendação:
+
+```text
+PENDING
+   ↑
+   │ coalesce
+   │
+Dispatcher
+
+RUNNING
+   │
+   ├── novo evento?
+   │
+   └── cria/atualiza novo PENDING
+```
+
+Portanto:
+
+```text
+RUNNING job
++
+new event
+=
+new PENDING job
+```
+
+Isso preserva o processamento atual e garante que haverá uma nova avaliação depois.
+
+---
+
+# 🟢 A arquitetura de correlação está conceitualmente correta
+
+Este ponto foi uma grande melhoria:
+
+```text
+Graph
+     \
+      → Correlation Group → Master Fusion
+     /
+Propagation
+```
+
+Porque `graph_risk` e `propagated_risk` não são completamente independentes.
+
+A fórmula:
+
+$$
+R_{gg}
+=
+1-(1-R_g)(1-w_pR_p)
+$$
+
+é razoável.
+
+Depois:
+
+$$
+R_{final}
+=
+1-
+(1-R_d)
+(1-w_gR_{gg})
+(1-w_bR_b)
+(1-w_mR_{ml})
+$$
+
+Isso evita uma fusão ingênua:
+
+```java
+direct + graph + propagation + behavioral + ml
+```
+
+que explodiria facilmente para `> 1`.
+
+---
+
+# 🟡 Mas eu adicionaria uma abstração de grupos mais genérica
+
+Hoje temos:
+
+```java
+RiskCorrelationGroup
+GraphIntelligenceCorrelationGroup
+```
+
+Muito bom.
+
+Mas eu deixaria o core preparado para:
+
+```text
+RiskCorrelationGroup
+├── GraphIntelligenceCorrelationGroup
+│     ├── graph
+│     └── propagated
+│
+├── BehavioralMlCorrelationGroup (future?)
+│
+└── DeviceIdentityCorrelationGroup (future?)
+```
+
+Interface:
+
+```java
+public interface RiskCorrelationGroup {
+
+    String id();
+
+    GroupRiskResult evaluate(FraudSignalSet signals);
+}
+```
+
+Assim o `ProbabilisticRiskFusionEngine` não precisa conhecer:
+
+```java
+graph
+propagation
+behavioral
+ml
+```
+
+diretamente.
+
+Ele trabalha com:
+
+```text
+raw signals
+        ↓
+correlation groups
+        ↓
+independent fusion factors
+        ↓
+final fusion
+```
+
+Isso é mais extensível.
+
+---
+
+# 🟢 Direct Rule Primacy está muito bem definido
+
+Eu manteria explicitamente:
+
+```java
+if (signals.directRisk() >= 1.0) {
+    return RiskFusionResult.hardBlock(...);
+}
+```
+
+Mesmo que matematicamente:
+
+$$
+1-(1-1.0)\cdot X = 1.0
+$$
+
+o `HardRulePolicy` explícito é importante semanticamente.
+
+Porque:
+
+```text
+R_direct = 1.0
+```
+
+não significa apenas:
+
+> "risco muito alto"
+
+Significa:
+
+> **uma regra determinística declarou uma violação não negociável.**
+
+Portanto:
+
+```text
+HARD_BLOCK
+```
+
+deve ser semanticamente diferente de:
+
+```text
+R_final = 0.99
+```
+
+Excelente decisão no plano.
+
+---
+
+# 🟢 Leave-One-Out Attribution é uma escolha muito boa
+
+Gostei bastante dessa decisão.
+
+A fórmula:
+
+$$
+C_s=R_{final}-R_{final\ without\ s}
+$$
+
+é muito melhor que tentar simplesmente usar:
+
+```text
+signal × weight
+```
+
+porque a sua fusion é não linear.
+
+Exemplo:
+
+```text
+Graph contribution ≠ graphRisk × graphWeight
+```
+
+necessariamente.
+
+LOO mede o efeito real daquele fator no resultado final.
+
+---
+
+# 🟡 Eu adicionaria um detalhe importante: contribuição não é causalidade
+
+Na documentação e API, eu evitaria chamar isso de:
+
+```text
+cause
+```
+
+ou:
+
+```text
+reason fraud happened
+```
+
+Prefiro:
+
+```java
+FactorContribution
+```
+
+com:
+
+```java
+public record FactorContribution(
+    String factor,
+    double marginalImpact,
+    double normalizedContribution
+) {}
+```
+
+Porque isso é:
+
+> contribuição marginal para o score
+
+e não:
+
+> explicação causal do crime.
+
+Isso é importante para compliance e auditoria.
+
+---
+
+# 🔴 Eu mudaria o fallback do ONNX
+
+Hoje:
+
+> Deterministic linear heuristic proxy if model file is unreadable.
+
+Eu acho perigoso.
+
+Imagine:
+
+```text
+ML model corrompido
+        ↓
+sistema muda silenciosamente
+para heuristic proxy
+        ↓
+R_ml continua sendo produzido
+```
+
+Agora você tem um score que parece:
+
+```text
+R_ml = 0.73
+```
+
+mas não veio do modelo aprovado.
+
+Para fraude, eu prefiro:
+
+```text
+MODEL_UNAVAILABLE
+```
+
+e então:
+
+```java
+mlRisk = OptionalDouble.empty();
+```
+
+ou:
+
+```java
+MlSignalResult.unavailable(...)
+```
+
+A fusion então sabe que aquele sinal está ausente.
+
+Exemplo:
+
+```java
+public record SignalValue(
+    double value,
+    SignalStatus status
+) {}
+```
+
+```java
+enum SignalStatus {
+    AVAILABLE,
+    UNAVAILABLE,
+    STALE,
+    FALLBACK
+}
+```
+
+Minha recomendação:
+
+### Produção
+
+```text
+ONNX unavailable
+↓
+R_ml unavailable
+↓
+fusion continues without ML
+↓
+audit metadata records degradation
+```
+
+### Test/dev
+
+Pode existir:
+
+```text
+DeterministicHeuristicRiskModel
+```
+
+mas explicitamente configurado.
+
+---
+
+# ⭐ Sugestão: `MlRiskResult`
+
+Eu adicionaria:
+
+```java
+public record MlRiskResult(
+    OptionalDouble score,
+    MlEvaluationStatus status,
+    String modelVersion,
+    long inferenceNanos
+) {}
+```
+
+```java
+public enum MlEvaluationStatus {
+    SUCCESS,
+    MODEL_UNAVAILABLE,
+    SCHEMA_INCOMPATIBLE,
+    INFERENCE_FAILED,
+    TIMEOUT
+}
+```
+
+Isso melhora muito:
+
+* observabilidade;
+* auditoria;
+* rollout de modelos;
+* debugging.
+
+---
+
+# 🟢 Feature versioning está correto, mas precisa validar também ordem e nomes
+
+Hoje temos:
+
+```java
+int featureVersion
+float[] values
+```
+
+Isso protege contra:
+
+```text
+v1 != v2
+```
+
+Mas não protege contra:
+
+```text
+featureVersion = 1
+```
+
+com valores montados na ordem errada.
+
+Eu consideraria metadata mais explícita:
+
+```java
+public record OnnxModelMetadata(
+    String modelId,
+    String modelVersion,
+    int featureVersion,
+    List<String> featureNames,
+    String checksum
+) {}
+```
+
+E:
+
+```java
+public record MlFeatureVector(
+    int featureVersion,
+    List<String> featureNames,
+    float[] values
+) {}
+```
+
+Ou, melhor ainda, o mapper é o único lugar capaz de construir o vetor:
+
+```text
+FraudFeatureMapper
+        ↓
+canonical ordered schema
+        ↓
+float[]
+```
+
+E o runtime valida:
+
+```text
+model metadata checksum
+model feature version
+expected feature count
+```
+
+No mínimo:
+
+```java
+values.length == expectedFeatureCount
+```
+
+deve ser obrigatório.
+
+---
+
+# 🟡 O modelo ONNX deveria ter um registry
+
+Pensando na evolução futura:
+
+```text
+fraud_risk_tabular_v1.onnx
+fraud_risk_tabular_v2.onnx
+```
+
+Eu adicionaria conceitualmente:
+
+```java
+OnnxModelRegistry
+```
+
+```text
+Model Registry
+├── active model
+├── shadow model
+└── candidate model
+```
+
+Isso prepara o sistema para:
+
+```text
+v1 ACTIVE
+v2 SHADOW
+```
+
+Então:
+
+```text
+production decision → v1
+metrics comparison → v1 vs v2
+```
+
+Sem alterar a arquitetura depois.
+
+---
+
+# 🟢 Durable queue com PostgreSQL é uma boa decisão aqui
+
+Para o volume esperado deste projeto, eu prefiro isso a introduzir:
+
+* Temporal;
+* Kafka Streams;
+* LangGraph runtime;
+* Python workers;
+* Celery.
+
+Você já possui:
+
+```text
+PostgreSQL
+Spring
+NATS
+Transactional Outbox
+SKIP LOCKED experience
+```
+
+Então a fila:
+
+```sql
+SELECT ...
+FOR UPDATE SKIP LOCKED
+```
+
+é extremamente coerente com a arquitetura existente.
+
+---
+
+# 🔴 Mas falta definir claramente lease recovery
+
+Você tem:
+
+```sql
+lease_expires_at
+```
+
+mas o plano deveria definir:
+
+```text
+RUNNING
++
+lease expired
+↓
+RETRY_WAIT
+↓
+PENDING
+```
+
+ou:
+
+```sql
+WHERE
+    status = 'RUNNING'
+AND lease_expires_at < NOW()
+```
+
+Um recovery worker deve existir.
+
+Eu adicionaria:
+
+```text
+FusionJobRecoveryService
+```
+
+ou incorporaria isso ao poller.
+
+Estados:
+
+```text
+PENDING
+RUNNING
+COMPLETED
+RETRY_WAIT
+FAILED
+```
+
+Transições:
+
+```text
+PENDING
+   ↓ claim
+RUNNING
+   ├── success → COMPLETED
+   │
+   ├── retryable failure → RETRY_WAIT
+   │                            ↓
+   │                         PENDING
+   │
+   └── max attempts → FAILED
+
+RUNNING + lease expired
+        ↓
+RETRY_WAIT
+```
+
+---
+
+# 🟢 RiskProfileStore abstraction: excelente
+
+Gostei muito desta parte:
+
+```java
+RiskProfileStore
+```
+
+Isso evita:
+
+```java
+DragonflyRiskProfileStore
+```
+
+como dependência arquitetural.
+
+Você pode usar:
+
+```text
+Redis
+Dragonfly
+Valkey
+```
+
+sem mudar:
+
+```text
+Fraud Gate
+Fusion Engine
+```
+
+Eu só adicionaria um contrato explícito:
+
+```java
+Optional<RiskProfile> find(UUID entityId);
+
+void store(RiskProfile profile, Duration ttl);
+
+void invalidate(UUID entityId);
+```
+
+---
+
+# 🟡 Mas precisamos resolver `userId` vs `entityId`
+
+O plano usa:
+
+```text
+fraud_entities.entity_id
+```
+
+e depois:
+
+```text
+user:{userId}:risk_profile
+```
+
+Isso pode ser correto, mas precisa haver um mapeamento explícito.
+
+Pergunta arquitetural:
+
+> `entity_id` sempre representa um usuário?
+
+No futuro, uma entidade pode ser:
+
+```text
+USER
+ACCOUNT
+DEVICE
+PIX_KEY
+COUNTERPARTY
+```
+
+Então eu não acoplaria:
+
+```text
+entity_id == user_id
+```
+
+Sugiro:
+
+```text
+risk_profile:{entity_type}:{entity_id}
+```
+
+Por exemplo:
+
+```text
+risk_profile:USER:uuid
+```
+
+ou, se o Fraud Gate só trabalha com usuário:
+
+```text
+user:{userId}:risk_profile
+```
+
+mas então o Fusion Service precisa ter:
+
+```java
+RiskSubject
+```
+
+para resolver essa relação.
+
+---
+
+# 🔴 O SLA `< 1ms` precisa ser melhor especificado
+
+Hoje:
+
+> P99 < 1ms service boundary SLA
+
+Isso é muito agressivo se você incluir:
+
+```text
+Spring
+Lettuce
+serialization
+network
+Redis/Dragonfly
+```
+
+Eu separaria:
+
+### Cache operation
+
+```text
+Dragonfly GET/HGETALL:
+P99 < 1 ms
+```
+
+### Fraud Gate application
+
+```text
+FraudGate evaluation:
+P99 < 2–5 ms
+```
+
+O requisito atual:
+
+```text
+Fraud Gate V4 < 1ms
+```
+
+pode ser possível, mas precisa definir:
+
+> medido onde?
+
+Porque:
+
+```text
+client → Redis roundtrip
+```
+
+é diferente de:
+
+```text
+pure Java policy evaluation
+```
+
+---
+
+# ⭐ Arquitetura final que eu recomendaria
+
+Eu visualizo o 000.8 assim:
+
+```text
+                    EVENTS
+                       │
+                       ▼
+            FusionEvaluationDispatcher
+                       │
+                       ▼
+              PostgreSQL Job Queue
+                (coalescing)
+                       │
+                       ▼
+                 FusionJobWorker
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+     Direct          Graph         Behavioral
+      Rules       + Propagation    Embeddings
+        │              │              │
+        └──────────────┼──────────────┘
+                       │
+                       ▼
+                   ONNX ML
+                       │
+                       ▼
+              Signal Availability
+                       │
+                       ▼
+             Correlation Groups
+                       │
+                       ▼
+          Probabilistic Fusion Engine
+                       │
+                       ▼
+             LOO Attribution Engine
+                       │
+                       ▼
+              RiskDecisionPolicy
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+    HARD_BLOCK      RESTRICT        REVIEW
+        │              │              │
+        │              └──────┐  ┌────┘
+        │                     ▼
+        │          SPEC-000.7 Investigation
+        │                     │
+        ▼                     ▼
+             RiskProfileStore + Checkpoint
+                       │
+                       ▼
+               Fraud Gate V4
+```
+
+---
+
+# 📌 Minhas mudanças obrigatórias antes do TASKS-000.8
+
+Eu faria estas **5 alterações obrigatórias**:
+
+### 1. Corrigir o unique constraint
+
+❌
+
+```sql
+UNIQUE(entity_id, status)
+```
+
+✅
+
+```sql
+CREATE UNIQUE INDEX ...
+WHERE status = 'PENDING'
+```
+
+---
+
+### 2. Definir comportamento para eventos durante `RUNNING`
+
+```text
+RUNNING + new event
+↓
+create/update PENDING job
+```
+
+---
+
+### 3. Remover fallback silencioso do ONNX em produção
+
+❌
+
+```text
+ONNX failure → heuristic risk
+```
+
+✅
+
+```text
+ONNX failure → ML unavailable
+→ fusion degradation metadata
+```
+
+---
+
+### 4. Adicionar lease recovery
+
+Definir formalmente:
+
+```text
+RUNNING + expired lease
+→ retry
+```
+
+---
+
+### 5. Resolver `entityId` × `userId`
+
+O `RiskProfileStore` precisa ter um subject/key model explícito.
+
+---
+
+# Minha conclusão
+
+**O PLAN-000.8 está arquiteturalmente muito forte.** Eu diria que ele está em um nível superior ao plano original baseado diretamente em LangGraph.
+
+A decisão mais importante foi esta:
+
+> **usar LLM/SLM como componente especializado de investigação (SPEC-000.7), mas manter fusion, decisão, workflow, estado e auditoria em Java determinístico.**
+
+Isso cria uma separação muito saudável:
+
+```text
+QUANTITATIVE RISK
+      ↓
+deterministic Java
+      ↓
+FraudDecision
+      ↓
+qualitative investigation
+      ↓
+grounded SLM
+      ↓
+human analyst
+```
+
+Eu faria os cinco ajustes acima e então partiria para o **TASKS-000.8 em TDD order**.
+
+E, sinceramente, a próxima task breakdown deveria colocar a **fila durável e o RiskFusionEngine antes do ONNX**, porque isso permite construir todo o pipeline com um `MlSignalProvider` fake antes de introduzir o runtime ONNX. Isso reduz bastante a complexidade inicial.

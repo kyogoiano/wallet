@@ -13,6 +13,6 @@ public class DatabaseCleaner {
     }
 
     public void clean() {
-        jdbc.execute("TRUNCATE TABLE fraud_relationship_events, fraud_relationships, fraud_entities, dlq_operations, goals, cashflow_profiles, savings_execution_history, savings_rules, savings_plans, ledger, accounts, outbox, wallet_operations RESTART IDENTITY CASCADE");
+        jdbc.execute("TRUNCATE TABLE fraud_analyst_reviews, fraud_investigation_checkpoints, fraud_fusion_jobs, fraud_relationship_events, fraud_relationships, fraud_entities, dlq_operations, goals, cashflow_profiles, savings_execution_history, savings_rules, savings_plans, ledger, accounts, outbox, wallet_operations RESTART IDENTITY CASCADE");
     }
 }

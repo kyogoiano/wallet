@@ -432,3 +432,58 @@ VALUES
     ('fa111111-1111-1111-1111-111111111111', '0a35fb14-75ee-4125-943b-500893c30d33', '2c57ad36-97aa-6347-b65d-722015e52f55', 'TRANSFERRED_TO', NOW() - INTERVAL '1 hour', gen_random_uuid(), 500.0000),
     ('fb222222-2222-2222-2222-222222222222', '2c57ad36-97aa-6347-b65d-722015e52f55', '3d68be47-08bb-7458-c76e-833126f63a66', 'TRANSFERRED_TO', NOW() - INTERVAL '30 minutes', gen_random_uuid(), 450.0000)
 ON CONFLICT (id) DO NOTHING;
+
+-- Hand-Rolled Durable Job Queue with Partial Unique Index Coalescing (REQ-FUSION-004, REQ-FUSION-009, REQ-FUSION-013)
+CREATE TABLE IF NOT EXISTS fraud_fusion_jobs (
+    job_id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    model_version VARCHAR(32) NOT NULL DEFAULT 'v1',
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    as_of TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    attempt_count INT NOT NULL DEFAULT 0,
+    worker_token UUID,
+    lease_expires_at TIMESTAMPTZ,
+    next_attempt_at TIMESTAMPTZ,
+    idempotency_key VARCHAR(128),
+    payload JSONB,
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Partial Unique Index: Guarantees at most ONE pending job per entity, while preserving full execution history
+CREATE UNIQUE INDEX IF NOT EXISTS uq_fusion_job_pending_entity
+    ON fraud_fusion_jobs (entity_id)
+    WHERE status = 'PENDING';
+
+CREATE INDEX IF NOT EXISTS idx_fusion_jobs_poll 
+    ON fraud_fusion_jobs (status, as_of, lease_expires_at);
+
+-- Checkpoints for Human-in-the-Loop Compliance Review (Under REVIEW / RESTRICT)
+CREATE TABLE IF NOT EXISTS fraud_investigation_checkpoints (
+    checkpoint_id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING_ANALYST',
+    state_payload JSONB NOT NULL,
+    final_risk NUMERIC(4, 3) NOT NULL,
+    risk_classification VARCHAR(32) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_checkpoints_entity 
+    ON fraud_investigation_checkpoints (entity_id, status);
+
+-- Audit Log for Human-in-the-Loop Analyst Decisions (REQ-FUSION-008)
+CREATE TABLE IF NOT EXISTS fraud_analyst_reviews (
+    review_id UUID PRIMARY KEY,
+    checkpoint_id UUID NOT NULL REFERENCES fraud_investigation_checkpoints(checkpoint_id),
+    entity_id UUID NOT NULL,
+    analyst_id VARCHAR(64) NOT NULL,
+    verdict VARCHAR(32) NOT NULL,
+    notes TEXT,
+    reviewed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_fraud_reviews_checkpoint 
+    ON fraud_analyst_reviews (checkpoint_id);

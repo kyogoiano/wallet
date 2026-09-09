@@ -90,6 +90,19 @@ services:
           - redis
           - dragonfly
 
+  dragonfly-client:
+    image: redis:alpine
+    container_name: dragonfly-client
+    restart: always
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    tty: true
+    volumes:
+      - redis-socket:/var/run/redis
+    networks:
+      - wallet-net
 
   openobserve:
     image: openobserve/openobserve:latest-amd64-simd

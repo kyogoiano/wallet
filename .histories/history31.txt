@@ -1,0 +1,622 @@
+Sim — e olhando a evolução que fizemos nas **SPEC-000.5 → 000.6 → 000.7**, eu acho que a **SPEC-000.8 precisa de uma revisão arquitetural importante antes de implementarmos**.
+
+Minha conclusão principal:
+
+> **Eu não colocaria LangGraph/StateGraph como o motor central da SPEC-000.8.**
+>
+> Usaria uma arquitetura **determinística de Signal Fusion + Micro-ML + Job Orchestrator hand-rolled**, e deixaria o componente agentic/LLM como uma camada opcional de investigação profunda.
+
+Isso mantém a consistência com a decisão que tomamos na **000.6**.
+
+---
+
+# 🚨 Principal problema da SPEC-000.8 atual
+
+Hoje ela mistura três responsabilidades muito diferentes:
+
+```text
+Signal Fusion
+      +
+Micro-ML inference
+      +
+Agentic Investigation Workflow
+```
+
+E coloca todas dentro de:
+
+```text
+LangGraph StateGraph
+```
+
+Isso cria um problema arquitetural.
+
+## Signal Fusion não precisa de um agent
+
+O cálculo:
+
+```text
+direct
+graph
+propagated
+behavioral
+ML
+       ↓
+Risk Fusion
+       ↓
+final_risk
+```
+
+é completamente:
+
+* determinístico;
+* matemático;
+* auditável;
+* reproduzível;
+* extremamente rápido.
+
+Não existe benefício real em usar um **agent workflow** para isso.
+
+---
+
+# 🏗️ Minha arquitetura recomendada
+
+Eu dividiria a SPEC-000.8 em **três camadas claramente separadas**:
+
+```text
+                    ┌─────────────────────────────┐
+                    │     FRAUD SIGNAL SOURCES     │
+                    │                             │
+                    │ Direct Rules                │
+                    │ Graph Intelligence          │
+                    │ Risk Propagation            │
+                    │ Behavioral Embeddings       │
+                    │ Micro-ML                    │
+                    └──────────────┬──────────────┘
+                                   │
+                                   ▼
+                    ┌─────────────────────────────┐
+                    │  DETERMINISTIC SIGNAL FUSION │
+                    │                             │
+                    │ RiskFusionEngine            │
+                    │ Attribution                 │
+                    │ Policy Classification       │
+                    └──────────────┬──────────────┘
+                                   │
+                 ┌─────────────────┼─────────────────┐
+                 │                 │                 │
+                 ▼                 ▼                 ▼
+              ALLOW             REVIEW             BLOCK
+                 │                 │                 │
+                 ▼                 ▼                 ▼
+            Hot Profile      Investigation      Hot Profile
+                               Workflow          + Action
+```
+
+E somente o caminho `REVIEW` poderia chegar a uma investigação mais sofisticada:
+
+```text
+REVIEW
+   │
+   ▼
+Investigation Job
+   │
+   ▼
+Evidence Collection
+   │
+   ├── Graph
+   ├── Temporal
+   ├── Behavioral
+   ├── ML Attribution
+   │
+   ▼
+SPEC-000.7 Investigation Synthesizer
+   │
+   ▼
+Optional Agentic Deep Investigation
+```
+
+---
+
+# 🧠 O que eu faria com LangGraph?
+
+Eu faria dele um componente **opcional e posterior**.
+
+Algo como:
+
+## Phase 0.8
+
+```text
+Deterministic Fusion
++
+ONNX Micro-ML
++
+Risk Profile Materialization
++
+Deterministic Investigation Dispatch
+```
+
+## Future Phase 0.9
+
+```text
+Agentic Investigation
++
+Tool-based reasoning
++
+Multi-step investigation
++
+Human-in-the-loop
+```
+
+Isso evita introduzir Python/LangGraph como dependência arquitetural central no Wallet Service Java/Spring.
+
+---
+
+# ⚠️ Outro problema: LangGraph + Spring Boot
+
+Seu projeto atualmente está muito consistente:
+
+```text
+Java 26
+Spring Boot
+Spring Modulith
+PostgreSQL
+NATS JetStream
+Redis / Dragonfly-compatible state
+ONNX Runtime
+```
+
+Introduzir LangGraph normalmente significa:
+
+```text
+Java Service
+     ↓
+Python Runtime
+     ↓
+LangGraph
+     ↓
+LLM runtime
+```
+
+Agora você tem:
+
+* outro runtime;
+* outro deployment;
+* outra pipeline;
+* outro ambiente de observabilidade;
+* serialização Java ↔ Python;
+* tracing distribuído;
+* versionamento de workflows em duas linguagens.
+
+Para o estágio atual do Wallet Service, isso é **overhead demais**.
+
+---
+
+# ✅ Melhor alternativa: Hand-Rolled Investigation Graph
+
+Podemos aplicar exatamente a filosofia da **SPEC-000.6**.
+
+Criar algo como:
+
+```java
+public interface InvestigationStep {
+
+    InvestigationState execute(InvestigationState state);
+}
+```
+
+E:
+
+```java
+public interface InvestigationWorkflow {
+
+    InvestigationResult investigate(UUID entityId);
+}
+```
+
+O fluxo pode ser completamente explícito:
+
+```text
+START
+  │
+  ▼
+LoadSignals
+  │
+  ▼
+RunMicroML
+  │
+  ▼
+FuseSignals
+  │
+  ├──── ALLOW ────► Materialize
+  │
+  ├──── BLOCK ────► Materialize + Action
+  │
+  └──── REVIEW ───► BuildEvidence
+                         │
+                         ▼
+                   GenerateDossier
+                         │
+                         ▼
+                   AnalystCheckpoint
+```
+
+Isso é literalmente um **StateGraph**, mas sem precisar de LangGraph.
+
+---
+
+# 🔥 Sobre a fórmula de Risk Fusion
+
+A fórmula atual:
+
+$$
+R_{\text{final}} =
+1 -
+(1-R_{\text{direct}})
+\prod_s(1-w_sR_s)
+$$
+
+é boa como ponto de partida.
+
+Mas eu faria uma pequena evolução.
+
+## Problema
+
+Os sinais não são realmente independentes.
+
+Por exemplo:
+
+```text
+Graph Risk
+       ↑
+       │
+Shared Device
+       │
+       ▼
+Behavioral Risk
+```
+
+Ou:
+
+```text
+Rapid Drain
+   │
+   ├── Direct Rule
+   │
+   ├── Behavioral Feature
+   │
+   └── ML Feature
+```
+
+Se aplicarmos probabilistic union diretamente:
+
+```text
+1 - Π(1 - signal)
+```
+
+podemos ter **double counting**.
+
+---
+
+# 🧮 Minha recomendação: Fusion Groups
+
+Agrupar sinais correlacionados.
+
+Por exemplo:
+
+```text
+GROUP A — Deterministic
+    direct_risk
+
+GROUP B — Graph Intelligence
+    graph_risk
+    propagated_risk
+
+GROUP C — Behavioral
+    behavioral_risk
+
+GROUP D — Statistical
+    ml_risk
+```
+
+Primeiro:
+
+### Graph Group
+
+$$
+R_{\text{graph-group}}
+=
+1-(1-R_{\text{graph}})
+(1-w_pR_{\text{propagated}})
+$$
+
+Depois:
+
+$$
+R_{\text{final}}
+=
+1-
+(1-R_{\text{direct}})
+(1-w_gR_{\text{graph-group}})
+(1-w_bR_{\text{behavioral}})
+(1-w_mR_{\text{ML}})
+$$
+
+Isso reduz bastante o double counting entre:
+
+```text
+graph_risk
+propagated_risk
+```
+
+---
+
+# 🧠 Micro-ML: ONNX é uma excelente decisão
+
+Aqui eu manteria exatamente a ideia.
+
+Mas faria uma separação importante:
+
+```text
+Training
+    ↓
+Offline
+Python / XGBoost / LightGBM
+    ↓
+Export ONNX
+    ↓
+Model Registry
+    ↓
+Production
+Java ONNX Runtime
+```
+
+Ou seja:
+
+```text
+Python NEVER required in runtime
+```
+
+O Wallet Service recebe apenas:
+
+```text
+fraud-risk-model-v1.onnx
+```
+
+E executa:
+
+```java
+OrtSession session;
+```
+
+Isso é muito mais alinhado ao projeto.
+
+---
+
+# ⚠️ Eu mudaria a meta de `< 2ms`
+
+Eu não colocaria isso como um hard requirement absoluto inicialmente.
+
+Porque depende de:
+
+* CPU;
+* JVM warmup;
+* ONNX model size;
+* feature preparation;
+* GC;
+* hardware.
+
+Eu escreveria:
+
+```text
+Target:
+P95 ONNX inference < 2ms
+
+Hard ceiling:
+P99 < 10ms
+```
+
+E mediria separadamente:
+
+```text
+Feature extraction
+ONNX inference
+Fusion
+Materialization
+```
+
+---
+
+# 🐉 DragonflyDB: eu faria uma abstração
+
+Não acoplaria diretamente:
+
+```java
+DragonflyClient
+```
+
+Criaria:
+
+```java
+public interface RiskProfileStore {
+
+    void save(RiskProfile profile);
+
+    Optional<RiskProfile> find(UUID entityId);
+
+    void invalidate(UUID entityId);
+}
+```
+
+Implementação:
+
+```text
+RedisRiskProfileStore
+```
+
+Como Dragonfly é Redis-compatible.
+
+Assim você pode usar:
+
+```text
+Redis
+Dragonfly
+Valkey
+```
+
+sem mudar o domínio.
+
+---
+
+# 🔥 A arquitetura que eu recomendaria para 000.8
+
+```mermaid
+flowchart TD
+
+    Event["Fraud / Transfer Events"] --> Dispatcher["FusionEvaluationDispatcher"]
+
+    Dispatcher --> Jobs[("PostgreSQL Durable Jobs")]
+
+    Jobs --> Worker["SignalFusionWorker"]
+
+    Worker --> Direct["Direct Risk"]
+    Worker --> Graph["Graph Risk"]
+    Worker --> Prop["Propagated Risk"]
+    Worker --> Behavior["Behavioral Risk"]
+    Worker --> ML["ONNX Micro-ML"]
+
+    Direct & Graph & Prop & Behavior & ML --> Fusion["Deterministic RiskFusionEngine"]
+
+    Fusion --> Attribution["Risk Attribution Engine"]
+
+    Attribution --> Decision{"Decision Policy"}
+
+    Decision -->|ALLOW| Materialize["RiskProfileStore"]
+
+    Decision -->|BLOCK| Block["Block / Restrict Policy"]
+    Block --> Materialize
+
+    Decision -->|REVIEW| InvestigationJob["Investigation Job"]
+
+    InvestigationJob --> Evidence["Evidence Context Builder"]
+
+    Evidence --> Dossier["SPEC-000.7 Investigation Synthesizer"]
+
+    Dossier --> Analyst["Analyst Checkpoint"]
+
+    Materialize --> Cache[("Redis / Dragonfly")]
+    Cache --> Gate["Fraud Gate V4"]
+```
+
+---
+
+# 📦 Spring Modulith topology sugerida
+
+Eu estruturaria assim:
+
+```text
+br.com.wallet.fraud.fusion
+│
+├── api/
+│   ├── RiskFusionEngine.java
+│   ├── FraudSignalFusionService.java
+│   ├── model/
+│   │   ├── FraudSignalSet.java
+│   │   ├── RiskFusionResult.java
+│   │   ├── RiskAttribution.java
+│   │   ├── RiskDecision.java
+│   │   └── RiskProfile.java
+│
+└── internal/
+    │
+    ├── fusion/
+    │   ├── ProbabilisticRiskFusionEngine.java
+    │   ├── SignalCorrelationPolicy.java
+    │   └── RiskAttributionCalculator.java
+    │
+    ├── ml/
+    │   ├── OnnxRiskModelEvaluator.java
+    │   ├── OnnxModelLoader.java
+    │   └── FraudFeatureMapper.java
+    │
+    ├── orchestration/
+    │   ├── FusionEvaluationDispatcher.java
+    │   ├── FusionJobWorker.java
+    │   └── InvestigationDispatcher.java
+    │
+    ├── persistence/
+    │   ├── RiskProfileStore.java
+    │   └── RedisRiskProfileStore.java
+    │
+    └── policy/
+        ├── RiskDecisionPolicy.java
+        └── HardRulePolicy.java
+```
+
+E a investigação continuaria sendo responsabilidade da:
+
+```text
+fraud.investigation
+```
+
+da **SPEC-000.7**.
+
+Isso é importante: **não duplicar Investigation Dossier na 000.8**.
+
+---
+
+# 🎯 Minha recomendação final
+
+Eu revisaria a SPEC-000.8 para:
+
+### ❌ Remover como core
+
+```text
+LangGraph StateGraph Agentic Workflow
+```
+
+### ✅ Substituir por
+
+```text
+PostgreSQL Durable Job Queue
++
+Deterministic Signal Fusion Pipeline
++
+ONNX Micro-ML
++
+Risk Profile Materialization
++
+Conditional Investigation Dispatch
+```
+
+### 🤖 Manter Agentic AI como opcional
+
+```text
+Future Deep Investigation Layer
+```
+
+ou até:
+
+```text
+SPEC-000.9
+```
+
+---
+
+## Minha avaliação
+
+| Componente                 | Decisão                      |
+| -------------------------- | ---------------------------- |
+| Probabilistic Fusion       | ✅ Manter                     |
+| Hard Rule Primacy          | ✅ Manter                     |
+| ONNX Micro-ML              | ✅ Manter fortemente          |
+| Dragonfly Hot State        | ✅ Manter, via abstraction    |
+| Fraud Gate O(1)            | ✅ Excelente                  |
+| LangGraph como core        | ❌ Remover                    |
+| Hand-rolled orchestration  | ✅ Reutilizar padrão da 000.6 |
+| Investigation Dossier      | ✅ Reutilizar 000.7           |
+| Human-in-the-loop          | ✅ Manter                     |
+| Agentic Deep Investigation | 🟡 Adiar / tornar opcional   |
+
+**Na minha opinião, essa mudança deixa a SPEC-000.8 muito mais coerente com a arquitetura que estamos construindo: PostgreSQL como fonte durável, NATS para eventos, Spring Modulith para boundaries, ONNX para inferência local e SLM apenas como copilot de investigação — nunca como parte do core decisório.**
+
+O próximo passo ideal seria eu **reescrever a SPEC-000.8 completa na versão “000.8 reviewed evolution”**, já incorporando essa arquitetura e também corrigindo a fórmula de fusion para lidar melhor com correlação/double-counting entre sinais.

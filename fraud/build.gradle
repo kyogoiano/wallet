@@ -5,6 +5,7 @@ ext {
     caffeineVersion = "3.2.4"
     resilience4jVersion = "2.4.0"
     lettuceVersion = "7.7.0.RELEASE"
+    onnxRuntimeVersion = "1.29.0"
 }
 
 dependencies {
@@ -16,6 +17,7 @@ dependencies {
     implementation("io.lettuce:lettuce-core:${lettuceVersion}")
     implementation("com.github.ben-manes.caffeine:caffeine:${caffeineVersion}")
     implementation("io.github.resilience4j:resilience4j-spring-boot4:${resilience4jVersion}")
+    implementation("com.microsoft.onnxruntime:onnxruntime:${onnxRuntimeVersion}")
     implementation 'org.springframework:spring-web'
     implementation 'tools.jackson.core:jackson-core'
     implementation 'tools.jackson.core:jackson-databind'

@@ -23,8 +23,11 @@ COPY src src
 RUN ./gradlew clean :bootJar --no-daemon
 
 # Runtime stage
-FROM bellsoft/liberica-runtime-container:jdk-26-slim-glibc
+FROM bellsoft/liberica-runtime-container:jdk-26-glibc
 WORKDIR /app
+
+# Install native C++ runtime and OpenMP dependencies required by embedded ONNX Runtime (I-FUSION-004)
+RUN apk update && apk add --no-cache libstdc++ libgomp
 
 # Copia o JAR gerado (usando um wildcard mais seguro)
 COPY --from=build /app/build/libs/*.jar app.jar

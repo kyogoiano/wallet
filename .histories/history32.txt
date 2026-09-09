@@ -1,0 +1,646 @@
+Sim — **essa versão revisada da SPEC-000.8 está significativamente mais madura e arquiteturalmente coerente** do que a versão anterior baseada em LangGraph.
+
+A principal evolução foi a decisão de **não usar um framework agentic para aquilo que é essencialmente um pipeline determinístico de alto throughput**. A arquitetura agora separa claramente:
+
+* **Phase 0.8:** signal fusion + micro-ML + orchestration determinística.
+* **Phase 0.7:** evidence-grounded investigation synthesis.
+* **Future Phase 0.9+:** agentes realmente autônomos/multi-step, caso façam sentido.
+
+Isso está perfeitamente alinhado com o mantra atualizado da especificação.
+
+## Minha avaliação: ⭐ 9.3/10
+
+A arquitetura está muito boa, mas eu faria **alguns ajustes antes de congelar a implementação**.
+
+---
+
+# 1. A remoção do LangGraph foi a decisão correta
+
+A versão original tinha um problema conceitual:
+
+> LangGraph estava sendo usado para orquestrar cálculos determinísticos.
+
+Agora a SPEC deixa explícito:
+
+* Signal fusion → matemática.
+* ONNX → inferência local.
+* Job queue → PostgreSQL.
+* Routing → policy determinística.
+* Investigation → reutiliza SPEC-000.7.
+* Human review → checkpoint auditável.
+
+Essa separação é muito mais adequada para um sistema financeiro.
+
+A arquitetura agora fica:
+
+```text
+EVENT
+  │
+  ▼
+PostgreSQL Durable Job
+  │
+  ▼
+Parallel Signal Evaluation
+  │
+  ├── Direct Rules
+  ├── Graph
+  ├── Temporal Propagation
+  ├── Behavioral Embeddings
+  └── ONNX Micro-ML
+           │
+           ▼
+     Risk Fusion Engine
+           │
+           ▼
+     Risk Attribution
+           │
+           ▼
+      Decision Policy
+       │     │      │
+     ALLOW REVIEW BLOCK
+       │     │      │
+       │     │      └─ Restrict/Block
+       │     │
+       │     └─ SPEC-000.7 Investigation
+       │
+       └─ Hot Risk Profile
+```
+
+Muito melhor que transformar isso em uma StateGraph.
+
+---
+
+# 2. Correlation Groups é provavelmente a melhoria mais importante
+
+Essa mudança é excelente.
+
+O problema anterior era:
+
+```text
+Graph Risk
++
+Propagation Risk
+```
+
+Esses sinais **não são realmente independentes**.
+
+A propagação temporal nasce da mesma estrutura relacional do grafo.
+
+A nova formulação:
+
+$$
+R_{\text{graph-group}}
+=
+1-(1-R_{\text{graph}})
+(1-w_pR_{\text{propagated}})
+$$
+
+antes da fusão principal evita inflar artificialmente o risco.
+
+A arquitetura documenta isso explicitamente como prevenção de *double counting*.
+
+Eu manteria isso.
+
+---
+
+# 3. Mas eu faria uma evolução: correlation groups configuráveis
+
+Hoje temos:
+
+```text
+GRAPH_GROUP
+ ├── graph
+ └── propagated
+```
+
+Mas futuramente provavelmente teremos outras correlações:
+
+```text
+AUTH_GROUP
+ ├── failed_auth
+ ├── device_switch
+ └── impossible_travel
+
+BEHAVIOR_GROUP
+ ├── behavioral_embedding
+ └── micro_ml_behavioral_features
+```
+
+Eu criaria desde já uma abstração:
+
+```java
+public interface RiskCorrelationGroup {
+
+    RiskSignalGroupType type();
+
+    GroupRiskResult combine(
+        List<WeightedRiskSignal> signals
+    );
+}
+```
+
+Exemplo:
+
+```java
+public enum RiskSignalGroupType {
+    DIRECT,
+    GRAPH_INTELLIGENCE,
+    BEHAVIORAL,
+    MACHINE_LEARNING
+}
+```
+
+Assim evitamos hardcode matemático espalhado pelo `RiskFusionEngine`.
+
+---
+
+# 4. ONNX Runtime: arquitetura correta, mas precisamos definir melhor o contrato
+
+A decisão de:
+
+> offline training → ONNX export → Java OrtSession
+
+é muito boa.
+
+A SPEC estabelece corretamente:
+
+* sem Python em runtime;
+* sem HTTP;
+* sem sidecar;
+* ONNX embedded;
+* P95 < 2 ms;
+* P99 < 10 ms.
+
+Mas falta uma coisa **extremamente importante**:
+
+## Feature Contract Versioning
+
+O modelo ONNX precisa saber exatamente qual vetor está recebendo.
+
+Eu adicionaria:
+
+```java
+public record MlFeatureVector(
+    int featureVersion,
+    float[] values
+) {}
+```
+
+E:
+
+```java
+public record OnnxModelMetadata(
+    String modelId,
+    String modelVersion,
+    int featureVersion,
+    String checksum
+) {}
+```
+
+E uma invariant:
+
+### `I-FUSION-008 — ML Feature Contract Compatibility`
+
+> An ONNX model MUST NOT execute when its expected feature schema version differs from the supplied feature vector version.
+
+Isso evita um dos piores tipos de bug em ML:
+
+```text
+Model expects:
+
+[velocity,
+ amount,
+ graph_degree]
+
+Application sends:
+
+[amount,
+ velocity,
+ graph_degree]
+```
+
+O modelo continua funcionando.
+
+Mas produz lixo silenciosamente.
+
+---
+
+# 5. Eu não colocaria `< 0.5ms` como SLA absoluto para Redis/Dragonfly
+
+Aqui eu faria uma pequena correção.
+
+A SPEC diz:
+
+> Fraud Gate V4 < 0.5ms.
+
+Conceitualmente está ótimo como **target**, mas como requisito absoluto pode ficar artificialmente difícil dependendo de:
+
+* network hop;
+* serialization;
+* JVM scheduling;
+* Redis client;
+* container environment.
+
+Eu reformularia:
+
+```text
+Fraud Gate target:
+P99 < 1ms end-to-end within the service boundary
+```
+
+E separaria:
+
+```text
+RiskProfileStore lookup:
+P99 < 0.5ms when hot-cache/local-network conditions apply
+```
+
+Porque:
+
+```text
+O(1)
+```
+
+é complexidade algorítmica.
+
+Mas:
+
+```text
+< 0.5ms
+```
+
+é uma característica operacional.
+
+Não devemos misturar as duas garantias.
+
+---
+
+# 6. O Durable Job Queue está muito alinhado com o projeto
+
+Essa parte está excelente porque reutiliza um padrão que vocês já possuem.
+
+A SPEC agora define:
+
+```text
+fraud_fusion_jobs
+
+PENDING
+RUNNING
+COMPLETED
+RETRY_WAIT
+FAILED
+```
+
+com:
+
+```sql
+SELECT ...
+FOR UPDATE SKIP LOCKED
+```
+
+e worker leases.
+
+Eu recomendaria adicionar explicitamente:
+
+```text
+lease_expires_at
+worker_id
+attempt_count
+next_attempt_at
+last_error
+idempotency_key
+```
+
+Algo assim:
+
+```sql
+CREATE TABLE fraud_fusion_jobs (
+    job_id UUID PRIMARY KEY,
+
+    entity_id UUID NOT NULL,
+
+    status VARCHAR(32) NOT NULL,
+
+    worker_token UUID,
+
+    lease_expires_at TIMESTAMPTZ,
+
+    attempt_count INT NOT NULL DEFAULT 0,
+
+    next_attempt_at TIMESTAMPTZ,
+
+    idempotency_key VARCHAR(128) UNIQUE,
+
+    payload JSONB,
+
+    last_error TEXT,
+
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+```
+
+Isso deixa o worker extremamente resiliente.
+
+---
+
+# 7. Eu adicionaria Job Coalescing
+
+Isso é importante.
+
+Imagine:
+
+```text
+Transfer 1
+Transfer 2
+Transfer 3
+Transfer 4
+```
+
+Cada um dispara:
+
+```text
+FraudEvaluationRequestedEvent
+```
+
+Não necessariamente queremos:
+
+```text
+4 fusion jobs completos
+```
+
+Podemos querer:
+
+```text
+Entity X
+→ latest state evaluation
+```
+
+Então eu adicionaria:
+
+### `REQ-FUSION-009 — Evaluation Coalescing`
+
+Para uma mesma entidade:
+
+```text
+entity_id + evaluation_type
+```
+
+deve haver no máximo uma avaliação pendente.
+
+Novos eventos:
+
+```text
+UPDATE latest_event_timestamp
+```
+
+ou:
+
+```text
+merge payload
+```
+
+Isso reduz bastante:
+
+* ONNX executions;
+* pgvector reads;
+* graph traversals;
+* Redis writes.
+
+---
+
+# 8. Risk Attribution merece um design matemático explícito
+
+A SPEC exige:
+
+$$
+\sum C_s=100\%
+$$
+
+Isso é ótimo.
+
+Mas precisamos definir **como** calcular contribuição.
+
+Eu evitaria algo simplista como:
+
+```text
+signal × weight / total
+```
+
+porque a fórmula probabilística é multiplicativa.
+
+Uma boa abordagem seria **leave-one-out marginal contribution**.
+
+Para cada sinal:
+
+$$
+C_s =
+R_{\text{final}}
+-
+R_{\text{final without }s}
+$$
+
+Depois normalizamos:
+
+$$
+C'_s =
+\frac{C_s}
+{\sum C_i}
+$$
+
+Isso produz attribution muito mais fiel à fórmula.
+
+Exemplo:
+
+```java
+public record RiskContribution(
+    RiskSignalType signal,
+    double marginalImpact,
+    double normalizedContribution
+) {}
+```
+
+Eu colocaria isso explicitamente no PLAN.
+
+---
+
+# 9. BLOCK automático precisa diferenciar Hard Block de Risk Block
+
+Hoje temos:
+
+```text
+R_final >= 0.85 → BLOCK
+```
+
+Eu tomaria cuidado.
+
+Existe uma diferença entre:
+
+### Hard deterministic block
+
+```text
+sanctioned account
+known fraudster
+account explicitly blocked
+```
+
+versus:
+
+### Statistical risk block
+
+```text
+graph + behavioral + ML
+```
+
+Eu criaria:
+
+```java
+public enum FraudDecision {
+
+    ALLOW,
+    REVIEW,
+    RESTRICT,
+    BLOCK
+}
+```
+
+Porque:
+
+```text
+BLOCK
+```
+
+é muito forte para algo baseado parcialmente em:
+
+* graph inference;
+* ML;
+* behavioral similarity.
+
+Minha sugestão:
+
+```text
+R_direct == 1.0
+        ↓
+HARD_BLOCK
+
+R_final >= 0.90
+        ↓
+RESTRICT + INVESTIGATION
+
+0.50 – 0.90
+        ↓
+REVIEW
+
+< 0.50
+        ↓
+ALLOW
+```
+
+Ou, se quiser manter o tri-state externo:
+
+```text
+BLOCK
+```
+
+internamente diferenciar:
+
+```text
+BLOCK_HARD
+BLOCK_SOFT
+```
+
+---
+
+# 10. Excelente reutilizar SPEC-000.7
+
+Essa é uma das decisões mais corretas da nova versão.
+
+A Phase 0.8 **não recria**:
+
+```text
+InvestigationContext
+LLM client
+Grounding validation
+Dossier
+```
+
+Ela simplesmente chama:
+
+```java
+InvestigationService.generateDossier(entityId)
+```
+
+Isso está exatamente correto e evita duplicação arquitetural.
+
+A dependência fica:
+
+```text
+SPEC-000.5
+       │
+       ▼
+SPEC-000.6
+       │
+       ▼
+SPEC-000.7
+       │
+       ▼
+SPEC-000.8
+```
+
+Muito boa progressão.
+
+---
+
+# Minha recomendação final antes da PLAN-000.8
+
+Eu adicionaria **5 evoluções pequenas** à SPEC:
+
+### 1️⃣ `I-FUSION-008`
+
+**ML Feature Contract Versioning**
+
+### 2️⃣ `REQ-FUSION-009`
+
+**Fusion Job Coalescing**
+
+### 3️⃣ `REQ-FUSION-010`
+
+**Explicit Marginal Risk Attribution**
+
+### 4️⃣ `REQ-FUSION-011`
+
+**Hard Block vs Statistical Restriction distinction**
+
+### 5️⃣ `REQ-FUSION-012`
+
+**Model Artifact Integrity**
+
+Por exemplo:
+
+```text
+ONNX artifact
+ ├── SHA-256 checksum
+ ├── modelVersion
+ ├── featureVersion
+ ├── trainedAt
+ └── trainingDatasetVersion
+```
+
+---
+
+## Veredito
+
+**Eu considero a SPEC-000.8 agora pronta para gerar a PLAN-000.8**, depois desses pequenos ajustes.
+
+A evolução ficou muito mais sólida:
+
+> **000.5** → Graph Intelligence
+> **000.6** → Temporal Propagation
+> **000.7** → Behavioral Intelligence + Grounded Investigation
+> **000.8** → Signal Fusion + Micro-ML + Durable Orchestration
+> **000.9** → possível Deep Investigation / Copilot Agentic Layer
+
+Essa divisão é bem mais sustentável do que tentar colocar **LangGraph no centro do fraud engine**.
+
+Se quiser, o próximo passo pode ser eu fazer uma **revisão estrutural completa e já produzir a versão final “SPEC-000.8 vNext”**, incorporando esses 5 ajustes, pronta para gerar a **PLAN-000.8**.

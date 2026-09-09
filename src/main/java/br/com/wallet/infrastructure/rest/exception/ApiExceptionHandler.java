@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Basic global exception handler.
@@ -37,6 +38,17 @@ public class ApiExceptionHandler {
         log.warn("Resource not found: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(new ApiError(ErrorCode.NOT_FOUND, ex.getMessage()));
+    }
+
+    @ExceptionHandler(ResponseStatusException.class)
+    public ResponseEntity<ApiError> handleResponseStatus(ResponseStatusException ex) {
+        log.warn("Response status exception [{}]: {}", ex.getStatusCode(), ex.getReason());
+        ErrorCode code = ex.getStatusCode().value() == HttpStatus.NOT_FOUND.value()
+                ? ErrorCode.NOT_FOUND
+                : ErrorCode.BAD_REQUEST;
+        String message = ex.getReason() != null ? ex.getReason() : ex.getMessage();
+        return ResponseEntity.status(ex.getStatusCode())
+                .body(new ApiError(code, message));
     }
 
     @ExceptionHandler(InsufficientFundsException.class)

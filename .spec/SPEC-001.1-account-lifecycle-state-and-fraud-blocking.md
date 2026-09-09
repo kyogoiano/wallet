@@ -65,7 +65,12 @@ Previously, when the **Fraud & Risk Engine** (`:fraud`) issued a `FraudDecision.
 - **`REQ-ACC-001` (Account Status Column & Enum)**: The `accounts` table SHALL include `status VARCHAR(32) NOT NULL DEFAULT 'ACTIVE'`, `blocked_at TIMESTAMPTZ`, and `blocked_reason TEXT`. Status enum values: `ACTIVE`, `BLOCKED`, `SUSPENDED`, `FROZEN`.
 - **`REQ-ACC-002` (Core Exception)**: The system SHALL define `AccountBlockedException` in package `br.com.wallet.core.exceptions`.
 - **`REQ-ACC-003` (Pre-Execution Transaction Gate)**: During account retrieval for update (`AccountDao.getBalancesFromWallets`, `findWalletBalanceForUpdate`), the system SHALL verify account status and throw `AccountBlockedException` if not `ACTIVE`.
-- **`REQ-ACC-004` (Automated Fraud Blocking)**: When `FraudCheckHelper` receives `FraudDecision.BLOCK` (or risk score $\ge 70$), it SHALL update `accounts.status = 'BLOCKED'` with `blocked_at = NOW()` and `blocked_reason`, synchronize Redis, emit `FraudEvent`, and throw `FraudBlockedException`.
+- **`REQ-ACC-004` (Automated Fraud Blocking & Graduated Enforcement)**:
+  - **Tier 1: Pre-Execution Gate (`FraudGate`)**: Evaluates hot risk profiles in DragonflyDB ($P99 < 2\text{ms}$).
+    - If `HARD_BLOCK`: SHALL update `accounts.status = 'BLOCKED'` with `blocked_at = NOW()` and `blocked_reason`, synchronize Redis/Dragonfly (`I-ACCOUNT-002`), and throw `FraudBlockedException`.
+    - If `RESTRICT`: SHALL reject the active transaction by throwing `FraudBlockedException` without modifying the persistent account lifecycle status in PostgreSQL.
+  - **Tier 2: Real-Time Sliding Window & Velocity (`FraudService`)**: When `FraudCheckHelper` receives `FraudDecision.BLOCK` (or risk score $\ge 70$), it SHALL update `accounts.status = 'BLOCKED'` with `blocked_at = NOW()` and `blocked_reason`, synchronize Redis/Dragonfly, emit `FraudEvent`, and throw `FraudBlockedException`.
+  - **Tier 3: Automated Capability Isolation**: When an automated capability sweep (e.g. `SavingsExecutionService`) encounters either `AccountBlockedException` or `FraudBlockedException`, it SHALL record `SavingsExecutionStatus.REJECTED_BY_FRAUD` without aborting the triggering monetary transaction (`I-SAVINGS-003`).
 - **`REQ-ACC-005` (Redis Fallback to Database)**: `RedisUserStore.getFallbackValue(userId)` SHALL query the database via a dedicated user status repository/dao to resolve authoritative user block status.
 - **`REQ-ACC-006` (Administrative Block & Unblock API)**: The system SHALL expose `AccountStateUseCase` in `br.com.wallet.ledger.api` allowing administrators to block and unblock accounts with audit logging.
 

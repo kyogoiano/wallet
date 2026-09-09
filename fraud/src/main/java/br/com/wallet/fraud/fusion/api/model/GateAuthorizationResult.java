@@ -1,6 +1,5 @@
-package br.com.wallet.fraud.fusion.internal.gate;
+package br.com.wallet.fraud.fusion.api.model;
 
-import br.com.wallet.fraud.fusion.api.model.FraudDecision;
 import org.jspecify.annotations.NonNull;
 
 import java.util.Objects;

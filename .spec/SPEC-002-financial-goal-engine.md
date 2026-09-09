@@ -62,6 +62,47 @@ Operating as an autonomous, lean Spring Modulith application module, `br.com.wal
 
 ---
 
+## 2.1 Capability Synergies & Cross-Module Roadmap Bridges
+
+Operating under the mantra *"Capabilities observe, analyze, decide, and propose. Wallet Core authorizes and executes"*, the Goal Engine serves as the proactive planning hub for other capabilities:
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Capability Synergies Matrix                     │
+│                                                                        │
+│   Phase 3: SPEC-003                       Phase 2: SPEC-002            │
+│  ┌───────────────────────┐               ┌───────────────────────────┐ │
+│  │ Subscription & Spend  │ ────────────> │ Goals & Strategy Engine   │ │
+│  │ (Auto-detects income  │ Inferred Cash │ (Calculates pacing,       │ │
+│  │  & recurring expenses)│ flow Profile  │  deficit, & feasibility)  │ │
+│  └───────────────────────┘               └─────────────┬─────────────┘ │
+│                                                        │               │
+│                                           Proposed     │ Target        │
+│                                           Pacing Plan  │ Wallet Sweeps │
+│                                                        ▼               │
+│                                          ┌───────────────────────────┐ │
+│                                          │ Phase 1: SPEC-001         │ │
+│                                          │ Smart Savings Rules       │ │
+│                                          │ (Automated execution)     │ │
+│                                          └───────────────────────────┘ │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+1. **Bridge with Smart Savings (`SPEC-001`)**:
+   - `FinancialGoal` specifies `targetWalletId` (an account designated for the goal).
+   - The Goal Engine calculates `recommendedMonthlyContribution`.
+   - In integrated flows, this strategy proposal maps directly to a `SavingsPlan` in `br.com.wallet.savings` with matching target wallet and monthly/percentage rules, bridging mathematical reasoning to automated execution.
+
+2. **Bridge with Spending & Subscription Intelligence (`SPEC-003`)**:
+   - In V1, `CashflowProfile` is provisioned manually via `PUT /goals/cashflow`.
+   - In `SPEC-003`, recurring transaction analysis automatically detects salary/deposit frequency (`monthlyIncome`) and subscription/bill commitments (`monthlyCommittedExpenses`), continuously feeding the Goal Engine with real-world cashflow reality.
+
+3. **Bridge with AI Financial Copilot & MCP (`SPEC-004`)**:
+   - `POST /goals/simulate` and `GET /goals/{id}/strategy` provide pure, deterministic REST contracts ideal for AI tool calling via the Model Context Protocol (MCP).
+   - The Copilot can propose goal adjustments and savings plan configurations to users with strict human-in-the-loop approval (`I-AI-001`).
+
+---
+
 ## 3. Core Domain Models & Concepts
 
 ```

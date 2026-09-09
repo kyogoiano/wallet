@@ -115,19 +115,26 @@ gantt
     section Phase 0 Baseline & Infrastructure
     SPEC-000 Architecture Alignment     :done, p00_1, 2026-08-22, 2d
     TASKS-000 & Modulith Baseline       :done, p00_2, after p00_1, 2d
-    SPEC-000.1 DragonflyDB Migration    :active, p00_3, 2026-08-26, 2d
+    SPEC-000.1 DragonflyDB Migration    :done, p00_3, 2026-08-26, 2d
+    SPEC-000.2 DLQ Resilience           :done, p00_4, 2026-08-28, 2d
+    SPEC-000.3 Async Exceptions         :done, p00_5, 2026-08-28, 2d
+    SPEC-000.4 Observability OTel       :done, p00_6, 2026-08-29, 2d
+    SPEC-000.5 Relational Graph         :done, p00_7, 2026-09-01, 3d
+    SPEC-000.6 Temporal Decay           :done, p00_8, 2026-09-03, 3d
+    SPEC-000.7 Vector Dossier           :done, p00_9, 2026-09-05, 3d
+    SPEC-000.8 Signal Fusion & Micro-ML :done, p00_10, 2026-09-07, 3d
     section Phase 1 Programmable Money
     SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
     SPEC-001.1 Account Lifecycle        :done, p1_2, 2026-08-24, 2d
     SPEC-001.2 Savings Plans & Rules    :done, p1_3, 2026-08-26, 2d
     section Phase 2 Goal Engine
-    SPEC-002 Financial Goal Engine      :p2_1, after p1_3, 3d
-    TASKS-002 & Strategy Engine         :p2_2, after p2_1, 4d
+    SPEC-002 Financial Goal Engine      :done, p2_1, 2026-08-27, 3d
+    TASKS-002 & Strategy Engine         :done, p2_2, after p2_1, 2d
     section Phase 3 Intelligence
-    SPEC-003 Subscription & Spend Intel :p3_1, after p2_2, 3d
+    SPEC-003 Subscription & Spend Intel :active, p3_1, 2026-09-09, 3d
     TASKS-003 & Pattern Extraction      :p3_2, after p3_1, 4d
     section Phase 4 AI Copilot & MCP
-    SPEC-004 MCP Server & AI Copilot    :p4_1, after p3_2, 3d
+    SPEC-004 MCP Server & AI Copilot    :p4_1, after p3_2, 4d
     TASKS-004 & Tool Protocol Delivery  :p4_2, after p4_1, 5d
 ```
 
@@ -161,7 +168,22 @@ gantt
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/SPEC-000.1-migrate-redis-to-dragonflydb.md) (Ratified)
   - [`.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/PLAN-000.1-migrate-redis-to-dragonflydb.md) (Approved)
-  - [`.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md) (Ready for TDD)
+  - [`.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/TASKS-000.1-migrate-redis-to-dragonflydb.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.1-migrate-redis-to-dragonflydb.md`](file:///.spec/summaries/SUMMARY-000.1-migrate-redis-to-dragonflydb.md) (Verified)
+
+---
+
+### 🔹 Phase 0.2: DLQ Resilience, EXHAUSTED Status & Spring Modulith Isolation
+**Spec Identifier**: [`SPEC-000.2-dlq-resilience-and-exhausted-operations`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Dead Letter Queue & Operational Recovery Capability (br.com.wallet.dlq)`
+
+- **Intent**: Refactor DLQ subsystem into a first-class Spring Modulith capability module (`br.com.wallet.dlq`), enforce bounded automatic replays capped at 3 retries (`I-DLQ-001`), transition unrecoverable messages to `EXHAUSTED` (`I-DLQ-002`), and provide operator REST APIs under `/dlq/operations` (`I-DLQ-003`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/SPEC-000.2-dlq-resilience-and-exhausted-operations.md) (Ratified)
+  - [`.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/PLAN-000.2-dlq-resilience-and-exhausted-operations.md) (Approved)
+  - [`.spec/TASKS-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/TASKS-000.2-dlq-resilience-and-exhausted-operations.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md`](file:///.spec/summaries/SUMMARY-000.2-dlq-resilience-and-exhausted-operations.md) (Verified)
 
 ---
 
@@ -237,12 +259,15 @@ gantt
 
 ### 🔹 Phase 0.8: Fraud Signal Fusion, Micro-ML & LangGraph Agentic Investigation
 **Spec Identifier**: [`SPEC-000.8-fraud-signal-fusion-and-micro-ml`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md)  
-**Status**: 🟢 **Reviewed & Ratified**  
+**Status**: 🟢 **Completed & Verified**  
 **Core Abstraction**: `Multi-Signal Probabilistic Fusion, Micro-ML ONNX Scoring & LangGraph StateGraph Agentic Workflow (br.com.wallet.fraud.fusion)`
 
 - **Intent**: Fuse deterministic rules, graph topology, temporal risk propagation, behavioral vector anomalies, and micro-ML shadow scores into an explainable final risk score ($R_{\text{final}}$), orchestrate deep asynchronous investigations and analyst reviews via a LangGraph StateGraph workflow, and materialize hot risk state into DragonflyDB for sub-millisecond $O(1)$ Fraud Gate V4 execution.
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/SPEC-000.8-fraud-signal-fusion-and-micro-ml.md) (Ratified)
+  - [`.spec/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md) (Approved)
+  - [`.spec/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md) (Verified)
 
 ---
 
@@ -304,24 +329,27 @@ gantt
 ---
 
 ### 🔹 Phase 2: Financial Goal & Cashflow Strategy Engine
-**Spec Identifier**: `SPEC-002-financial-goal-engine`  
-**Status**: ⚪ Planned  
-**Core Abstraction**: `Goals & Strategy (br.com.wallet.goals)`
+**Spec Identifier**: [`SPEC-002-financial-goal-engine`](file:///.spec/SPEC-002-financial-goal-engine.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Goals & Strategy Capability (br.com.wallet.goals)`
 
-- **Intent**: Goal-oriented financial strategy calculation utilizing `spring-modulith-moments` (`MonthHasPassed`, `DayHasPassed`).
+- **Intent**: Goal-oriented financial strategy calculation, cashflow capacity modeling, and pure stateless feasibility simulation (`ON_TRACK`, `AT_RISK`, `UNACHIEVABLE`, `ACHIEVED`) with multi-goal waterfall prioritization.
 - **Spec Kit Artifacts**:
-  - `.spec/SPEC-002-financial-goal-engine.md`
+  - [`.spec/SPEC-002-financial-goal-engine.md`](file:///.spec/SPEC-002-financial-goal-engine.md) (Ratified)
+  - [`.spec/PLAN-002-financial-goal-engine.md`](file:///.spec/PLAN-002-financial-goal-engine.md) (Approved)
+  - [`.spec/TASKS-002-financial-goal-engine.md`](file:///.spec/TASKS-002-financial-goal-engine.md) (Completed)
+  - [`.spec/summaries/SUMMARY-002-financial-goal-engine.md`](file:///.spec/summaries/SUMMARY-002-financial-goal-engine.md) (Verified)
 
 ---
 
 ### 🔹 Phase 3: Subscription & Spending Intelligence
 **Spec Identifier**: `SPEC-003-spending-and-subscription-intelligence`  
-**Status**: ⚪ Planned  
-**Core Abstraction**: `Intelligence (br.com.wallet.intelligence)`
+**Status**: ⚪ Planned (Next Milestone)  
+**Core Abstraction**: `Spending Intelligence, Recurring Patterns & Cashflow Forecasting (br.com.wallet.intelligence)`
 
-- **Intent**: Extract recurring financial patterns, predict upcoming obligations, and alert on fee/rate anomalies without state mutation.
+- **Intent**: Asynchronously observe financial transactions, detect recurring subscriptions and obligations (periodicity, variance, merchant clustering), forecast forward liquidity liabilities (7/14/30-day calendar projections), automatically feed inferred `monthlyIncome` and `monthlyCommittedExpenses` into `CashflowProfile` (`br.com.wallet.goals`), and enrich behavioral vectors (`fraud_behavioral_profiles`) without direct ledger mutation.
 - **Spec Kit Artifacts**:
-  - `.spec/SPEC-003-spending-and-subscription-intelligence.md`
+  - `.spec/SPEC-003-spending-and-subscription-intelligence.md` (Pending Specification)
 
 ---
 

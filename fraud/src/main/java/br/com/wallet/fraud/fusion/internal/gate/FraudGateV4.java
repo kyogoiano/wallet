@@ -1,6 +1,8 @@
 package br.com.wallet.fraud.fusion.internal.gate;
 
+import br.com.wallet.fraud.fusion.api.FraudGate;
 import br.com.wallet.fraud.fusion.api.model.FraudDecision;
+import br.com.wallet.fraud.fusion.api.model.GateAuthorizationResult;
 import br.com.wallet.fraud.fusion.api.model.RiskProfile;
 import br.com.wallet.fraud.fusion.api.model.RiskSubject;
 import br.com.wallet.fraud.fusion.internal.persistence.RiskProfileStore;
@@ -17,7 +19,7 @@ import java.util.Optional;
  * High-performance pre-execution authorization gate meeting the P99 < 2ms Gateway SLA (REQ-FUSION-007).
  */
 @Component
-public class FraudGateV4 {
+public class FraudGateV4 implements FraudGate {
 
     private static final Logger log = LoggerFactory.getLogger(FraudGateV4.class);
     public static final BigDecimal HIGH_VALUE_THRESHOLD = new BigDecimal("5000.00");

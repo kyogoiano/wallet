@@ -135,4 +135,24 @@ class SavingsExecutionServiceTest {
                 eq(SavingsExecutionStatus.REJECTED_BY_FRAUD), any()
         );
     }
+
+    @Test
+    @DisplayName("Should handle FraudBlockedException gracefully and record REJECTED_BY_FRAUD")
+    void shouldHandleFraudBlockedExceptionGracefully() {
+        IntendedSweepAction action = new IntendedSweepAction(
+                planId, ruleId, SavingsRuleType.ROUND_UP, sourceWallet, targetWallet, new BigDecimal("50.00")
+        );
+
+        when(historyDao.isOperationProcessed(any())).thenReturn(false);
+        doThrow(new br.com.wallet.ledger.api.exceptions.FraudBlockedException(sourceOpId, UUID.randomUUID()))
+                .when(transferFundsUseCase).handle(any());
+
+        executionService.executeSweep(action, sourceOpId, "TRANSFER_COMPLETED");
+
+        verify(historyDao).insertExecution(
+                any(), eq(planId), eq(ruleId), eq(sourceOpId),
+                eq("TRANSFER_COMPLETED"), eq(new BigDecimal("50.00")), eq(BigDecimal.ZERO),
+                eq(SavingsExecutionStatus.REJECTED_BY_FRAUD), any()
+        );
+    }
 }

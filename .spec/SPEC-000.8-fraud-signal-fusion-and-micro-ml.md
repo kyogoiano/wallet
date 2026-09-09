@@ -119,9 +119,13 @@ flowchart TD
 - **`REQ-FUSION-006` (Typed Subject Hot Risk Profile Storage)**:
   - Storage-agnostic `RiskProfileStore` interface (`RedisRiskProfileStore` implementation) keyed by `RiskSubject(RiskSubjectType type, UUID id)`.
   - Structured Hash `risk_profile:{entityType}:{entityId}` with 1-hour TTL.
-- **`REQ-FUSION-007` (Fraud Gate V4 Authorization SLA & Contextual Degradation)**:
-  - Synchronous payment authorization check with P99 $< 2\text{ms}$ gateway SLA (P99 $< 0.5\text{ms}$ cache lookup).
-  - Contextual degradation policy when cache is offline (fail-closed for known high risk, deterministic fallback).
+- **`REQ-FUSION-007` (Fraud Gate V4 Authorization SLA, Public SPI & Critical Path Integration)**:
+  - Public `FraudGate` interface in `br.com.wallet.fraud.fusion.api` (`@NamedInterface("fusion-api")`) with contract `GateAuthorizationResult authorize(RiskSubject subject, BigDecimal amount)`.
+  - Implemented by `FraudGateV4` providing synchronous payment authorization check with P99 $< 2\text{ms}$ gateway SLA (P99 $< 0.5\text{ms}$ DragonflyDB cache lookup).
+  - Wired directly into `FraudCheckHelper` on the transaction critical path before legacy velocity evaluation:
+    - `HARD_BLOCK`: Sets `accounts.status = 'BLOCKED'` in PostgreSQL (`I-ACCOUNT-001`), synchronizes Redis/Dragonfly (`I-ACCOUNT-002`), and throws `FraudBlockedException`.
+    - `RESTRICT`: Rejects the active transaction with `FraudBlockedException` without modifying the persistent account lifecycle status in PostgreSQL.
+  - Contextual degradation policy when cache is offline (fail-closed for known high risk $\ge 5000.00$, deterministic fallback allow for lower amounts).
 - **`REQ-FUSION-008` (Human-in-the-Loop Analyst Feedback)**:
   - Compliance review endpoint and use case for analyst overrides (`CONFIRMED_FRAUD`, `FALSE_POSITIVE`, `ALLOW_WITH_EXCEPTION`).
 - **`REQ-FUSION-013` (Fusion Job Lease Recovery with Bounded Backoff)**:
@@ -234,7 +238,7 @@ To accurately attribute risk without assuming additivity on a multiplicative fun
 - **Given** an updated risk profile for user entity `user123`.
 - **When** `RiskProfileStore.save(profile)` executes.
 - **Then** Redis/Dragonfly Hash `risk_profile:USER:user123` is updated with TTL 3600 seconds.
-- **And** `FraudGateV4.checkAuthorization(userId, amount)` evaluates authorization with P99 $< 2\text{ms}$ gateway SLA (P99 $< 0.5\text{ms}$ cache lookup).
+- **And** `fraudGate.authorize(new RiskSubject(RiskSubjectType.USER, userId), amount)` evaluates authorization with P99 $< 2\text{ms}$ gateway SLA (P99 $< 0.5\text{ms}$ cache lookup).
 
 ### REQ-FUSION-008: Human-in-the-Loop Analyst Feedback
 - **Given** an investigation checkpoint in `PENDING_ANALYST`.

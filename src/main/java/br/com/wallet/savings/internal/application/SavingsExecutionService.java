@@ -4,6 +4,7 @@ import br.com.wallet.core.context.OperationOrigin;
 import br.com.wallet.core.exceptions.AccountBlockedException;
 import br.com.wallet.ledger.api.TransferFundsUseCase;
 import br.com.wallet.ledger.api.context.Transfer;
+import br.com.wallet.ledger.api.exceptions.FraudBlockedException;
 import br.com.wallet.ledger.api.exceptions.InsufficientFundsException;
 import br.com.wallet.savings.api.model.SavingsExecutionStatus;
 import br.com.wallet.savings.internal.domain.IntendedSweepAction;
@@ -92,7 +93,7 @@ public class SavingsExecutionService {
                     triggerEventType, action.sweepAmount(), BigDecimal.ZERO,
                     SavingsExecutionStatus.SKIPPED_INSUFFICIENT_FUNDS, e.getMessage()
             );
-        } catch (AccountBlockedException e) {
+        } catch (AccountBlockedException | FraudBlockedException e) {
             log.warn("Savings sweep rejected by fraud engine. savingsOpId={}, planId={}", savingsOperationId, action.planId());
             historyDao.insertExecution(
                     savingsOperationId, action.planId(), action.ruleId(), sourceOperationId,

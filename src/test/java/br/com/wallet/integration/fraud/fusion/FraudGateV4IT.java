@@ -5,7 +5,7 @@ import br.com.wallet.fraud.fusion.api.model.RiskProfile;
 import br.com.wallet.fraud.fusion.api.model.RiskSubject;
 import br.com.wallet.fraud.fusion.api.model.RiskSubjectType;
 import br.com.wallet.fraud.fusion.internal.gate.FraudGateV4;
-import br.com.wallet.fraud.fusion.internal.gate.GateAuthorizationResult;
+import br.com.wallet.fraud.fusion.api.model.GateAuthorizationResult;
 import br.com.wallet.fraud.fusion.internal.persistence.RiskProfileStore;
 import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.IntegrationTestBase;

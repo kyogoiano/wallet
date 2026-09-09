@@ -1,5 +1,6 @@
 package br.com.wallet.unit.ledger.guard;
 
+import br.com.wallet.core.context.FraudContext;
 import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.ledger.api.domain.FraudCheckable;
 import br.com.wallet.ledger.api.event.FraudEvent;
@@ -8,7 +9,8 @@ import br.com.wallet.fraud.application.FraudService;
 import br.com.wallet.fraud.domain.FraudDecision;
 import br.com.wallet.fraud.domain.FraudResponse;
 import br.com.wallet.fraud.domain.RuleType;
-import br.com.wallet.core.context.FraudContext;
+import br.com.wallet.fraud.fusion.api.FraudGate;
+import br.com.wallet.fraud.fusion.api.model.GateAuthorizationResult;
 import br.com.wallet.ledger.internal.persistence.AccountDao;
 import br.com.wallet.ledger.internal.persistence.OutboxDao;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +45,8 @@ class FraudCheckHelperTest {
     private AccountDao accountDao;
     @Mock
     private Clock clock;
+    @Mock
+    private FraudGate fraudGate;
 
     private FraudCheckHelper fraudCheckHelper;
 
@@ -54,8 +58,9 @@ class FraudCheckHelperTest {
 
     @BeforeEach
     void setUp() {
-        fraudCheckHelper = new FraudCheckHelper(fraudService, outboxDao, accountDao, clock);
-        when(clock.instant()).thenReturn(fixedInstant);
+        fraudCheckHelper = new FraudCheckHelper(fraudService, outboxDao, accountDao, clock, fraudGate);
+        lenient().when(clock.instant()).thenReturn(fixedInstant);
+        lenient().when(fraudGate.authorize(any(), any())).thenReturn(GateAuthorizationResult.allow("AUTHORIZED"));
     }
 
     @Test
@@ -169,5 +174,53 @@ class FraudCheckHelperTest {
         assertThat(capturedContext.operationId()).isEqualTo(operationId);
         assertThat(capturedContext.amountInCents()).isEqualTo(12345L); // 123.45 * 100
         assertThat(capturedContext.timestamp()).isEqualTo(fixedInstant);
+    }
+
+    @Test
+    @DisplayName("Should block and persist account block when Fraud Gate V4 returns HARD_BLOCK")
+    void shouldBlockOperationWhenFraudGateReturnsHardBlock() {
+        // Given
+        FraudCheckable operation = mock(FraudCheckable.class);
+        when(operation.operationId()).thenReturn(operationId);
+        when(operation.amount()).thenReturn(amount);
+        when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+
+        when(fraudGate.authorize(any(), any())).thenReturn(
+                GateAuthorizationResult.block(br.com.wallet.fraud.fusion.api.model.FraudDecision.HARD_BLOCK, "HARD_BLOCK: Direct rule violated")
+        );
+
+        // When / Then
+        assertThatThrownBy(() -> fraudCheckHelper.performFraudCheck(operation))
+                .isInstanceOf(FraudBlockedException.class)
+                .hasFieldOrPropertyWithValue("operationId", operationId)
+                .hasFieldOrPropertyWithValue("userId", sourceUserId);
+
+        verify(accountDao).blockAccountByUserId(eq(sourceUserId), contains("Direct rule violated"));
+        verify(fraudService).blockUser(sourceUserId);
+        verifyNoInteractions(outboxDao); // Legacy rules not evaluated when pre-execution gate blocks
+    }
+
+    @Test
+    @DisplayName("Should block transaction without DB account block when Fraud Gate V4 returns RESTRICT")
+    void shouldBlockOperationWhenFraudGateReturnsRestrict() {
+        // Given
+        FraudCheckable operation = mock(FraudCheckable.class);
+        when(operation.operationId()).thenReturn(operationId);
+        when(operation.amount()).thenReturn(amount);
+        when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+
+        when(fraudGate.authorize(any(), any())).thenReturn(
+                GateAuthorizationResult.block(br.com.wallet.fraud.fusion.api.model.FraudDecision.RESTRICT, "RESTRICT: High fused risk")
+        );
+
+        // When / Then
+        assertThatThrownBy(() -> fraudCheckHelper.performFraudCheck(operation))
+                .isInstanceOf(FraudBlockedException.class)
+                .hasFieldOrPropertyWithValue("operationId", operationId)
+                .hasFieldOrPropertyWithValue("userId", sourceUserId);
+
+        verifyNoInteractions(accountDao); // RESTRICT does not hard block the account in PostgreSQL
+        verify(fraudService, never()).blockUser(any());
+        verifyNoInteractions(outboxDao);
     }
 }

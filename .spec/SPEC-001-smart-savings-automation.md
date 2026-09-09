@@ -240,6 +240,7 @@ public class SavingsEventListener {
 | Sweep amount exceeds liquidity (`balance - minRetained <= 0`) | Sweep skipped; recorded as `SKIPPED_LIQUIDITY`; primary transaction unaffected | `I-SAVINGS-003`, `I-SAVINGS-004` |
 | Round-up calculated on exact multiple (e.g. 50.00, step=5.00) | `sweepAmount` is 0.00; no transfer command dispatched | `REQ-SAV-003A` |
 | Target savings wallet locked or unavailable | Ledger API throws exception; caught and logged in savings history; primary transaction succeeds | `I-SAVINGS-003` |
+| Sweep rejected by Anti-Fraud (`AccountBlockedException` or `FraudBlockedException`) | Sweep skipped; recorded as `REJECTED_BY_FRAUD`; primary transaction unaffected | `I-SAVINGS-003`, `I-ACCOUNT-001` |
 | Direct import of `br.com.wallet.ledger.internal.*` in savings | Build fails during `ModulithArchitectureTest` | `I-SAVINGS-002`, `I-MODULITH-001` |
 
 ---

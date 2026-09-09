@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 
 import org.springframework.stereotype.Component;
 
-import java.io.InputStream;
 import java.util.Objects;
 
 /**

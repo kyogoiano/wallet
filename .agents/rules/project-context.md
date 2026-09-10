@@ -49,13 +49,19 @@ The Wallet Service follows **Modular Monolith (Spring Modulith)** and **Clean Ar
 - **`br.com.wallet.savings` (in root)**: Smart Savings capability module (`SavingsPlanUseCase`, `SavingsQueryUseCase`, `SavingsRuleEngine`, `SavingsEventListener`) reacting to banking events via `@ApplicationModuleListener`.
 - **`br.com.wallet.goals` (in root)**: Financial Goal & Cashflow Strategy Engine (`GoalUseCase`, `GoalStrategyEngine`, `ContributionCalculator`, `CashflowCapacityCalculator`) providing deterministic feasibility simulations and multi-goal waterfall prioritization.
 - **`br.com.wallet.dlq` (in root)**: Dead Letter Queue resilience capability module (`DlqManagementUseCase`, `DlqQueryUseCase`, `DlqReplayEngine`, `DlqOperationsDao`), enforcing bounded replays capped at 3 retries, transition to `EXHAUSTED`, and operator REST endpoints.
+- **`:edge` (`br.com.wallet.edge`)**: Reactive Edge Gateway & Ingress Resilience subproject:
+  - `command`: `CommandAcceptanceService`, `CommandEnvelope`, `CommandType`.
+  - `resilience`: `PerimeterRateLimiter` ($P99 < 10\mu s$ token bucket), `IngressBulkhead` (default 2048), `BrokerCircuitBreaker`.
+  - `journal`: Preallocated 64MB `SegmentedFileJournal`, `BinaryRecordCodec` (54B record / 32B segment headers, CRC32C), `GroupCommitEngine` (100-batch / 1ms `force(false)`), `SpoolWatermarkGate` (95/85% hysteresis).
+  - `ingress` & `transport`: `EdgeOperationsController`, `EdgeOperationsStreamController` (Server-Sent Events), `AltSvcWebFilter` (HTTP/3 over QUIC on UDP 8443).
+  - `recovery`: `JournalRecoveryWorker` (80/20 fair drain), `SpoolAckTracker`, and `EdgeReadinessHealthIndicator` (`ReactiveHealthIndicator` emitting `Mono<Health>`).
 - **`br.com.wallet.infrastructure` (in root)**: REST controllers (`TransferController`, `DepositController`, `WithdrawController`, `SavingsController`, `GoalController`, `DlqController`, `FraudInvestigationController`), NATS JetStream workers, and Spring configuration.
 
 ---
 
 ## 2. Technology Stack
 
-- **Runtime & Language**: Java 26, Spring Boot 4.1.0, Gradle 9.7.1
+- **Runtime & Language**: Java 27, Spring Boot 4.2.0-M1, Gradle 9.8-rc-1
 - **Database**: PostgreSQL 17/19 with schema migrations in `docker/init/schema.sql` and `pgvector` extension (`vector(16)`, `vector(128)`).
 - **In-Memory Store & Distributed State**: DragonflyDB v1.40.1 (multi-threaded, Redis-compatible, RESP3, Epoll Unix Domain Sockets `/var/run/redis/redis.sock` & TCP `6379` fallback).
 - **Messaging & Event Streaming**: NATS JetStream (`events.*`, `commands.*`, `commands.dlq.*`)

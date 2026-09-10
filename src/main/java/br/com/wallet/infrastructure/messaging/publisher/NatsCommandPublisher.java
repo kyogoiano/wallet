@@ -21,6 +21,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -41,7 +42,7 @@ public class NatsCommandPublisher implements JetStreamConfig {
         this.commandWriter = objectMapper.writer();
 
         final var jsm = this.connection.jetStreamManagement();
-        ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
+        ensureStream(jsm, "commands", List.of("commands.*", "commands.wallet.*"), Duration.ofHours(24));
         ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
         log.info("Commands stream created!");
     }

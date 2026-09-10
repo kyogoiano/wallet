@@ -1,0 +1,926 @@
+Sim. Com a revisão que fizemos da SPEC-000.9, eu **não consideraria esse TASKS-000.9 ainda “Ready for Implementation”** sem alguns ajustes. A estrutura TDD está boa, mas há algumas inconsistências importantes entre SPEC → PLAN → TASKS, principalmente em **durabilidade do journal, SSE, HTTP/3 0-RTT, ownership do consumer e semântica de ACK/NAK**.
+
+Eu faria uma revisão incremental, sem reescrever tudo.
+
+## 1. Problemas que precisam ser corrigidos
+
+### 🔴 1. `REQ-EDG-018` ainda está inconsistente
+
+Na matriz:
+
+> `EdgeCorruptionIT.shouldHaltOnCrcFailureAndQuarantine()`
+
+Mas a própria SPEC determina que corrupção:
+
+* interrompe o scan;
+* preserva o segmento para forensics;
+* gera CRITICAL;
+* **não envia para DLQ**.
+
+E a TASK-6.3 já está correta:
+
+> `segment isolation on CRC mismatch without DLQ pollution`
+
+Portanto, eu mudaria o teste para:
+
+```text
+EdgeCorruptionIT.shouldHaltOnCrcFailureAndIsolateSegment()
+```
+
+E TASK-4.2 para:
+
+```text
+Implement storage corruption detection halting segment scan,
+preserving and isolating the affected segment, and raising a
+CRITICAL alert without DLQ routing.
+```
+
+**Não usar “quarantine”**, porque isso sugere uma fila/fluxo de quarentena.
+
+---
+
+# 2. 🔴 Falta uma tarefa para o problema mais sério: 0-RTT
+
+A SPEC inclui HTTP/3 + QUIC + 0-RTT, mas os TASKS não têm nenhum teste garantindo que **mutations financeiras não sejam processadas em 0-RTT**.
+
+Isso é importante porque:
+
+```text
+0-RTT
+   ↓
+replay possível
+   ↓
+POST financeiro
+   ↓
+operationId dedup
+```
+
+O `operationId` protege contra efeito financeiro duplicado, mas **não é suficiente como proteção geral contra replay**, principalmente para autenticação/autorização/risk semantics.
+
+Eu adicionaria uma TASK dentro da Phase 5:
+
+```text
+- [ ] TASK-5.4 [RED]: Write failing integration tests asserting that
+      financial mutation endpoints do not process HTTP/3 0-RTT requests
+      and require 1-RTT before command acceptance.
+
+- [ ] TASK-5.5 [GREEN]: Configure HTTP/3/QUIC transport policy so 0-RTT
+      may establish transport connectivity but financial mutation
+      requests are rejected/deferred until 1-RTT authentication state
+      is established.
+```
+
+E na traceability:
+
+| Requirement          | Test                                                         | Task                   |
+| -------------------- | ------------------------------------------------------------ | ---------------------- |
+| HTTP/3 replay safety | `EdgeTransportIT.shouldRejectFinancialMutationOverZeroRtt()` | `TASK-5.4`, `TASK-5.5` |
+
+Isso deveria ser `[MUST]`.
+
+---
+
+# 3. 🔴 SSE atualmente não garante entrega do status
+
+A matriz está correta em apontar:
+
+```text
+REQ-EDG-019
+EdgeStreamIT.shouldPushStatusTransitionsViaSse()
+```
+
+Mas isso só testa o happy path.
+
+O problema arquitetural é:
+
+```text
+Core
+  ↓
+OperationStatusHub (memory)
+  ↓
+SSE
+```
+
+Se acontecer:
+
+```text
+POST → 202
+       ↓
+edge A
+       ↓
+client conecta
+       ↓
+edge B processou COMPLETED
+```
+
+ou:
+
+```text
+COMPLETED
+   ↓
+client conecta depois
+```
+
+o cliente pode perder o evento.
+
+Portanto eu acrescentaria:
+
+```text
+- [ ] TASK-5.6 [RED]: Write integration tests asserting that an SSE
+      subscriber receives the current durable operation status when
+      connecting after the terminal transition.
+
+- [ ] TASK-5.7 [GREEN]: Implement SSE bootstrap from the durable
+      operation-status source before attaching the subscriber to the
+      live OperationStatusHub stream.
+```
+
+A ideia deve ser:
+
+```text
+GET /operations/{id}/stream
+
+        │
+        ├── 1. read current durable status
+        │
+        └── 2. subscribe to live updates
+                    │
+                    ▼
+                  SSE
+```
+
+Assim SSE é **delivery mechanism**, não source of truth.
+
+---
+
+# 4. 🔴 Multi-node SSE também precisa aparecer
+
+`OperationStatusHub` aparentemente é local.
+
+Com:
+
+```text
+             ┌── Edge A ── SSE client
+Core event ──┤
+             └── Edge B
+```
+
+o evento produzido em B não necessariamente chega ao cliente conectado em A.
+
+Eu colocaria em TASK-5.2 ou em uma nova task:
+
+```text
+- [ ] TASK-5.8 [RED/GREEN]: Verify multi-instance SSE delivery by
+      propagating operation status events across edge instances and
+      fan-out locally to connected subscribers.
+```
+
+A implementação pode usar NATS para distribuição de eventos de status:
+
+```text
+Core
+  ↓
+events.operation.status
+  ↓
+NATS
+ ├── Edge A → local Hub → SSE
+ └── Edge B → local Hub → SSE
+```
+
+**Não criar um consumer NATS por operação.**
+
+Um subscription/consumer compartilhado por edge node é suficiente.
+
+---
+
+# 5. 🔴 `SpoolAckTracker` está subespecificado
+
+Essa é uma das partes que eu mudaria mais.
+
+Hoje:
+
+```text
+TASK-4.4
+confirming JetStream PUBACK before reclaiming segment space
+```
+
+Mas pense no crash:
+
+```text
+record 1 → PubAck
+record 2 → PubAck
+record 3 → PubAck
+record 4 → PubAck
+
+process crash
+```
+
+Como o processo sabe, depois do restart, que 1–4 já foram confirmados?
+
+Se o ACK só está na memória:
+
+```text
+RAM ACK state ❌
+```
+
+e o processo reinicia, você não tem como confiar nisso.
+
+Então precisamos de uma estrutura durável:
+
+```text
+journal
+   │
+   ├── records
+   │
+   └── durable ack/checkpoint metadata
+```
+
+Eu adicionaria:
+
+```text
+- [ ] TASK-4.5 [RED]: Write recovery tests asserting that acknowledged
+      records remain distinguishable from unacknowledged records after
+      process restart.
+
+- [ ] TASK-4.6 [GREEN]: Implement durable journal acknowledgement/checkpoint
+      metadata allowing safe replay and segment reclamation after crash.
+```
+
+Pode ser:
+
+* ACK tombstone;
+* monotonic checkpoint;
+* bitmap;
+* ACK index.
+
+Não precisamos decidir ainda que será RocksDB/TidesDB.
+
+Isso mantém o **Journal SPI** independente da implementação.
+
+---
+
+# 6. 🔴 Fair drain: 80/20 não deveria ser implementado literalmente
+
+A TASK diz:
+
+> weighted fair drain (80% replay / 20% live)
+
+Eu mudaria a linguagem.
+
+Porque:
+
+```text
+replay = 80%
+live   = 20%
+```
+
+pode acabar significando:
+
+```text
+replay 80
+live 20
+```
+
+mesmo quando não existe replay.
+
+Melhor:
+
+> weighted scheduler with a minimum live-capacity reservation of 20%.
+
+Assim:
+
+```text
+replay backlog + live traffic
+       │
+       ▼
+┌──────────────────────┐
+│ weighted scheduler   │
+│                      │
+│ replay ≤ 80%         │
+│ live ≥ 20% capacity  │
+└──────────────────────┘
+```
+
+Mas se não houver live traffic:
+
+```text
+100% replay
+```
+
+E se não houver replay:
+
+```text
+100% live
+```
+
+Eu alteraria TASK-4.1 para:
+
+```text
+Implement JournalRecoveryWorker with weighted fair scheduling,
+reserving at least 20% of dispatch capacity for live traffic while
+allowing unused capacity to be consumed by replay.
+```
+
+---
+
+# 7. 🔴 O teste de performance está incompatível com fsync
+
+A TASK-6.5:
+
+> `≥ 20,000 ops/sec under degraded spooling with ≤ 2ms batch latency`
+
+Isso pode ser alcançável, mas **não deveria ser um único SLO**, porque o caminho degradado contém:
+
+```text
+append
+ ↓
+group commit
+ ↓
+FileChannel.force(false)
+ ↓
+future completion
+```
+
+O `fsync` pode variar muito conforme:
+
+* NVMe;
+* filesystem;
+* queue depth;
+* kernel;
+* workload;
+* cloud storage.
+
+Eu separaria:
+
+### Healthy path
+
+```text
+Broker durable PubAck
+```
+
+com seu SLO.
+
+### Degraded path
+
+```text
+Journal append + group commit + force
+```
+
+com benchmark separado.
+
+Por exemplo:
+
+```text
+TASK-6.5 [SHOULD]:
+Benchmark degraded journal throughput and durability latency,
+targeting ≥20,000 ops/sec and measuring P50/P95/P99 group-commit
+latency independently from broker-path latency.
+```
+
+Não colocaria `≤2ms` como requisito absoluto até termos benchmark real do hardware.
+
+---
+
+# 8. 🔴 Preallocation precisa de definição
+
+TASK-1.3:
+
+> 64MB segment preallocation and zero-fill
+
+Isso é uma implementação bem específica.
+
+`FileChannel` não garante por si só que um arquivo tenha sido fisicamente alocado no dispositivo da forma que você imagina.
+
+Eu mudaria para:
+
+```text
+Implement SegmentedFileJournal with fixed-size 64MB segments and
+explicit physical-allocation strategy appropriate to the deployment
+filesystem, avoiding sparse-file assumptions.
+```
+
+E adicionaria teste/benchmark de criação de segmento.
+
+---
+
+# 9. 🔴 Binary format ainda precisa de alguns contratos
+
+TASK-1.1 fala:
+
+> 54B record header
+
+mas a SPEC ainda precisa deixar cristalino:
+
+### Endianness
+
+Por exemplo:
+
+```text
+All multi-byte numeric fields MUST use big-endian encoding.
+```
+
+### Version
+
+```text
+Segment format version = 1
+Record format version = 1
+```
+
+### Length
+
+Precisamos saber exatamente o que significa:
+
+```text
+Length
+```
+
+porque já existe:
+
+```text
+PayloadLen
+```
+
+Eu recomendo:
+
+```text
+Length = complete record frame length
+PayloadLen = payload bytes
+```
+
+### CRC
+
+Definir exatamente:
+
+```text
+CRC32C covers:
+Version + Flags + Length + SeqNo + OpId +
+Timestamp + CmdType + PayloadLen + Payload
+```
+
+e não:
+
+```text
+Magic
+CRC field itself
+```
+
+Eu criaria uma pequena TASK:
+
+```text
+- [ ] TASK-1.4 [RED]: Add binary-format contract tests covering
+      endianness, version constants, length semantics and CRC coverage.
+
+- [ ] TASK-1.5 [GREEN]: Finalize BinaryRecordCodec format contract and
+      reject malformed/oversized frames before payload allocation.
+```
+
+---
+
+# 10. 🔴 `64KB` aparece em dois lugares, mas precisa ser coerente
+
+Você tem:
+
+```text
+REQ-EDG-015 >64KB → 413
+```
+
+e o record:
+
+```text
+Payload NB
+```
+
+Eu faria o codec também respeitar o limite:
+
+```text
+MAX_COMMAND_ENVELOPE_BYTES = 64 * 1024
+```
+
+para evitar:
+
+```text
+network
+ ↓
+journal
+ ↓
+codec
+ ↓
+alocação gigante
+```
+
+O limite precisa existir **antes da alocação**.
+
+---
+
+# 11. 🔴 TASK-7 é arquiteturalmente problemática
+
+Essa é provavelmente a mudança estrutural mais importante.
+
+Você tem:
+
+```text
+:edge
+   ↓
+infrastructure
+   ↓
+EdgeCommandConsumer
+   ↓
+Ledger use cases
+```
+
+Mas a SPEC define `:edge` como subprojeto dedicado.
+
+Não queremos:
+
+```text
+edge → core implementation
+```
+
+porque rapidamente vira acoplamento.
+
+Eu separaria:
+
+```text
+                ┌─────────────────┐
+HTTP             │   :edge         │
+ │               │ acceptance      │
+ ▼               │ journal         │
+EdgeCommand ────►│ publisher       │
+                └────────┬────────┘
+                         │ NATS
+                         ▼
+                ┌─────────────────┐
+                │     :core       │
+                │                 │
+                │ CommandConsumer │
+                │      ↓          │
+                │ Use Cases       │
+                │      ↓          │
+                │ Ledger          │
+                └─────────────────┘
+```
+
+Ou seja:
+
+### Edge
+
+```text
+EdgeCommandPublisher
+```
+
+### Core
+
+```text
+CommandConsumer
+```
+
+O nome `EdgeCommandConsumer` é enganoso.
+
+Eu mudaria:
+
+```text
+TASK-7.3
+CoreCommandConsumerTest
+
+TASK-7.4
+CoreCommandConsumer
+
+TASK-7.5
+EdgeToCoreIntegrationTest
+```
+
+E manteria o adapter de NATS na infraestrutura.
+
+---
+
+# 12. 🔴 ACK/NAK/DLQ não pode tratar toda exceção como FAILED
+
+A TASK-7.3 menciona:
+
+> terminal status push + ACK/NAK/DLQ
+
+Mas precisamos explicitar três classes:
+
+### Business rejection
+
+Ex.:
+
+```text
+fraud blocked
+insufficient funds
+invalid operation
+```
+
+Resultado:
+
+```text
+FAILED/BLOCKED
+ACK
+```
+
+porque a mensagem foi processada corretamente.
+
+### Transient infrastructure failure
+
+Ex.:
+
+```text
+PostgreSQL unavailable
+timeout
+NATS transient issue
+```
+
+Resultado:
+
+```text
+NAK / retry
+```
+
+### Poison message
+
+Ex.:
+
+```text
+invalid schema
+unrecoverable deserialization
+```
+
+Resultado:
+
+```text
+DLQ
+```
+
+Portanto a TASK deve exigir testes específicos:
+
+```text
+shouldAckBusinessRejection()
+shouldRetryTransientInfrastructureFailure()
+shouldRoutePoisonMessageToDlq()
+```
+
+Isso é **MUST**.
+
+---
+
+# 13. 🔴 Idempotency precisa testar conflito de operationId
+
+A SPEC possui:
+
+```text
+I-DEDUP-001
+```
+
+Mas a task só testa:
+
+```text
+Nats-Msg-Id: <operationId>
+```
+
+Precisamos testar:
+
+```text
+same operationId
++
+same payload
+=
+duplicate
+```
+
+versus:
+
+```text
+same operationId
++
+different payload
+=
+CONFLICT
+```
+
+Isso é muito importante.
+
+Adicionar:
+
+```text
+TASK-3.7 [RED]:
+Write tests asserting that replaying the same operationId with the
+same command is idempotent, while reusing an operationId with a
+different command payload is rejected.
+
+TASK-3.8 [GREEN]:
+Implement operationId/payload fingerprint validation.
+```
+
+---
+
+# 14. 🔴 Journal precisa entrar na segurança do 000.10
+
+Aqui existe uma consequência importante da arquitetura.
+
+Agora temos:
+
+```text
+HTTP
+ ↓
+Edge
+ ↓
+LOCAL JOURNAL
+ ↓
+NATS
+```
+
+Portanto o journal é uma nova cópia dos dados financeiros.
+
+Se o payload tiver:
+
+```text
+accountId
+userId
+amount
+metadata
+PII
+```
+
+não podemos simplesmente dizer:
+
+> encryption at rest será resolvido em SPEC-000.10
+
+sem deixar um contrato aqui.
+
+Eu colocaria em 000.9:
+
+```text
+The journal MUST integrate with the payload protection mechanism
+defined by SPEC-000.10 before production acceptance of sensitive
+financial payloads.
+```
+
+E uma task:
+
+```text
+TASK-6.6 [MUST]:
+Verify that journal persistence does not store plaintext sensitive
+financial payloads and is compatible with SPEC-000.10 envelope
+encryption requirements.
+```
+
+---
+
+# 15. 🔴 SSE precisa de autorização
+
+Hoje:
+
+```text
+GET /operations/{operationId}/stream
+```
+
+não deve significar:
+
+> quem conhece o UUID pode acompanhar a operação.
+
+Precisamos:
+
+```text
+authenticated principal
+        ↓
+authorize operationId
+        ↓
+SSE
+```
+
+Adicionar:
+
+```text
+TASK-5.9 [RED]:
+Write integration tests asserting that an authenticated client can
+stream only operations belonging to its authorized principal/tenant.
+
+TASK-5.10 [GREEN]:
+Implement operation-status authorization before establishing SSE
+subscriptions.
+```
+
+Isso pode posteriormente ser refinado pelo 000.10.
+
+---
+
+# 16. A matriz de traceability ficaria melhor assim
+
+Eu adicionaria pelo menos estas linhas:
+
+| Requirement / Invariant       | Verification                                                     | Tasks         |
+| ----------------------------- | ---------------------------------------------------------------- | ------------- |
+| 0-RTT financial replay safety | `EdgeTransportIT.shouldRejectFinancialMutationOverZeroRtt()`     | `5.4`, `5.5`  |
+| SSE durable bootstrap         | `EdgeStreamIT.shouldReplayCurrentStatusOnConnect()`              | `5.6`, `5.7`  |
+| SSE multi-node delivery       | `EdgeStreamClusterIT.shouldDeliverStatusAcrossEdgeNodes()`       | `5.8`         |
+| Durable ACK recovery          | `SpoolAckRecoveryIT.shouldRecoverAckStateAfterRestart()`         | `4.5`, `4.6`  |
+| OperationId conflict          | `IdempotencyIT.shouldRejectConflictingOperationId()`             | `3.7`, `3.8`  |
+| Business failure ACK          | `CoreCommandConsumerTest.shouldAckBusinessRejection()`           | `7.3`, `7.4`  |
+| Infrastructure failure retry  | `CoreCommandConsumerTest.shouldRetryTransientFailure()`          | `7.3`, `7.4`  |
+| Poison message DLQ            | `CoreCommandConsumerTest.shouldRoutePoisonMessageToDlq()`        | `7.3`, `7.4`  |
+| SSE authorization             | `EdgeStreamSecurityIT.shouldRejectUnauthorizedOperationStream()` | `5.9`, `5.10` |
+| Journal payload protection    | `JournalSecurityIT.shouldNotPersistPlaintextSensitivePayload()`  | `6.6`         |
+
+---
+
+# 17. Uma mudança que eu faria no status
+
+Atualmente:
+
+```text
+Status: ⚪ Ready for Implementation
+```
+
+Eu colocaria:
+
+```text
+Status: 🟡 Ready for Implementation — Architecture Hardening Required
+```
+
+ou, se você quiser manter o processo mais rígido:
+
+```text
+Status: ⚪ Draft — Pending Task Hardening
+```
+
+Porque existem requisitos da própria SPEC que ainda não possuem implementação/teste correspondente.
+
+---
+
+# 18. Estrutura final que eu recomendo
+
+Sem destruir o seu breakdown atual:
+
+```text
+Phase 1
+  1.1 codec RED
+  1.2 codec GREEN
+  1.3 journal
+  1.4 binary contract RED
+  1.5 binary contract GREEN
+
+Phase 2
+  2.1 group commit RED
+  2.2 group commit GREEN
+  2.3 watermarks
+
+Phase 3
+  3.1 acceptance RED
+  3.2 acceptance GREEN
+  3.3 rate limiter
+  3.4 bulkhead
+  3.5 circuit breaker
+  3.6 size validation
+  3.7 idempotency conflict RED
+  3.8 idempotency conflict GREEN
+
+Phase 4
+  4.1 fair recovery
+  4.2 corruption isolation
+  4.3 readiness
+  4.4 ACK tracker
+  4.5 ACK recovery RED
+  4.6 ACK recovery GREEN
+
+Phase 5
+  5.1 SSE RED
+  5.2 SSE GREEN
+  5.3 HTTP/3
+  5.4 0-RTT RED
+  5.5 0-RTT GREEN
+  5.6 durable SSE bootstrap RED
+  5.7 durable SSE bootstrap GREEN
+  5.8 multi-node SSE
+  5.9 SSE authorization RED
+  5.10 SSE authorization GREEN
+
+Phase 6
+  6.1 ingress chaos
+  6.2 capacity
+  6.3 corruption
+  6.4 observability
+  6.5 benchmark
+  6.6 journal security
+
+Phase 7
+  7.1 publisher RED
+  7.2 publisher GREEN
+  7.3 core consumer RED
+  7.4 core consumer GREEN
+  7.5 end-to-end
+```
+
+### Minha avaliação
+
+**A base está muito boa.** Eu não mudaria a arquitetura central. O que falta é transformar algumas decisões arquiteturais que estavam implícitas na SPEC em **invariantes/testes executáveis**.
+
+Os quatro pontos que considero **bloqueadores antes de começar a implementação** são:
+
+1. **0-RTT não pode aceitar mutation financeira.**
+2. **ACK do journal precisa sobreviver a restart.**
+3. **SSE precisa ter fonte durável + funcionamento multi-node.**
+4. **Command consumer deve pertencer ao Core, não ao Edge.**
+
+Depois vêm os hardenings importantes: idempotency conflict, ACK/NAK/DLQ semântica, formato binário, segurança do spool e benchmark separado por caminho.
+
+Com esses ajustes, o TASKS-000.9 fica bem mais alinhado com a ideia de **financial-grade edge**, sem introduzir RocksDB/TidesDB prematuramente.

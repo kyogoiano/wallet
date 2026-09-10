@@ -40,7 +40,7 @@ public class FusionJobWorker {
         return workerToken;
     }
 
-    @Scheduled(fixedDelay = 1000)
+    @Scheduled(fixedDelayString = "${fraud.fusion.worker.fixed-delay:1000}", initialDelayString = "${fraud.fusion.worker.initial-delay:1000}")
     public boolean pollAndExecute() {
         Optional<FusionJob> jobOpt = repository.claimNextJob(workerToken, leaseDuration);
         if (jobOpt.isEmpty()) {

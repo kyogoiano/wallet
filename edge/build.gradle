@@ -1,0 +1,19 @@
+group = 'br.com.wallet.edge'
+
+dependencies {
+    implementation project(":core")
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation 'io.projectreactor:reactor-core'
+    implementation 'io.micrometer:micrometer-core'
+    implementation 'org.slf4j:slf4j-api'
+    implementation 'jakarta.servlet:jakarta.servlet-api'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'io.projectreactor:reactor-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}

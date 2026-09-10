@@ -83,6 +83,18 @@ class ApiExceptionHandlerTest {
     }
 
     @Test
+    @DisplayName("Should handle AsyncRequestTimeoutException and return 503 Service Unavailable")
+    void shouldHandleAsyncRequestTimeout() {
+        org.springframework.web.context.request.async.AsyncRequestTimeoutException ex =
+                new org.springframework.web.context.request.async.AsyncRequestTimeoutException();
+
+        ResponseEntity<Void> response = handler.handleAsyncRequestTimeout(ex);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+        assertThat(response.getBody()).isNull();
+    }
+
+    @Test
     @DisplayName("Should handle generic Exception and return 500 Internal Server Error")
     void shouldHandleGenericException() {
         Exception ex = new RuntimeException("Something unexpected happened");
@@ -90,6 +102,7 @@ class ApiExceptionHandlerTest {
         ResponseEntity<ApiError> response = handler.handleGeneric(ex);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.INTERNAL_SERVER_ERROR);
+        assertThat(response.getHeaders().getContentType()).isEqualTo(org.springframework.http.MediaType.APPLICATION_JSON);
         assertThat(response.getBody()).isNotNull();
         assertThat(response.getBody().code()).isEqualTo(ErrorCode.INTERNAL_ERROR);
         assertThat(response.getBody().message()).isEqualTo("Unexpected error");

@@ -46,7 +46,7 @@ public class FusionJobRecoveryService {
         };
     }
 
-    @Scheduled(fixedDelay = 5000)
+    @Scheduled(fixedDelayString = "${fraud.fusion.recovery.fixed-delay:5000}", initialDelayString = "${fraud.fusion.recovery.initial-delay:5000}")
     public int recoverExpiredLeases() {
         return recoverExpiredLeases(Instant.now());
     }

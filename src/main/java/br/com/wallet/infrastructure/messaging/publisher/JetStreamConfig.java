@@ -10,12 +10,22 @@ import org.jspecify.annotations.NonNull;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.List;
 
 public interface JetStreamConfig {
 
     default void ensureStream(@NonNull final JetStreamManagement jsm,
                               @NonNull final String streamName,
                               @NonNull final String subjects,
+                              @NonNull final Duration retention)
+            throws IOException, JetStreamApiException {
+        ensureStream(jsm, streamName, List.of(subjects), retention);
+    }
+
+    default void ensureStream(@NonNull final JetStreamManagement jsm,
+                              @NonNull final String streamName,
+                              @NonNull final Collection<String> subjects,
                               @NonNull final Duration retention)
             throws IOException, JetStreamApiException {
 

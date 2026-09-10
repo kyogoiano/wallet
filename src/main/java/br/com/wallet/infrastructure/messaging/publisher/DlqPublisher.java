@@ -47,4 +47,39 @@ public class DlqPublisher {
             log.error("Failed to publish to DLQ", ex);
         }
     }
+
+    public io.nats.client.api.PublishAck publishDlqConfirmed(
+            @NonNull String subject,
+            @NonNull Connection connection,
+            @NonNull Message message,
+            @NonNull Exception error
+    ) throws Exception {
+        final var now = clock.instant();
+        final var newHeaders = new Headers();
+
+        newHeaders.add("original_subject", message.getSubject());
+        String opId = message.getHeaders() != null ? message.getHeaders().getFirst("operation_id") : null;
+        if (opId != null) newHeaders.add("operation_id", opId);
+        String type = message.getHeaders() != null ? message.getHeaders().getFirst("type") : null;
+        if (type != null) newHeaders.add("type", type);
+        newHeaders.add("failed_at", now.toString());
+        newHeaders.add("error", error.getClass().getSimpleName());
+        newHeaders.add("error_message", error.getMessage());
+        long deliveredCount = (message.metaData() != null) ? message.metaData().deliveredCount() : 1;
+        newHeaders.add("delivery_count", String.valueOf(deliveredCount));
+        newHeaders.add("failure_type", ExceptionType.parseException(error).name());
+        String msgId = message.getHeaders() != null ? message.getHeaders().getFirst("Nats-Msg-Id") : null;
+        if (msgId != null) newHeaders.add("Nats-Msg-Id", msgId);
+        String userId = message.getHeaders() != null ? message.getHeaders().getFirst("userId") : null;
+        if (userId != null) newHeaders.add("userId", userId);
+
+        final var dlqMessage = NatsMessage.builder()
+                .subject(subject)
+                .headers(newHeaders)
+                .data(message.getData())
+                .build();
+
+        final JetStream jetStream = connection.jetStream();
+        return jetStream.publish(dlqMessage);
+    }
 }

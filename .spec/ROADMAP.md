@@ -124,8 +124,10 @@ gantt
     SPEC-000.4 Observability OTel       :done, p00_6, 2026-08-29, 2d
     SPEC-000.5 Relational Graph         :done, p00_7, 2026-09-01, 3d
     SPEC-000.6 Temporal Decay           :done, p00_8, 2026-09-03, 3d
-    SPEC-000.7 Vector Dossier           :done, p00_9, 2026-09-05, 3d
     SPEC-000.8 Signal Fusion & Micro-ML :done, p00_10, 2026-09-07, 3d
+    SPEC-000.9 Reactive Edge Ingress    :done, p00_11, 2026-09-09, 3d
+    SPEC-000.10 Financial Security      :p00_12, after p00_11, 3d
+    SPEC-000.11 Tiered DLQ & Recovery   :p00_13, after p00_12, 3d
     section Phase 1 Programmable Money
     SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
     SPEC-001.1 Account Lifecycle        :done, p1_2, 2026-08-24, 2d
@@ -314,6 +316,20 @@ gantt
   - [`plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/plans/PLAN-000.8-fraud-signal-fusion-and-micro-ml.md) (Approved)
   - [`tasks/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/tasks/TASKS-000.8-fraud-signal-fusion-and-micro-ml.md) (Completed)
   - [`.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md`](file:///.spec/summaries/SUMMARY-000.8-fraud-signal-fusion-and-micro-ml.md) (Verified)
+
+---
+
+### 🔹 Phase 000.9: Reactive Edge Gateway & Ingress Resilience
+**Spec Identifier**: [`SPEC-000.9-reactive-edge-gateway-and-ingress-resilience`](file:///.spec/SPEC-000.9-reactive-edge-gateway-and-ingress-resilience.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Dedicated Subproject (:edge), Financial Ingress Boundary, Durable Acceptance & Reactive Readiness`
+
+- **Intent**: Decouple the financial command write path into a dedicated reactive edge gateway subproject (`:edge` / `br.com.wallet.edge`), enforce durable acceptance semantics (`I-EDGE-001`), bounded inflight bulkheading (`I-EDGE-002`), idempotency across crash recoveries (`I-EDGE-003`), startup journal replay readiness gate with non-blocking Spring Boot `ReactiveHealthIndicator` (`I-EDGE-004`), and bounded capacity safety boundaries with preallocated segmented files and group-commit `fsync` (`I-EDGE-005`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.9-reactive-edge-gateway-and-ingress-resilience.md`](file:///.spec/SPEC-000.9-reactive-edge-gateway-and-ingress-resilience.md) (Ratified)
+  - [`plans/PLAN-000.9-reactive-edge-gateway-and-ingress-resilience.md`](file:///.spec/plans/PLAN-000.9-reactive-edge-gateway-and-ingress-resilience.md) (Approved)
+  - [`tasks/TASKS-000.9-reactive-edge-gateway-and-ingress-resilience.md`](file:///.spec/tasks/TASKS-000.9-reactive-edge-gateway-and-ingress-resilience.md) (Verified)
+  - [`summaries/SUMMARY-000.9-reactive-edge-gateway-and-ingress-resilience.md`](file:///.spec/summaries/SUMMARY-000.9-reactive-edge-gateway-and-ingress-resilience.md) (Completed)
 
 ---
 

@@ -58,7 +58,7 @@ To protect the orchestrator's context window from pollution, delegate work acros
 - [`constitution.md`](file:///.agents/rules/constitution.md) — Absolute financial invariants & core non-negotiable rules.
 - [`project-context.md`](file:///.agents/rules/project-context.md) — Architecture overview, tech stack, and module boundaries.
 - [`capability-boundaries.md`](file:///.agents/rules/capability-boundaries.md) — Architectural mantra, Spring Modulith boundaries, and capability rules.
-- [`coding-standards.md`](file:///.agents/rules/coding-standards.md) — Modern Java 26 patterns, immutability, zero boilerplate.
+- [`coding-standards.md`](file:///.agents/rules/coding-standards.md) — Modern Java 27 patterns, immutability, zero boilerplate.
 - [`testing-standards.md`](file:///.agents/rules/testing-standards.md) — TDD methodology, Zero Vibe Coding, Testcontainers, and test triads.
 
 ### Skills ([`.agents/skills/`](file:///.agents/skills/))

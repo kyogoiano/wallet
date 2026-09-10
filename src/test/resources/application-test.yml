@@ -7,3 +7,26 @@ management:
 redis:
   socket:
     enabled: false
+
+wallet:
+  outbox:
+    relay:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+  dlq:
+    replay:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+
+fraud:
+  fusion:
+    worker:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+    recovery:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+  propagation:
+    worker:
+      poll-interval-ms: 3600000
+      reap-interval-ms: 3600000

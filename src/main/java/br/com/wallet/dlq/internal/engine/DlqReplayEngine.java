@@ -40,7 +40,7 @@ public class DlqReplayEngine {
         this.connection = Objects.requireNonNull(connection, "connection cannot be null");
     }
 
-    @Scheduled(fixedDelay = 10000)
+    @Scheduled(fixedDelayString = "${wallet.dlq.replay.fixed-delay:10000}", initialDelayString = "${wallet.dlq.replay.initial-delay:10000}")
     @Transactional
     public void process() {
         final var now = clock.instant();

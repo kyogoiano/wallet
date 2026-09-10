@@ -1,6 +1,6 @@
 ---
 name: coding-standards
-description: Coding guidelines, modern Java 26 patterns, clean architecture boundaries, and error handling conventions.
+description: Coding guidelines, modern Java 27 patterns, clean architecture boundaries, and error handling conventions.
 trigger: model_decision
 ---
 
@@ -8,7 +8,7 @@ trigger: model_decision
 
 ## 1. Modern Java & Idiomatic Style
 
-- **Java Version**: Target Java 26 language features.
+- **Java Version**: Target Java 27 language features.
 - **Records**: Use `record` for immutable domain events, DTOs, value objects, and context carriers.
 - **Sealed Interfaces & Pattern Matching**: Use sealed types and pattern matching for domain results (e.g., `VelocityResult.Ok`, `VelocityResult.Exceeded`, `VelocityResult.Replay`).
 - **Null Safety**: Annotate non-nullable parameters and return types with `@NonNull` (from `org.jspecify.annotations.NonNull`).

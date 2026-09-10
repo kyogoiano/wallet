@@ -8,6 +8,7 @@ import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Configuration;
 
 import java.time.Duration;
+import java.util.List;
 
 @Configuration
 public class NatsJetStreamBootstrap implements InitializingBean, JetStreamConfig {
@@ -23,7 +24,7 @@ public class NatsJetStreamBootstrap implements InitializingBean, JetStreamConfig
     public void afterPropertiesSet() throws Exception {
         var jsm = connection.jetStreamManagement();
         log.info(">>>> Inicializando Streams NATS...");
-        ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
+        ensureStream(jsm, "commands", List.of("commands.*", "commands.wallet.*"), Duration.ofHours(24));
         ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
         ensureStream(jsm, "events", "events.>", Duration.ofHours(24));
     }

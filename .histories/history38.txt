@@ -1,0 +1,820 @@
+Sim — e **o PLAN-000.9 está conceitualmente muito mais maduro agora**. A evolução em relação à primeira ideia com RocksDB/Disruptor ficou especialmente boa porque você separou corretamente:
+
+> **handoff / backpressure ≠ durable acceptance**
+
+O plano está alinhado com a SPEC-000.9, mas antes de transformá-lo em TASKS eu faria alguns ajustes profissionais importantes. Há **3 problemas críticos**, alguns gaps de consistência e algumas melhorias de arquitetura.
+
+---
+
+# 🟢 Avaliação geral
+
+| Área                       | Avaliação                         |
+| -------------------------- | --------------------------------- |
+| Durable acceptance         | 🟢 Muito boa                      |
+| Separação Edge/Core        | 🟢 Excelente                      |
+| Reactive ingress           | 🟢 Boa                            |
+| Backpressure / bulkheading | 🟢 Boa, com ajustes               |
+| Journal design             | 🟢 Muito promissor                |
+| Crash recovery             | 🟡 Precisa refinamento            |
+| HA semantics               | 🟡 Principal gap                  |
+| Idempotency                | 🟡 Precisa explicitar melhor      |
+| Group commit               | 🟡 Pequeno risco de implementação |
+| Fair draining              | 🟢 Excelente ideia                |
+| RocksDB/TidesDB decision   | 🟢 Correto manter SPI             |
+| Observability              | 🔴 Falta explicitar               |
+| Security boundary          | 🟡 Correto deixar para 000.10     |
+
+---
+
+# 🔴 1. Problema crítico: `FileChannel.force(false)` não é exatamente o que a spec promete
+
+No plano:
+
+```java
+FileChannel.force(false)
+```
+
+Você chama isso de:
+
+> `fsync`
+
+Mas há uma diferença importante.
+
+`force(false)` força principalmente o conteúdo do arquivo, sem garantir necessariamente a metadata associada ao arquivo.
+
+Para o modelo financeiro que estamos definindo, eu evitaria chamar isso simplesmente de "atomic fsync".
+
+Eu mudaria para algo como:
+
+```text
+DurableCommitPolicy
+├── DATA_ONLY
+│   └── FileChannel.force(false)
+│
+└── FULL_DURABILITY
+    └── FileChannel.force(true)
+```
+
+E a SPEC deveria definir qual garantia é necessária.
+
+### Minha recomendação
+
+Para o journal de comandos financeiros:
+
+```text
+FileChannel.force(false)
+```
+
+pode ser aceitável **para append em segmento já existente e pré-alocado**, porque você não depende da criação da metadata do arquivo para cada operação.
+
+Isso combina muito bem com o seu design:
+
+```text
+64MB preallocated segments
+```
+
+Então eu documentaria explicitamente:
+
+> Segment creation and preallocation are durably completed before the segment becomes active. Command acceptance only occurs after `FileChannel.force(false)` confirms persistence of record data within the already durable segment.
+
+Isso torna a garantia muito mais precisa.
+
+---
+
+# 🔴 2. O maior gap: journal local não resolve perda total do nó
+
+Você já percebeu isso na History 35, mas o PLAN ainda pode formalizar melhor.
+
+Hoje:
+
+```text
+Client
+  |
+  v
+Edge Node A
+  |
+  +--> local NVMe journal
+          |
+          v
+        202
+```
+
+Se o Node A:
+
+* perde energia permanentemente
+* perde o SSD
+* sofre hardware failure
+* fica isolado da rede
+
+temos um comando aceito que ainda não chegou ao NATS.
+
+O plano fala corretamente sobre:
+
+```text
+CrashRecoveryJournalReplay
+```
+
+mas isso só funciona se:
+
+> o mesmo disco voltar.
+
+Portanto precisamos distinguir dois níveis:
+
+### Durabilidade local
+
+```text
+Process crash
+OS crash
+Power loss
+```
+
+🟢 recuperável.
+
+### Alta disponibilidade financeira
+
+```text
+Node destroyed
+NVMe failure
+Rack failure
+Datacenter failure
+```
+
+🔴 não garantido pelo journal local.
+
+---
+
+## Recomendo introduzir explicitamente:
+
+### `I-EDGE-006 — Local Durability Is Not Distributed HA`
+
+```text
+A locally fsynced command guarantees crash recovery on the same durable storage,
+but does not constitute replicated availability across node failure domains.
+```
+
+E deixar a solução de replicated spillover para uma evolução futura.
+
+Por exemplo:
+
+```text
+SPEC-000.9
+│
+├── Local Durable Acceptance
+│
+└── Recovery on Same Node
+
+Future:
+SPEC-000.11 / 000.12
+│
+└── Replicated Edge Journal
+    ├── quorum replication
+    ├── shared NVMe-oF
+    ├── replicated storage
+    └── broker-independent HA
+```
+
+Isso evita prometer "zero loss" quando tecnicamente estamos falando de **crash safety**, não de **node-loss durability**.
+
+---
+
+# 🟡 3. O estado `READY_DEGRADED_SPOOLING` merece uma política de capacidade
+
+Este trecho está ótimo:
+
+```text
+READY_DEGRADED_SPOOLING
+```
+
+Mas eu não deixaria a transição simplesmente baseada em:
+
+```text
+Disk Usage >= 95%
+```
+
+Eu usaria **watermarks**.
+
+Por exemplo:
+
+```text
+NORMAL
+   ↓  broker failure
+DEGRADED_SPOOLING
+
+DEGRADED_SPOOLING
+   ↓  journal >= 80%
+PRESSURE
+
+PRESSURE
+   ↓  journal >= 95%
+SATURATED
+
+SATURATED
+   ↓ journal < 85%
+DEGRADED_SPOOLING
+```
+
+Algo como:
+
+| Journal usage           | Behavior                     |
+| ----------------------- | ---------------------------- |
+| `< 70%`                 | Normal                       |
+| `70–80%`                | Warning                      |
+| `80–95%`                | Pressure / stronger shedding |
+| `>=95%`                 | No degraded acceptance       |
+| `<85% after saturation` | Recovery                     |
+
+Isso evita oscilações:
+
+```text
+94.9%
+95.1%
+94.8%
+95.2%
+```
+
+---
+
+# 🟢 4. A arquitetura do `DurableSpilloverJournal` está muito bem posicionada
+
+Essa foi, na minha opinião, a melhor decisão.
+
+Eu **não migraria agora de RocksDB para TidesDB**.
+
+Na verdade, eu iria além:
+
+> **não escolheria nenhum dos dois como baseline.**
+
+Seu baseline:
+
+```text
+Segmented append-only log
+```
+
+é provavelmente mais apropriado para esse caso.
+
+O workload é:
+
+```text
+WRITE:
+append sequentially
+
+READ:
+sequential replay
+
+DELETE:
+segment reclamation
+
+LOOKUP:
+minimal
+```
+
+Isso é praticamente o caso ideal para:
+
+```text
+append-only segmented journal
+```
+
+Você não precisa de:
+
+* LSM compaction
+* SSTables
+* Bloom filters
+* random key lookup
+* write amplification
+* background compaction
+
+Portanto:
+
+```text
+SegmentedFileJournal
+```
+
+🟢 deve continuar como implementação principal.
+
+E:
+
+```text
+DurableSpilloverJournal
+```
+
+permite futuramente:
+
+```text
+SegmentedFileJournal
+RocksDBJournal
+TidesDBJournal
+ReplicatedJournal
+RemoteObjectStoreJournal
+```
+
+---
+
+# 🟡 5. Eu mudaria a topologia para separar melhor API, command e transport
+
+Hoje:
+
+```text
+api
+├── dto
+└── EdgeReadinessState
+```
+
+Eu sugeriria:
+
+```text
+br.com.wallet.edge
+│
+├── api
+│   ├── EdgeCommandIngress.java
+│   ├── EdgeCommandResult.java
+│   └── EdgeReadinessState.java
+│
+├── internal
+│
+│   ├── ingress
+│   │   ├── EdgeOperationsController.java
+│   │   ├── EdgeRequestValidator.java
+│   │   └── EdgeRequestMapper.java
+│
+│   ├── command
+│   │   ├── FinancialCommand.java
+│   │   ├── CommandEnvelope.java
+│   │   └── CommandAcceptanceService.java
+│
+│   ├── resilience
+│   │   ├── PerimeterRateLimiter.java
+│   │   ├── IngressBulkhead.java
+│   │   ├── BrokerCircuitBreaker.java
+│   │   └── IngressTimeoutPolicy.java
+│
+│   ├── journal
+│   │   ├── spi
+│   │   │   └── DurableSpilloverJournal.java
+│   │   │
+│   │   └── segmented
+│   │       ├── SegmentHeader.java
+│   │       ├── JournalRecord.java
+│   │       ├── BinaryRecordCodec.java
+│   │       ├── SegmentedFileJournal.java
+│   │       └── GroupCommitEngine.java
+│
+│   ├── publisher
+│   │   └── EdgeCommandPublisher.java
+│
+│   └── recovery
+│       ├── JournalRecoveryWorker.java
+│       ├── JournalReplayScheduler.java
+│       ├── SpoolAckTracker.java
+│       └── EdgeReadinessHealthIndicator.java
+```
+
+Isso cria uma separação muito importante:
+
+```text
+HTTP
+ ↓
+Command Envelope
+ ↓
+Acceptance Service
+ ↓
+ ┌─────────────┐
+ │ Broker      │
+ │ Journal     │
+ └─────────────┘
+```
+
+O core não deveria conhecer HTTP.
+
+---
+
+# 🔴 6. Idempotência precisa existir antes do `202`
+
+Este é provavelmente o ponto arquitetural mais importante que eu adicionaria.
+
+Imagine:
+
+```text
+Client
+   |
+POST operationId=123
+   |
+Edge publishes
+   |
+NATS PUBACK
+   |
+--- network dies before HTTP response ---
+   |
+Client retries operationId=123
+```
+
+O Edge precisa responder corretamente.
+
+Possibilidades:
+
+```text
+First request
+→ ACCEPTED
+
+Retry
+→ already accepted
+```
+
+Mas como saber isso?
+
+Você já tem:
+
+```text
+Nats-Msg-Id = operationId
+```
+
+Excelente.
+
+Mas eu formalizaria uma abstração:
+
+```java
+OperationAcceptanceRegistry
+```
+
+Com estados:
+
+```text
+UNKNOWN
+ACCEPTING
+ACCEPTED_BROKER
+ACCEPTED_JOURNAL
+REPLAYING
+COMPLETED
+```
+
+Isso pode inicialmente usar o próprio journal + NATS deduplication como source of truth, sem necessariamente adicionar Redis ao hot path.
+
+O importante é que:
+
+```text
+202 must be idempotent
+```
+
+não apenas a execução downstream.
+
+---
+
+# 🟡 7. Fair draining 80/20 é excelente, mas deveria ser configurável
+
+Eu manteria:
+
+```text
+80% replay
+20% live
+```
+
+como default.
+
+Mas não hardcoded.
+
+```yaml
+edge:
+  recovery:
+    replay-share: 0.80
+    live-share: 0.20
+```
+
+E o scheduler poderia operar com weighted permits:
+
+```text
+8 replay permits
+2 live permits
+```
+
+Isso evita starvation.
+
+Mas eu adicionaria um limite:
+
+```text
+replay can never consume 100% capacity
+```
+
+Mesmo durante backlog gigantesco.
+
+---
+
+# 🟡 8. Bulkhead: eu revisaria `5000`
+
+Este número:
+
+```text
+MAX_INFLIGHT = 5000
+```
+
+não deveria ser um default universal.
+
+Em WebFlux, 5000 requests "inflight" podem significar:
+
+* 5000 publishers
+* buffers
+* payload references
+* timers
+* pending promises
+
+Com payload máximo de:
+
+```text
+64 KB
+```
+
+o worst-case teórico seria enorme.
+
+Mesmo sem copiar todos os buffers:
+
+```text
+5000 × 64 KB
+≈ 312 MB
+```
+
+fora overhead.
+
+Eu faria:
+
+```yaml
+edge:
+  ingress:
+    max-inflight: CPU / memory dependent
+```
+
+E definiria:
+
+```text
+MAX_INFLIGHT =
+min(
+  configured_limit,
+  memory_safe_limit,
+  downstream_capacity
+)
+```
+
+Talvez começar com:
+
+```text
+512–2048
+```
+
+dependendo da máquina.
+
+Depois benchmark.
+
+---
+
+# 🟢 9. A Binary Framing está boa, mas falta um campo importante: command type
+
+Hoje:
+
+```text
+OperationId
+Timestamp
+Payload
+```
+
+Mas o recovery precisa saber:
+
+```text
+TRANSFER?
+DEPOSIT?
+WITHDRAW?
+```
+
+Eu colocaria no envelope.
+
+Por exemplo:
+
+```text
+[Magic]
+[Version]
+[Flags]
+[Length]
+[CRC32C]
+[Sequence]
+[OperationId]
+[Timestamp]
+[CommandType]
+[PayloadLength]
+[Payload]
+```
+
+Ou usar um pequeno `CommandType`:
+
+```text
+1 byte / 2 bytes
+```
+
+Assim o journal é autossuficiente.
+
+---
+
+# 🔴 10. CRC32C não deve automaticamente ir para DLQ
+
+Este ponto da matriz:
+
+> CRC32C failure isolates corrupted frame to DLQ quarantine
+
+Eu mudaria.
+
+Se o CRC falhou:
+
+```text
+the payload cannot be trusted
+```
+
+Você talvez nem consiga construir um DLQ message seguro.
+
+Melhor:
+
+```text
+CRC failure
+   ↓
+Stop at corrupted frame
+   ↓
+Preserve original segment
+   ↓
+Raise CRITICAL alert
+   ↓
+Quarantine segment / forensic recovery
+```
+
+Ou, se houver framing suficiente para pular:
+
+```text
+CorruptRecordQuarantine
+```
+
+Mas **não tratar CRC corruption como poison message comum**.
+
+São classes diferentes:
+
+### Poison payload
+
+```text
+Valid durable bytes
+Invalid business/schema semantics
+```
+
+→ DLQ.
+
+### Storage corruption
+
+```text
+Invalid bytes
+CRC mismatch
+Potential disk corruption
+```
+
+→ Storage incident.
+
+Essa distinção é importante para um sistema financeiro.
+
+---
+
+# 🟢 Minha versão recomendada do fluxo
+
+Eu consolidaria assim:
+
+```mermaid
+flowchart TD
+    Client --> Edge
+
+    Edge --> PayloadGate
+    PayloadGate --> RateLimiter
+    RateLimiter --> Bulkhead
+
+    Bulkhead --> AcceptanceService
+
+    AcceptanceService --> CircuitBreaker
+
+    CircuitBreaker -->|Broker healthy| NATS
+    NATS -->|PUBACK| Accepted
+
+    CircuitBreaker -->|Open / timeout| JournalQueue
+
+    JournalQueue --> GroupCommit
+    GroupCommit --> DurableSegment
+    DurableSegment -->|force complete| Accepted
+
+    DurableSegment --> RecoveryScheduler
+
+    RecoveryScheduler --> ReplayQueue
+
+    ReplayQueue -->|80% capacity| NATS
+    AcceptanceService -->|20% capacity| NATS
+
+    NATS --> AckTracker
+    AckTracker --> SegmentReclaimer
+```
+
+A principal diferença é:
+
+> **o controller não decide a estratégia de aceitação.**
+
+Ele apenas faz:
+
+```text
+HTTP → Command → AcceptanceService → AcceptanceResult → HTTP
+```
+
+Isso torna o sistema muito mais testável.
+
+---
+
+# 📌 Minha recomendação final para o PLAN-000.9
+
+Eu consideraria o plano **80–85% pronto para TASKS**, mas faria estes ajustes antes:
+
+### 🔴 Obrigatórios
+
+1. Formalizar diferença entre **local durability vs distributed HA**.
+2. Corrigir a semântica/documentação de `FileChannel.force(false)`.
+3. Criar um modelo explícito de **idempotent acceptance**.
+4. Separar **CRC/storage corruption** de DLQ poison messages.
+5. Tornar `MAX_INFLIGHT` benchmark/config driven.
+
+### 🟡 Fortemente recomendados
+
+6. Adicionar watermarks de spool.
+7. Tornar 80/20 recovery configurável.
+8. Adicionar `CommandType` ao journal envelope.
+9. Criar `CommandAcceptanceService`.
+10. Adicionar observabilidade explícita.
+
+---
+
+## 🚨 O que ainda está faltando no PLAN: Observability
+
+Eu adicionaria uma seção:
+
+### 6. Observability & SLO Metrics
+
+```text
+edge_ingress_requests_total
+
+edge_inflight_commands
+
+edge_rate_limit_rejections_total
+
+edge_bulkhead_rejections_total
+
+edge_nats_publish_latency
+
+edge_nats_circuit_breaker_state
+
+edge_journal_append_latency
+
+edge_journal_group_commit_size
+
+edge_journal_fsync_latency
+
+edge_journal_usage_bytes
+
+edge_journal_usage_percent
+
+edge_recovery_backlog_records
+
+edge_recovery_lag_seconds
+
+edge_replay_success_total
+
+edge_replay_failures_total
+```
+
+E os principais alerts:
+
+```text
+Journal usage > 80%
+Journal usage > 95%
+Recovery backlog increasing
+Circuit breaker OPEN > 30s
+Fsync P99 > threshold
+Replay failures increasing
+CRC corruption detected
+```
+
+---
+
+# Veredito
+
+**A direção está excelente.** Principalmente porque vocês abandonaram a ideia inicial de:
+
+> “Disruptor → 202”
+
+e chegaram ao conceito correto:
+
+> **Broker durable acknowledgment OR locally durable journal commit → 202.**
+
+Eu também **não migraria agora para TidesDB**. Para o workload específico da SPEC-000.9, o `SegmentedFileJournal` é arquiteturalmente mais simples e provavelmente mais previsível que RocksDB ou TidesDB.
+
+Minha recomendação é: **revisar o PLAN com esses ajustes e então criar o `TASKS-000.9` em TDD order**. O próximo artefato pode ficar muito bom se organizarmos as tasks em:
+
+1. RED — durable acceptance semantics
+2. GREEN — segmented journal + group commit
+3. RED/GREEN — ingress resilience
+4. RED/GREEN — crash recovery + idempotency
+5. integration/chaos tests
+6. performance verification + observability
+
+Isso deixaria a Phase 000.9 com um nível bem próximo de uma arquitetura real de **financial command gateway**.

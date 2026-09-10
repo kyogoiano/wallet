@@ -28,6 +28,15 @@ class OperationStateServiceTest {
     OperationStateService service;
 
     @Test
+    void shouldMarkOperationCompleted() {
+        UUID opId = UUID.randomUUID();
+
+        service.markOperationCompleted(opId);
+
+        verify(walletOperationsDao).completeOperation(opId);
+    }
+
+    @Test
     void shouldMarkOperationFailed() {
         UUID opId = UUID.randomUUID();
 

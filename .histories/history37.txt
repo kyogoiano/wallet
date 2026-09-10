@@ -1,0 +1,740 @@
+Sim — e esta versão da **SPEC-000.9 está significativamente mais madura** que o primeiro desenho. A principal evolução foi corrigir exatamente o ponto mais perigoso: **confundir buffering com durabilidade**.
+
+Minha revisão profissional: **a arquitetura está conceitualmente muito boa, mas eu faria alguns ajustes antes de considerar a spec realmente “implementation-ready”**.
+
+---
+
+# ✅ Veredito geral
+
+**Arquitetura:** 🟢 Muito forte
+**Financial correctness:** 🟢 Forte
+**Resilience:** 🟢 Muito boa
+**Spec slicing:** 🟢 Bem focada
+**Alguns invariantes precisam ser refinados:** 🟡
+**Status que eu recomendaria:** `Ready for Plan`, não necessariamente `Ratified/Implemented`.
+
+O maior mérito:
+
+> `202 ACCEPTED` agora representa uma **aceitação durável**, e não apenas “o servidor colocou algo numa fila”.
+
+Isso é exatamente o tipo de distinção que separa um backend convencional de um sistema financeiro sério.
+
+---
+
+# 1. O maior ponto positivo: I-EDGE-001 está correto
+
+Esta definição é excelente:
+
+$$
+\text{Response}(202) \iff \text{PUBACK}(\text{JetStream}) \lor \text{fsync}(\text{DurableJournal})
+$$
+
+Mas eu faria uma pequena mudança conceitual.
+
+## Problema
+
+`PUBACK` sozinho pode ser ambíguo dependendo da semântica exata de publicação/configuração do JetStream.
+
+O contrato real que queremos é:
+
+> **o broker confirmou persistência conforme a política de durabilidade configurada.**
+
+Eu reformularia:
+
+### I-EDGE-001
+
+```text
+202 ACCEPTED may only be returned after one of the following durable
+acceptance acknowledgements:
+
+A. JetStream persistence acknowledgement satisfying the configured
+   stream durability/replication policy.
+
+B. Local Durable Spillover Journal group-commit acknowledgement,
+   including successful force/fsync of the batch containing the command.
+```
+
+Isso evita que a spec fique semanticamente dependente de uma interpretação simplificada de `PUBACK`.
+
+---
+
+# 2. Eu mudaria o I-EDGE-003: a promessa atual é forte demais
+
+Hoje:
+
+$$
+\forall opId,\quad Executions(opId) \le 1
+$$
+
+O problema é que isso promete **exactly-once execution end-to-end**, algo que a Edge Gateway isoladamente não consegue garantir.
+
+A Edge consegue garantir:
+
+* deduplicação na publicação;
+* deduplicação no replay;
+* propagação do `operationId`;
+* prevenção de duplicação óbvia.
+
+Mas o verdadeiro sistema precisa trabalhar como:
+
+```text
+At-least-once delivery
+        +
+Idempotent execution
+        =
+Effectively-once financial effect
+```
+
+Eu mudaria para:
+
+### I-EDGE-003 — Idempotent Financial Effect
+
+```text
+The Edge MUST preserve operationId across:
+
+- client retries
+- broker retries
+- journal replay
+- crash recovery
+
+Downstream execution MUST be idempotent such that:
+
+∀ operationId,
+FinancialEffects(operationId) ≤ 1
+```
+
+Matematicamente:
+
+$$
+\forall opId,\quad FinancialEffects(opId) \le 1
+$$
+
+Isso é muito mais defensável arquiteturalmente.
+
+---
+
+# 3. I-EDGE-004 está muito bom, mas a fórmula precisa de um ajuste
+
+Hoje:
+
+$$
+READY \iff Backlog = \emptyset \lor ReplayScheduled
+$$
+
+O problema é `ReplayScheduled`.
+
+Se você apenas **agendou** o replay, mas:
+
+* o NATS continua indisponível;
+* o drainer está parado;
+* a fila local continua crescendo;
+
+o node poderia ficar READY.
+
+Eu separaria dois estados.
+
+## Recovery complete
+
+```text
+Journal scanned successfully
+AND
+all records classified
+AND
+replay workers initialized
+```
+
+## Serving readiness
+
+Eu sugiro:
+
+$$
+READY \iff RecoveryScanCompleted \land RecoveryPipelineOperational
+$$
+
+Não precisa esperar necessariamente backlog zero.
+
+Caso contrário, imagine:
+
+```text
+100 milhões de comandos no spool
+```
+
+Você não quer manter o node fora do load balancer até zerar tudo.
+
+Melhor arquitetura:
+
+```text
+STARTING
+   ↓
+RECOVERING
+   ↓
+Journal scan complete
+   ↓
+Replay pipeline operational
+   ↓
+READY
+```
+
+Com métricas:
+
+```text
+edge_spool_backlog_records
+edge_spool_backlog_bytes
+edge_recovery_pending_records
+```
+
+---
+
+# 4. O maior ponto que falta: comportamento quando NATS volta
+
+Você descreve corretamente:
+
+```text
+NATS DOWN
+   ↓
+Journal fsync
+   ↓
+202
+```
+
+Mas falta formalizar a transição:
+
+```text
+NATS DOWN
+      ↓
+SPOOLING
+      ↓
+NATS HALF-OPEN
+      ↓
+?
+```
+
+Aqui eu adicionaria um requisito explícito.
+
+## REQ-EDG-014 — Ordered Recovery Drain
+
+```text
+When NATS connectivity is restored, the Edge MUST drain durable
+spillover records using deterministic operation identifiers and bounded
+backpressure.
+
+New commands MUST NOT starve journal recovery indefinitely.
+```
+
+A política precisa decidir entre:
+
+### Opção A — Recovery-first
+
+```text
+Spool → NATS
+New traffic waits / reduced capacity
+```
+
+### Opção B — Fair scheduling ⭐
+
+```text
+80% replay capacity
+20% new traffic
+```
+
+ou algo adaptativo.
+
+Eu prefiro uma política de **fair draining**, porque recovery-first pode gerar indisponibilidade artificial.
+
+---
+
+# 5. O journal está muito bem desenhado
+
+Este formato é bom:
+
+```text
+[Magic: 4B]
+[Version: 2B]
+[Flags: 2B]
+[Length: 4B]
+[CRC32C: 4B]
+[OperationId: 16B]
+[Timestamp: 8B]
+[PayloadLength: 4B]
+[Payload: NB]
+```
+
+Mas adicionaria duas coisas.
+
+## A. Header CRC / segment metadata
+
+Sugestão:
+
+```text
+SEGMENT HEADER
+
+[Magic]
+[Version]
+[SegmentId]
+[CreatedAt]
+[HeaderCRC32C]
+```
+
+Porque você vai querer detectar:
+
+* segmento errado;
+* versão incompatível;
+* corrupção de header.
+
+---
+
+## B. Record sequence number
+
+Eu adicionaria:
+
+```text
+[SequenceNumber: 8B]
+```
+
+Então:
+
+```text
+[Magic]
+[Version]
+[Flags]
+[Length]
+[CRC32C]
+[SequenceNumber]
+[OperationId]
+[Timestamp]
+[PayloadLength]
+[Payload]
+```
+
+Isso ajuda muito em:
+
+* recovery;
+* debugging;
+* métricas;
+* ordering;
+* gap detection.
+
+---
+
+# 6. Group Commit: excelente, mas precisa de um timeout máximo
+
+Você colocou:
+
+> 1ms or N-record window
+
+Muito bom.
+
+Mas eu formalizaria:
+
+```text
+flush when:
+
+batchSize >= MAX_BATCH_RECORDS
+OR
+elapsed >= MAX_GROUP_COMMIT_DELAY
+```
+
+E o ACK só pode voltar depois:
+
+```text
+write()
+   ↓
+batch assembled
+   ↓
+FileChannel.force(true)
+   ↓
+complete all promises
+   ↓
+202
+```
+
+O importante é que a implementação não faça:
+
+```text
+write()
+↓
+Promise.complete()
+↓
+fsync later
+```
+
+Esse seria uma violação direta do I-EDGE-001.
+
+---
+
+# 7. Cuidado com esta meta: `< 0.1 μs`
+
+Você escreveu:
+
+> L0/L1 lock-free token bucket MUST reject excess traffic in <0.1μs
+
+Eu removeria esse número da spec.
+
+0.1 µs = **100 nanoseconds**.
+
+Isso é uma meta extremamente agressiva e difícil de validar realisticamente em:
+
+* JVM;
+* Netty;
+* CPU moderna;
+* benchmark JMH;
+* diferentes arquiteturas.
+
+Eu colocaria:
+
+```text
+O(1), allocation-free, no external network dependency.
+```
+
+E uma meta operacional mais realista:
+
+```text
+P99 local limiter evaluation < 10 μs
+```
+
+Mesmo 10 µs é irrelevante comparado à rede.
+
+---
+
+# 8. MAX_INFLIGHT = 5,000 deveria ser configuração, não arquitetura fixa
+
+Muito melhor:
+
+```text
+MAX_INFLIGHT = configurable
+```
+
+Dependente de:
+
+* CPU cores;
+* memória;
+* tamanho médio do payload;
+* capacidade do NATS;
+* throughput do NVMe.
+
+Eu colocaria:
+
+```text
+edge.bulkhead.max-inflight=5000
+```
+
+Mas a spec deveria dizer:
+
+> Default: 5,000; dynamically configurable per deployment profile.
+
+---
+
+# 9. Falta um limite de payload
+
+Este é um ponto importante para uma Edge financeira.
+
+Sem isso:
+
+```text
+POST /operations
+Content-Length: 2GB
+```
+
+Pode gerar:
+
+* pressão de memória;
+* spool exhaustion;
+* ataque de resource exhaustion.
+
+Eu adicionaria:
+
+## REQ-EDG-015 — Maximum Command Envelope Size
+
+```text
+The Edge MUST enforce a maximum command payload size before durable
+admission.
+
+Requests exceeding MAX_COMMAND_SIZE MUST be rejected with HTTP 413.
+```
+
+Exemplo:
+
+```text
+MAX_COMMAND_SIZE = 64 KB
+```
+
+ou configurável.
+
+---
+
+# 10. Falta um conceito explícito de Admission State
+
+Eu criaria um pequeno state machine.
+
+```mermaid
+stateDiagram-v2
+    [*] --> STARTING
+
+    STARTING --> RECOVERING
+    RECOVERING --> READY: Journal scanned + replay operational
+
+    READY --> BROKER_HEALTHY
+    BROKER_HEALTHY --> SPOOLING: NATS unavailable
+
+    SPOOLING --> BROKER_HEALTHY: NATS recovered
+
+    SPOOLING --> SATURATED: Disk >= threshold
+    SATURATED --> SPOOLING: Capacity recovered
+
+    SATURATED --> [*]
+```
+
+Na prática:
+
+```text
+READY / BROKER_HEALTHY
+READY / DEGRADED_SPOOLING
+NOT_READY / RECOVERING
+NOT_READY / STORAGE_FAILURE
+```
+
+Isso simplifica muito a implementação e observabilidade.
+
+---
+
+# 11. RocksDB vs TidesDB: minha recomendação mudou
+
+E aqui está a parte interessante.
+
+**Com esta nova SPEC-000.9, eu não escolheria RocksDB nem TidesDB como baseline.**
+
+O `SegmentedFileJournal` é arquiteturalmente melhor para esse caso.
+
+Por quê?
+
+Seu workload é:
+
+```text
+append
+append
+append
+append
+
+↓
+
+sequential replay
+
+↓
+
+delete/truncate old segment
+```
+
+Isso é literalmente o workload ideal para:
+
+```text
+Append-only segmented log
+```
+
+RocksDB é excelente quando você precisa:
+
+```text
+operationId → random lookup
+key → value
+range scan
+compaction
+LSM indexing
+```
+
+Mas para um WAL/spool:
+
+```text
+Sequential append
++
+fsync
++
+sequential drain
+```
+
+RocksDB adiciona:
+
+* compaction;
+* write amplification;
+* SSTables;
+* memtables;
+* background threads.
+
+### Minha recomendação
+
+| Tecnologia                | Fit para Edge Spool              |
+| ------------------------- | -------------------------------- |
+| Segmented append-only log | 🟢 Melhor baseline               |
+| RocksDB                   | 🟡 Alternativa para lookup/index |
+| TidesDB                   | 🟡 Avaliar por benchmark         |
+| SQLite WAL                | 🟡 Possível, mas desnecessário   |
+| Kafka embedded            | 🔴 Overkill                      |
+
+Então eu manteria exatamente:
+
+```text
+REQ-EDG-012 [COULD]
+Pluggable DurableSpilloverJournal SPI
+```
+
+Mas não faria a migração para TidesDB agora.
+
+**Benchmark primeiro.**
+
+---
+
+# 12. Um ponto que eu adicionaria: spool ACK protocol
+
+Você precisa definir como um record é considerado “consumido”.
+
+Exemplo:
+
+```text
+Journal Record
+       ↓
+Publish to NATS
+       ↓
+JetStream PUBACK
+       ↓
+Mark record ACKED
+       ↓
+Eligible for segment cleanup
+```
+
+Isso deveria virar um requisito.
+
+## REQ-EDG-016 — Durable Replay Acknowledgement
+
+```text
+A journal record MUST remain recoverable until successful JetStream
+durable acknowledgement is received for its operationId.
+
+A record MUST NOT be physically reclaimed solely because publish was
+attempted.
+```
+
+Esse detalhe é crítico.
+
+---
+
+# 13. Outro ponto profissional: split-brain de spool não é o problema — orphaned acceptance é
+
+O cenário:
+
+```text
+Edge-A
+   ↓
+fsync
+   ↓
+202
+
+POWER FAILURE
+```
+
+Depois:
+
+```text
+Load Balancer → Edge-B
+```
+
+O cliente pode continuar usando o serviço, enquanto a operação aceita está “presa” no disco do Edge-A.
+
+Isso é aceitável **somente se você assumir recuperação daquele node**.
+
+Mas se o SSD morrer permanentemente?
+
+Você perdeu uma operação que já recebeu 202.
+
+Então há uma distinção importante:
+
+### Current design guarantees
+
+🟢 Process crash durability
+🟢 OS crash durability
+🟢 Restart recovery
+
+Mas não necessariamente:
+
+🔴 Physical node destruction durability
+🔴 NVMe permanent failure durability
+
+A spec deveria deixar isso explícito.
+
+Você pode chamar:
+
+## I-EDGE-006 — Local Durable Acceptance Scope
+
+```text
+Local journal acceptance guarantees process and host restart durability,
+but does not independently provide node-loss durability.
+
+Deployment architecture MUST provide one of:
+
+- replicated local storage
+- synchronous journal replication
+- RAID / hardware durability strategy
+- operational recovery guarantees
+```
+
+Isso é importante porque **fsync não é HA**.
+
+---
+
+# Minha versão final recomendada dos novos requisitos
+
+Eu adicionaria:
+
+```text
+REQ-EDG-014 — Ordered/Fair Recovery Drain
+REQ-EDG-015 — Maximum Command Envelope Size
+REQ-EDG-016 — Durable Replay Acknowledgement
+REQ-EDG-017 — Explicit Admission State Machine
+```
+
+E um novo invariant:
+
+```text
+I-EDGE-006 — Local Durable Acceptance Scope
+```
+
+---
+
+# 📊 Minha avaliação da SPEC-000.9
+
+| Área                           | Avaliação |
+| ------------------------------ | --------- |
+| Financial durability semantics | ⭐⭐⭐⭐⭐     |
+| Reactive ingress design        | ⭐⭐⭐⭐⭐     |
+| Backpressure / bulkheading     | ⭐⭐⭐⭐⭐     |
+| Journal architecture           | ⭐⭐⭐⭐⭐     |
+| Crash recovery                 | ⭐⭐⭐⭐½     |
+| End-to-end idempotency wording | ⭐⭐⭐½      |
+| HA / physical node failure     | ⭐⭐⭐       |
+| Operational state modeling     | ⭐⭐⭐⭐      |
+| Observability requirements     | ⭐⭐⭐½      |
+
+## Conclusão
+
+**Eu considero a SPEC-000.9 uma base arquitetural muito sólida.**
+
+A decisão mais importante — e correta — foi abandonar a ideia de:
+
+> Disruptor → 202
+
+e estabelecer:
+
+> **PUBACK OR fsync → 202**
+
+Para um wallet financeiro, essa é a fronteira conceitual correta.
+
+### Minha recomendação de sequência
+
+Antes de gerar o `PLAN-000.9`, eu faria uma **pequena revisão final da SPEC**, incorporando principalmente:
+
+1. corrigir `I-EDGE-003` para **effectively-once financial effect**;
+2. corrigir o readiness para não exigir necessariamente backlog zero;
+3. adicionar `REQ-EDG-016` para lifecycle ACK → reclaim;
+4. explicitar que local fsync ≠ node-loss HA;
+5. adicionar limite máximo de payload;
+6. remover a meta rígida de `0.1μs`;
+7. formalizar o state machine do Edge.
+
+Com esses ajustes, eu diria que ela fica **realmente pronta para virar um PLAN de nível production-grade**.

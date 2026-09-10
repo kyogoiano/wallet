@@ -1,37 +1,49 @@
 plugins {
 	id 'java'
 	id 'jacoco'
-	id 'org.springframework.boot' version '4.1.1'
+	id 'org.springframework.boot' version '4.2.0-M1'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
 group = 'br.com.wallet'
 version = '0.0.1-SNAPSHOT'
 
-dependencyManagement {
-	imports {
-		mavenBom "org.springframework.modulith:spring-modulith-bom:2.1.0"
-	}
-}
-
-java {
-	toolchain {
-		languageVersion = JavaLanguageVersion.of(26)
-	}
-}
-
-repositories {
-	mavenCentral()
-}
-
-
 ext {
-	springVersion = "7.0.9"
+	springVersion = "7.1.0-M1"
 	openApiVersion = "3.1.0"
 	jnatsVersion = "2.26.2"
 	lettuceVersion = "7.7.0.RELEASE"
 	otlpAppenderVersion = "2.28.1-alpha"
 	nettyVersion = "4.2.17.Final"
+	modulithVersion = "2.1.1"
+	archunitVersion = "1.5.0"
+	asmVersion = "9.10.1"
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.modulith:spring-modulith-bom:${modulithVersion}"
+	}
+	dependencies {
+		dependency "com.tngtech.archunit:archunit:${archunitVersion}"
+		dependency "com.tngtech.archunit:archunit-junit5:${archunitVersion}"
+		dependency "com.tngtech.archunit:archunit-junit5-api:${archunitVersion}"
+		dependency "com.tngtech.archunit:archunit-junit5-engine:${archunitVersion}"
+		dependency "org.ow2.asm:asm:${asmVersion}"
+		dependency "org.ow2.asm:asm-commons:${asmVersion}"
+	}
+}
+
+java {
+	toolchain {
+		languageVersion = JavaLanguageVersion.of(27)
+	}
+}
+
+repositories {
+	mavenCentral()
+	maven { url 'https://repo.spring.io/milestone' }
+	maven { url 'https://repo.spring.io/snapshot' }
 }
 
 subprojects {
@@ -43,19 +55,22 @@ subprojects {
 
 	dependencyManagement {
 		imports {
-			mavenBom "org.springframework.boot:spring-boot-dependencies:4.1.1"
-			mavenBom "org.springframework.modulith:spring-modulith-bom:2.1.0"
+			mavenBom "org.springframework.boot:spring-boot-dependencies:4.2.0-M1"
+			mavenBom "org.springframework.modulith:spring-modulith-bom:2.1.1"
 		}
 	}
 
+
 	java {
 		toolchain {
-			languageVersion = JavaLanguageVersion.of(26)
+			languageVersion = JavaLanguageVersion.of(27)
 		}
 	}
 
 	repositories {
 		mavenCentral()
+		maven { url 'https://repo.spring.io/milestone' }
+		maven { url 'https://repo.spring.io/snapshot' }
 	}
 
 	bootJar {
@@ -80,6 +95,7 @@ dependencies {
 	// Project dependencies
 	implementation project(':core')
 	implementation project(':fraud')
+	implementation project(':edge')
 
 	// Spring Boot Starters for the main application
 	implementation 'org.springframework.boot:spring-boot-starter'
@@ -110,6 +126,11 @@ dependencies {
 	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
 	testImplementation 'org.springframework.modulith:spring-modulith-docs'
 	implementation 'org.springframework.modulith:spring-modulith-events-api'
+
+	// ArchUnit & ASM for Java 27 bytecode support (major version 71)
+	testImplementation "com.tngtech.archunit:archunit:${archunitVersion}"
+	testImplementation "com.tngtech.archunit:archunit-junit5:${archunitVersion}"
+	testImplementation "org.ow2.asm:asm:${asmVersion}"
 
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'

@@ -95,4 +95,17 @@ class OperationStatusTrackingIT extends DockerProperties {
         assertThat(status.get().errorMessage()).isEqualTo("Insufficient funds");
         assertThat(status.get().failureType()).isEqualTo("BUSINESS");
     }
+
+    @Test
+    void shouldTrackCompletedOperationStatusWhenMarkedCompletedViaUseCase() {
+        UUID opId = UUID.randomUUID();
+
+        operationStateUseCase.markOperationCompleted(opId);
+
+        var status = operationQueryUseCase.getOperationStatus(opId);
+        assertThat(status).isPresent();
+        assertThat(status.get().operationId()).isEqualTo(opId);
+        assertThat(status.get().status()).isEqualTo(OperationStatus.COMPLETED);
+        assertThat(status.get().errorMessage()).isNull();
+    }
 }

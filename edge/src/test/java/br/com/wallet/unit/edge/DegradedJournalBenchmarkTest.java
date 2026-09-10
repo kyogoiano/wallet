@@ -12,6 +12,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
@@ -41,7 +42,7 @@ class DegradedJournalBenchmarkTest {
         }
         if (spoolDir != null && Files.exists(spoolDir)) {
             try (var stream = Files.walk(spoolDir)) {
-                stream.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                stream.sorted(Comparator.reverseOrder()).forEach(p -> {
                     try { Files.deleteIfExists(p); } catch (IOException ignored) {}
                 });
             }
@@ -69,9 +70,7 @@ class DegradedJournalBenchmarkTest {
             long submitNanos = System.nanoTime();
 
             futures[i] = journal.append(CommandType.TRANSFER, opId, payload)
-                    .thenAccept(v -> {
-                        latenciesNanos[index] = System.nanoTime() - submitNanos;
-                    });
+                    .thenAccept(v -> latenciesNanos[index] = System.nanoTime() - submitNanos);
         }
 
         CompletableFuture.allOf(futures).get(30, TimeUnit.SECONDS);

@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -88,7 +89,7 @@ class EdgeIngressIT {
         }
         if (spoolDir != null && Files.exists(spoolDir)) {
             try (var stream = Files.walk(spoolDir)) {
-                stream.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                stream.sorted(Comparator.reverseOrder()).forEach(p -> {
                     try {
                         Files.deleteIfExists(p);
                     } catch (IOException ignored) {}

@@ -79,7 +79,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
 
     @Override
     public void processMessage(@NonNull final Message message) {
-        CommandType type = null;
+        CommandType type;
         UUID operationId = null;
 
         try {
@@ -146,10 +146,8 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
                     }
                     message.nakWithDelay(retryDelay(deliveries));
                 }
-                case DLQ -> {
-                    // Retry exhausted: publish to DLQ with confirmed PubAck, then ACK
-                    handlePoisonMessage(message, type, operationId, e);
-                }
+                case DLQ -> // Retry exhausted: publish to DLQ with confirmed PubAck, then ACK
+                        handlePoisonMessage(message, type, operationId, e);
             }
         }
     }
@@ -242,7 +240,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
         };
     }
 
-    private JsonNode parseJsonNode(byte[] data, UUID fallbackOpId) throws Exception {
+    private JsonNode parseJsonNode(byte[] data, UUID fallbackOpId) {
         JsonNode node = objectMapper.readTree(data);
         while (node != null && node.isString()) {
             try {
@@ -268,7 +266,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
         return node;
     }
 
-    private Object deserializeCommand(JsonNode node, CommandType type) throws Exception {
+    private Object deserializeCommand(JsonNode node, CommandType type) {
         return switch (type) {
             case TRANSFER -> objectMapper.treeToValue(node, Transfer.class);
             case DEPOSIT -> objectMapper.treeToValue(node, Deposit.class);

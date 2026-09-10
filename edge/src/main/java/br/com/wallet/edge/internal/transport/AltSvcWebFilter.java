@@ -37,7 +37,7 @@ public class AltSvcWebFilter extends OncePerRequestFilter {
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
             HttpServletResponse response,
-            FilterChain filterChain
+            @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
         response.setHeader(ALT_SVC_HEADER, altSvcValue);
 

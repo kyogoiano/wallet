@@ -88,7 +88,7 @@ class JournalRecoveryWorkerTest {
 
     @Test
     @DisplayName("Should halt segment scan and quarantine corrupted segment without DLQ pollution on CRC error (REQ-EDG-018)")
-    void shouldHaltOnCrcFailureAndQuarantine() throws IOException {
+    void shouldHaltOnCrcFailureAndQuarantine() {
         Path segCorrupt = Path.of("/spool/segment-0000000000000002.wal");
         when(journal.listSegmentFiles()).thenReturn(List.of(segCorrupt));
 

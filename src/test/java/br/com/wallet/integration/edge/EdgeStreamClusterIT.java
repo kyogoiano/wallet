@@ -8,6 +8,7 @@ import br.com.wallet.support.IntegrationTestBase;
 import io.nats.client.Connection;
 import io.nats.client.Nats;
 import io.nats.client.Options;
+import org.jspecify.annotations.NonNull;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -106,7 +107,7 @@ public class EdgeStreamClusterIT extends DockerProperties {
             }
 
             @Override
-            public void send(SseEventBuilder builder) throws java.io.IOException {
+            public void send(@NonNull SseEventBuilder builder) throws java.io.IOException {
                 super.send(builder);
                 receivedEvents.add(builder);
             }

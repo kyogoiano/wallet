@@ -64,9 +64,7 @@ public class NatsEdgeCommandPublisher implements EdgeCommandPublisher {
                     .build();
 
             return jetStream.publishAsync(message, options)
-                    .thenAccept(ack -> {
-                        log.debug("Published command [{}] to [{}] seqNo={}", command.type(), subject, ack.getSeqno());
-                    });
+                    .thenAccept(ack -> log.debug("Published command [{}] to [{}] seqNo={}", command.type(), subject, ack.getSeqno()));
         } catch (Exception e) {
             log.error("Failed to initiate NATS publish for opId={}: {}", command.operationId(), e.getMessage(), e);
             return CompletableFuture.failedFuture(e);

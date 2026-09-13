@@ -76,7 +76,7 @@ public class JournalRecoveryWorker implements ApplicationRunner {
         boolean encounteredCorruption = false;
 
         List<Path> segmentFiles = journal.listSegmentFiles();
-        for (Path segment : segmentFiles) {
+        for (final Path segment : segmentFiles) {
             try {
                 List<JournalRecord> records = journal.readSegmentRecords(segment);
                 if (records.isEmpty()) {

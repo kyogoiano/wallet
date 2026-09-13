@@ -54,7 +54,7 @@ public class OperationStatusHub implements LocalOperationStatusBroadcaster {
                 message
         );
 
-        for (SseEmitter emitter : emitters) {
+        for (final SseEmitter emitter : emitters) {
             try {
                 emitter.send(SseEmitter.event()
                         .name("status")

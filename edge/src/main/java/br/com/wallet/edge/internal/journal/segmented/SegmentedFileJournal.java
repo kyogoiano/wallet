@@ -159,7 +159,7 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
     }
 
     private void scanOffsetAndSequence(Path segment) throws IOException {
-        try (FileChannel ch = FileChannel.open(segment, StandardOpenOption.READ)) {
+        try (final FileChannel ch = FileChannel.open(segment, StandardOpenOption.READ)) {
             ByteBuffer headerBuf = ByteBuffer.allocate(SegmentHeader.HEADER_SIZE);
             ch.read(headerBuf, 0);
             headerBuf.flip();

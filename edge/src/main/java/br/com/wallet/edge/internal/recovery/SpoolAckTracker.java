@@ -37,11 +37,7 @@ public class SpoolAckTracker {
         acknowledgedBySegment.put(segmentFile, acknowledged);
 
         Set<Long> pending = ConcurrentHashMap.newKeySet();
-        for (Long seq : sequenceNumbers) {
-            if (!durablyAcknowledged.contains(seq)) {
-                pending.add(seq);
-            }
-        }
+        sequenceNumbers.stream().filter(seq -> !durablyAcknowledged.contains(seq)).forEach(pending::add);
         pendingAcksBySegment.put(segmentFile, pending);
     }
 
@@ -99,7 +95,7 @@ public class SpoolAckTracker {
         try {
             List<String> lines = Files.readAllLines(ackFile);
             Set<Long> set = new HashSet<>(lines.size());
-            for (String line : lines) {
+            for (final String line : lines) {
                 String trimmed = line.trim();
                 if (!trimmed.isEmpty()) {
                     try {

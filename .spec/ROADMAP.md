@@ -128,7 +128,8 @@ gantt
     SPEC-000.9 Reactive Edge Ingress    :done, p00_11, 2026-09-09, 3d
     SPEC-000.9.1 Edge/Core Runtimes     :done, p00_11_1, 2026-09-10, 2d
     SPEC-000.9.2 Container Topology     :active, p00_11_2, after p00_11_1, 3d
-    SPEC-000.10 Financial Security      :p00_12, after p00_11_2, 3d
+    SPEC-000.9.3 HMAC-Signed Ingress    :active, p00_11_3, after p00_11_2, 3d
+    SPEC-000.10 Financial Security      :p00_12, after p00_11_3, 3d
     SPEC-000.11 Tiered DLQ & Recovery   :p00_13, after p00_12, 3d
     section Phase 1 Programmable Money
     SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
@@ -360,6 +361,21 @@ gantt
   - `plans/PLAN-000.9.2-containerized-multi-process-topology.md` (Pending)
   - `tasks/TASKS-000.9.2-containerized-multi-process-topology.md` (Pending)
   - `summaries/SUMMARY-000.9.2-containerized-multi-process-topology.md` (Pending)
+
+---
+
+### 🔹 Phase 000.9.3: HMAC-Signed Ingress & Multi-Tenant Security Boundary
+**Spec Identifier**: [`SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries`](file:///.spec/SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md)  
+**Status**: 🟢 **Ratified**  
+**Core Abstraction**: `Cryptographic HMAC Ingress, Zero-DB Credential Resolution, Tenant Rate Limiting & Core Transactional Isolation`
+
+- **Intent**: Eliminate untrusted client headers (`X-Tenant-Id`) by enforcing mandatory HMAC-SHA-256 signature verification at Edge using standard JDK 27 cryptography (`I-SEC-002`), resolving credentials and deriving `tenantId` in memory without database queries (`I-SEC-003`, `I-SEC-004`), isolating tenant traffic via partitioned `(tenantId, principalId)` token buckets (`I-SEC-007`), propagating verified identity across NATS JetStream within `CommandEnvelope`, and enforcing account tenant equality in Core inside the atomic `SELECT FOR UPDATE` transaction boundary (`I-SEC-005`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md`](file:///.spec/SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md) (Ratified)
+  - [`.spec/architecture/ARCH-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md`](file:///.spec/architecture/ARCH-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md) (Ratified)
+  - `plans/PLAN-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
+  - `tasks/TASKS-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
+  - `summaries/SUMMARY-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
 
 ---
 

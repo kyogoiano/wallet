@@ -32,6 +32,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import org.springframework.test.context.TestPropertySource;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -39,6 +40,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
+@TestPropertySource(properties = {
+        "wallet.runtime.mode=monolith",
+        "wallet.edge.enabled=true",
+        "edge.spool.directory=${java.io.tmpdir}/edge-to-core-${random.uuid}"
+})
 @DisplayName("Edge-to-Core Full Pipeline End-to-End Integration Test (TASK-7.5)")
 public class EdgeToCoreIntegrationTest extends DockerProperties {
 

@@ -12,6 +12,7 @@ import br.com.wallet.edge.internal.resilience.BrokerCircuitBreaker;
 import br.com.wallet.edge.internal.resilience.IngressBulkhead;
 import br.com.wallet.edge.internal.resilience.PerimeterRateLimiter;
 import br.com.wallet.edge.internal.transport.AltSvcWebFilter;
+import br.com.wallet.edge.internal.ingress.ConditionalOnEdgeIngress;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
@@ -25,6 +26,7 @@ import java.util.concurrent.CompletableFuture;
  * Spring configuration registering Edge Gateway components and lifecycle beans.
  */
 @Configuration
+@ConditionalOnEdgeIngress
 public class EdgeConfiguration {
 
     @Bean
@@ -85,11 +87,14 @@ public class EdgeConfiguration {
     @Bean(initMethod = "start", destroyMethod = "close")
     @ConditionalOnMissingBean
     public SegmentedFileJournal segmentedFileJournal(
-            @Value("${edge.spool.directory:#{systemProperties['java.io.tmpdir']}/wallet-spool}") String spoolPath,
+            @Value("${edge.spool.directory:#{null}}") String spoolPath,
             @Value("${edge.spool.segment-size-bytes:67108864}") long segmentSize,
             @Value("${edge.spool.max-capacity-bytes:10737418240}") long maxCapacity
     ) throws IOException {
-        return new SegmentedFileJournal(Path.of(spoolPath), segmentSize, maxCapacity, 100, 1L);
+        Path path = (spoolPath != null && !spoolPath.isBlank())
+                ? Path.of(spoolPath)
+                : Path.of(System.getProperty("java.io.tmpdir"), "wallet-spool-" + java.util.UUID.randomUUID());
+        return new SegmentedFileJournal(path, segmentSize, maxCapacity, 100, 1L);
     }
 
     @Bean

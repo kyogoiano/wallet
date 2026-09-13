@@ -8,6 +8,8 @@ import br.com.wallet.edge.internal.journal.spi.DurableSpilloverJournal;
 import br.com.wallet.edge.api.EdgeCommandPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.ApplicationArguments;
+import org.springframework.boot.ApplicationRunner;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -26,7 +28,7 @@ import java.util.concurrent.TimeoutException;
  * 3. Forensics quarantine on CRC corruption without DLQ pollution.
  * 4. Reclaims segment storage only upon confirmed JetStream PUBACK.
  */
-public class JournalRecoveryWorker {
+public class JournalRecoveryWorker implements ApplicationRunner {
 
     private static final Logger log = LoggerFactory.getLogger(JournalRecoveryWorker.class);
 
@@ -60,6 +62,13 @@ public class JournalRecoveryWorker {
         this.healthIndicator = Objects.requireNonNull(healthIndicator, "healthIndicator must not be null");
         this.replayQuotaShare = replayQuotaShare;
         this.liveQuotaShare = liveQuotaShare;
+    }
+
+    @Override
+    public void run(ApplicationArguments args) {
+        log.info("Starting edge crash recovery and fair drain scan (I-EDGE-004)...");
+        runRecoveryScan();
+        log.info("Edge crash recovery scan completed with state: {}", healthIndicator.getCurrentState());
     }
 
     public void runRecoveryScan() {

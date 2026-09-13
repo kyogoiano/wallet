@@ -6,13 +6,15 @@ This directory contains specifications, architectural plans, task breakdowns, an
 
 ## 🗂️ Directory Taxonomy & File Conventions
 
-All initiatives follow a strict, deterministic four-artifact lifecycle:
+All initiatives follow a strict, deterministic five-artifact lifecycle:
 
 ```text
 .spec/
 ├── ROADMAP.md                                   # Multi-Phase Strategic Architecture & Milestones
 ├── README.md                                    # This Master Taxonomy & Navigation Index
 ├── SPEC-XXX-<slug>.md                           # Product & Tech Intent, Invariants, MoSCoW Requirements (<= 250 lines)
+├── architecture/                                # Deep System Architecture, Subsystems, Topology & Design Details
+│   └── ARCH-XXX-<slug>.md
 ├── plans/
 │   └── PLAN-XXX-<slug>.md                       # Modulith Boundaries, ADRs, Concurrency & DB Schemas
 ├── tasks/
@@ -21,6 +23,16 @@ All initiatives follow a strict, deterministic four-artifact lifecycle:
     └── SUMMARY-XXX-<slug>.md                    # Traceability Audit, Test Coverage, Practical Verification Guide
 ```
 
+
+---
+
+## 🏛️ System Architecture Documents (`.spec/architecture/`)
+
+System architecture documents synthesize multiple atomic specifications into a deep, authoritative system design reference with component interaction models, storage semantics, and failure topologies:
+
+| Architecture ID | Subsystems Covered | Document | Status | Key Topologies & Principles |
+| :--- | :--- | :--- | :---: | :--- |
+| **ARCH-000.9** | `:edge`, `:core`, Root, Platform | [`ARCH-000.9`](file:///.spec/architecture/ARCH-000.9-reactive-edge-and-multi-process-topology.md) | 🟢 Ratified | Process separation, Option A (Local NVMe) & Option B (Dedicated CSI RWO Block Volume) StatefulSet, NATS JetStream scaling fabric, 5-tier deployment matrix. |
 
 ---
 
@@ -39,6 +51,8 @@ All initiatives follow a strict, deterministic four-artifact lifecycle:
 | **0.3** | `ledger` / `infra` | [`SPEC-000.3`](file:///.spec/SPEC-000.3-async-command-exception-handling.md) | [`PLAN-000.3`](file:///.spec/plans/PLAN-000.3-async-command-exception-handling.md) | [`TASKS-000.3`](file:///.spec/tasks/TASKS-000.3-async-command-exception-handling.md) | [`SUMMARY-000.3`](file:///.spec/summaries/SUMMARY-000.3-async-command-exception-handling.md) | 🟢 Verified | `I-OPS-001` to `I-OPS-004` |
 | **0.4** | `infra` / `core` | [`SPEC-000.4`](file:///.spec/SPEC-000.4-observability-outbox-and-openobserve-optimization.md) | [`PLAN-000.4`](file:///.spec/plans/PLAN-000.4-observability-outbox-and-openobserve-optimization.md) | [`TASKS-000.4`](file:///.spec/tasks/TASKS-000.4-observability-outbox-and-openobserve-optimization.md) | [`SUMMARY-000.4`](file:///.spec/summaries/SUMMARY-000.4-observability-outbox-and-openobserve-optimization.md) | 🟢 Verified | `I-OBS-001`, `I-OBS-002` |
 | **000.9** | `edge` | [`SPEC-000.9`](file:///.spec/SPEC-000.9-reactive-edge-gateway-and-ingress-resilience.md) | [`PLAN-000.9`](file:///.spec/plans/PLAN-000.9-reactive-edge-gateway-and-ingress-resilience.md) | [`TASKS-000.9`](file:///.spec/tasks/TASKS-000.9-reactive-edge-gateway-and-ingress-resilience.md) | [`SUMMARY-000.9`](file:///.spec/summaries/SUMMARY-000.9-reactive-edge-gateway-and-ingress-resilience.md) | 🟢 Verified | `I-EDGE-001` to `I-EDGE-005` |
+| **000.9.1** | `edge` / `core` | [`SPEC-000.9.1`](file:///.spec/SPEC-000.9.1-edge-core-independent-runtimes.md) | [`PLAN-000.9.1`](file:///.spec/plans/PLAN-000.9.1-edge-core-independent-runtimes.md) | [`TASKS-000.9.1`](file:///.spec/tasks/TASKS-000.9.1-edge-core-independent-runtimes.md) | [`SUMMARY-000.9.1`](file:///.spec/summaries/SUMMARY-000.9.1-edge-core-independent-runtimes.md) | 🟢 Verified | `I-PROCESS-001`, `I-CONTRACT-001`, `I-RUNTIME-001`, `I-PORT-001`, `I-STATE-001` |
+| **000.9.2** | `platform` / `infra` | [`SPEC-000.9.2`](file:///.spec/SPEC-000.9.2-containerized-multi-process-topology.md) | `PLAN-000.9.2` | `TASKS-000.9.2` | `SUMMARY-000.9.2` | 🟡 Ratified | `I-CONTAINER-001`, `I-TOPOLOGY-001`, `I-STORAGE-001`, `I-PLATFORM-001`, `I-GRACEFUL-001` |
 
 ---
 

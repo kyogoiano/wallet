@@ -1,6 +1,5 @@
 package br.com.wallet.unit.core;
 
-import br.com.wallet.core.context.OperationOrigin;
 import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.core.tracing.TraceContext;
 import br.com.wallet.core.tracing.Traceable;
@@ -9,7 +8,6 @@ import io.micrometer.tracing.BaggageInScope;
 import io.micrometer.tracing.ScopedSpan;
 import io.micrometer.tracing.Tracer;
 import org.aspectj.lang.ProceedingJoinPoint;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -47,15 +45,11 @@ class TracingAspectTest {
     @InjectMocks
     TracingAspect aspect;
 
-    @BeforeEach
-    void setUp() {
-        when(traceable.value()).thenReturn("test.span");
-        when(tracer.startScopedSpan(anyString())).thenReturn(scopedSpan);
-    }
-
     @Test
     @DisplayName("Should unconditionally start and end span even when operationId is null (I-OBS-002)")
     void shouldCloseSpanEvenWhenOperationIdIsNull() throws Throwable {
+        when(traceable.value()).thenReturn("test.span");
+        when(tracer.startScopedSpan(anyString())).thenReturn(scopedSpan);
         when(joinPoint.getArgs()).thenReturn(new Object[]{"non-context-argument"});
         when(joinPoint.proceed()).thenReturn("result");
 
@@ -70,6 +64,9 @@ class TracingAspectTest {
     @Test
     @DisplayName("Should create baggage scope and tag span when operationId UUID is present")
     void shouldCreateBaggageAndTagSpanWhenUUIDPresent() throws Throwable {
+        when(traceable.value()).thenReturn("test.span");
+        when(tracer.startScopedSpan(anyString())).thenReturn(scopedSpan);
+
         UUID opId = UUID.randomUUID();
         when(joinPoint.getArgs()).thenReturn(new Object[]{opId});
         when(joinPoint.proceed()).thenReturn("success");
@@ -87,6 +84,9 @@ class TracingAspectTest {
     @Test
     @DisplayName("Should extract operationId and tags from TraceContext")
     void shouldExtractFromTraceContext() throws Throwable {
+        when(traceable.value()).thenReturn("test.span");
+        when(tracer.startScopedSpan(anyString())).thenReturn(scopedSpan);
+
         UUID opId = UUID.randomUUID();
         TraceContext ctx = new TraceContext() {
             @Override
@@ -121,6 +121,9 @@ class TracingAspectTest {
     @Test
     @DisplayName("Should record error and tag FAILED when joinPoint throws RuntimeException")
     void shouldRecordErrorAndCloseSpanOnException() throws Throwable {
+        when(traceable.value()).thenReturn("test.span");
+        when(tracer.startScopedSpan(anyString())).thenReturn(scopedSpan);
+
         when(joinPoint.getArgs()).thenReturn(new Object[]{});
         RuntimeException expectedEx = new RuntimeException("DB Connection timeout");
         when(joinPoint.proceed()).thenThrow(expectedEx);
@@ -136,6 +139,9 @@ class TracingAspectTest {
     @Test
     @DisplayName("Should tag IDEMPOTENT_IGNORE and close span on IdempotencyException")
     void shouldTagIdempotentAndCloseSpanOnIdempotencyException() throws Throwable {
+        when(traceable.value()).thenReturn("test.span");
+        when(tracer.startScopedSpan(anyString())).thenReturn(scopedSpan);
+
         UUID opId = UUID.randomUUID();
         when(joinPoint.getArgs()).thenReturn(new Object[]{opId});
         when(tracer.createBaggageInScope(TracingAspect.OPERATION_ID, opId.toString())).thenReturn(baggageInScope);
@@ -154,6 +160,9 @@ class TracingAspectTest {
     @Test
     @DisplayName("Should create both operation.id and user.id baggage when present in TraceContext")
     void shouldCreateBothOperationAndUserBaggage() throws Throwable {
+        when(traceable.value()).thenReturn("test.span");
+        when(tracer.startScopedSpan(anyString())).thenReturn(scopedSpan);
+
         UUID opId = UUID.randomUUID();
         UUID userId = UUID.randomUUID();
         BaggageInScope userBaggage = mock(BaggageInScope.class);
@@ -191,5 +200,16 @@ class TracingAspectTest {
         verify(baggageInScope).close();
         verify(userBaggage).close();
         verify(scopedSpan).end();
+    }
+
+    @Test
+    @DisplayName("Should proceed without tracing when tracer is absent (null)")
+    void shouldProceedWithoutTracingWhenTracerIsNull() throws Throwable {
+        TracingAspect noOpAspect = new TracingAspect((Tracer) null);
+        when(joinPoint.proceed()).thenReturn("fallback-ok");
+
+        Object result = noOpAspect.trace(joinPoint, traceable);
+
+        assertThat(result).isEqualTo("fallback-ok");
     }
 }

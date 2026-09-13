@@ -1,8 +1,9 @@
-package br.com.wallet.infrastructure.messaging.publisher;
+package br.com.wallet.edge.internal.publisher;
 
 import br.com.wallet.edge.api.CommandEnvelope;
 import br.com.wallet.edge.api.CommandType;
 import br.com.wallet.edge.api.EdgeCommandPublisher;
+import br.com.wallet.edge.internal.ingress.ConditionalOnEdgeIngress;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.PublishOptions;
@@ -10,6 +11,7 @@ import io.nats.client.impl.Headers;
 import io.nats.client.impl.NatsMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.JsonNode;
@@ -20,11 +22,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CompletableFuture;
 
 /**
- * Production implementation of EdgeCommandPublisher dispatching commands to NATS JetStream (REQ-EDG-021).
+ * Production implementation of EdgeCommandPublisher dispatching commands to NATS JetStream (REQ-EDG-021, REQ-PRC-006).
  * Injects Nats-Msg-Id for broker-side deduplication (I-DEDUP-001) and completes only upon PublishAck (I-EDGE-001).
  */
 @Component
 @Primary
+@ConditionalOnEdgeIngress
+@ConditionalOnBean(Connection.class)
 public class NatsEdgeCommandPublisher implements EdgeCommandPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(NatsEdgeCommandPublisher.class);

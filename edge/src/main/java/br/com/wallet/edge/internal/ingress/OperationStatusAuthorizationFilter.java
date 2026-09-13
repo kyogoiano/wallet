@@ -8,7 +8,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -21,7 +20,6 @@ import java.util.regex.Pattern;
  * Rejects requests with HTTP 401 Unauthorized if missing tenant credentials,
  * and HTTP 403 Forbidden if the tenant does not own the requested operation.
  */
-@Component
 public class OperationStatusAuthorizationFilter extends OncePerRequestFilter {
 
     private static final Logger log = LoggerFactory.getLogger(OperationStatusAuthorizationFilter.class);

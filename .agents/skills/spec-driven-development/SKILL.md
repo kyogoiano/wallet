@@ -16,21 +16,22 @@ This skill implements the **GitHub Spec Kit** methodology rigorously adapted for
 - Defining a new capability module, domain use case, or API endpoint.
 - Executing an architectural refactoring, migration, or boundary shift.
 - Diagnosing or fixing financial domain bugs with regression prevention.
-- Authoring or auditing `.spec/SPEC-XXX.md`, `.spec/plans/PLAN-XXX.md`, `.spec/tasks/TASKS-XXX.md`, or `.spec/summaries/SUMMARY-XXX.md`.
+- Authoring or auditing `.spec/SPEC-XXX.md`, `.spec/architecture/ARCH-XXX.md`, `.spec/plans/PLAN-XXX.md`, `.spec/tasks/TASKS-XXX.md`, or `.spec/summaries/SUMMARY-XXX.md`.
 
 ---
 
-## 3. The 8-Stage Enhanced SDD Pipeline
+## 3. The 9-Stage Enhanced SDD Pipeline
 
 ```text
-0. PRE-FLIGHT  → Audit .histories/ and prior SUMMARY-*.md for past ADRs and invariants
-1. SPECIFY     → Author .spec/SPEC-XXX.md (Product & Tech Intent, MoSCoW, Impact Matrix)
-2. CLARIFY     → Resolve domain ambiguities, edge cases, and human alignment
-3. PLAN        → Author .spec/plans/PLAN-XXX.md (Architecture, Modulith Boundaries, ADRs)
-4. TASKS       → Author .spec/tasks/TASKS-XXX.md (Atomic TDD task cards, [MUST] prioritized)
-5. ANALYZE     → Pre-implementation consistency gate (Spec ↔ Plan ↔ Tasks traceability)
-6. IMPLEMENT   → Red → Green → Refactor (Zero Vibe Coding, Exact BigDecimal math)
-7. CONVERGE    → Zero Spec-Drift Reconciliation, Modulith verification, Practical Guide
+0. PRE-FLIGHT   → Audit .histories/ and prior SUMMARY-*.md for past ADRs and invariants
+1. SPECIFY      → Author .spec/SPEC-XXX.md (Product & Tech Intent, MoSCoW, Impact Matrix)
+2. CLARIFY      → Resolve domain ambiguities, edge cases, and human alignment
+3. ARCHITECTURE → Author .spec/architecture/ARCH-XXX.md (Macro-Topology, Storage & Failure Models)
+4. PLAN         → Author .spec/plans/PLAN-XXX.md (Modulith Boundaries, ADRs, Concurrency & DDL)
+5. TASKS        → Author .spec/tasks/TASKS-XXX.md (Atomic TDD task cards, [MUST] prioritized)
+6. ANALYZE      → Pre-implementation consistency gate (Spec ↔ Arch ↔ Plan ↔ Tasks traceability)
+7. IMPLEMENT    → Red → Green → Refactor (Zero Vibe Coding, Exact BigDecimal math)
+8. CONVERGE     → Zero Spec-Drift Reconciliation, Modulith verification, Practical Guide
 ```
 
 
@@ -66,7 +67,14 @@ This skill implements the **GitHub Spec Kit** methodology rigorously adapted for
   1. Present open trade-offs and edge cases to the human engineer.
   2. Resolve ambiguous domain policies. Do not proceed until requirements and invariants are ratified.
 
-### Stage 3: Plan
+### Stage 3: Architecture
+- **Goal**: Macro-topology, component interaction models, storage semantics, and failure domains.
+- **Actions**:
+  1. Create `.spec/architecture/ARCH-XXX-<name>.md` using [`templates/architecture-template.md`](templates/architecture-template.md) when introducing subsystems, multi-process runtimes, or cross-cutting platform topologies.
+  2. Formalize physical/logical boundaries, single-writer storage models, IPC scaling fabrics, and platform deployment matrices.
+  3. Define failure modes, split-brain mitigations, and automated disaster recovery workflows.
+
+### Stage 4: Plan
 - **Goal**: Architecture decisions, Modulith module boundaries, data structures, and failure semantics.
 - **Actions**:
   1. Create `.spec/plans/PLAN-XXX-<name>.md` using [`templates/plan-template.md`](templates/plan-template.md).
@@ -74,15 +82,14 @@ This skill implements the **GitHub Spec Kit** methodology rigorously adapted for
   3. Document ADRs, sequence diagrams, and concurrency strategy (`SELECT FOR UPDATE` deterministic ordering).
   4. Specify database DDL migrations, check constraints, indexes, and cache TTLs.
 
-### Stage 4: Tasks (Active Task Cards)
+### Stage 5: Tasks (Active Task Cards)
 - **Goal**: Atomic, sequence-ordered TDD task decomposition mapped 1-to-1 to requirements.
 - **Actions**:
   1. Create `.spec/tasks/TASKS-XXX-<name>.md` using [`templates/tasks-template.md`](templates/tasks-template.md).
   2. Group tasks strictly by MoSCoW tier: **Phase 1 executes `[MUST]` tasks only**.
   3. Ensure every task points to its target requirement ID (`REQ-XXX`) or invariant (`I-XXX`).
 
-
-### Stage 5: Analyze (Pre-Implementation Gate)
+### Stage 6: Analyze (Pre-Implementation Gate)
 - **Goal**: Automated consistency verification before a single line of production code is written.
 - **Actions**:
   1. Verify: Every `REQ-XXX [MUST]` has corresponding test tasks in `TASKS-XXX.md`.
@@ -90,7 +97,7 @@ This skill implements the **GitHub Spec Kit** methodology rigorously adapted for
   3. Verify: Zero orphan tasks exist without specification backing.
   4. Verify: Concurrency, error paths, and seed data prerequisites are fully specified.
 
-### Stage 6: Implement (Zero Vibe Coding — `I-TDD-002`)
+### Stage 7: Implement (Zero Vibe Coding — `I-TDD-002`)
 - **Goal**: Deterministic Red $\to$ Green $\to$ Refactor execution.
 - **Actions**:
   1. **Red**: Write a failing unit/integration test. Verify that it fails for the expected domain reason.
@@ -99,7 +106,7 @@ This skill implements the **GitHub Spec Kit** methodology rigorously adapted for
   4. **Green**: Write the minimal production code necessary to pass.
   5. **Refactor**: Clean up and optimize while all tests remain green.
 
-### Stage 7: Converge (`I-SDD-002`, `I-SDD-003`)
+### Stage 8: Converge (`I-SDD-002`, `I-SDD-003`)
 - **Goal**: Bi-directional equivalence certification, zero-drift verification, and operational documentation.
 - **Actions**:
   1. **Build & Test**: Run `./gradlew test jacocoTestReport`.

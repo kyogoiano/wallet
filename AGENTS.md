@@ -13,7 +13,7 @@ To maximize reasoning efficiency and prevent context window degradation ("lost i
 | **L0: Constitution** | Immutable Constraints | [`.agents/rules/constitution.md`](file:///.agents/rules/constitution.md) | Absolute financial & architectural invariants (never violate). |
 | **L1: Rules** | Persistent Context | [`.agents/rules/`](file:///.agents/rules/) | Architectural standards, coding conventions, testing guidelines. |
 | **L2: Skills** | On-Demand Knowledge | [`.agents/skills/`](file:///.agents/skills/) | Procedural domain workflows (loaded progressively when needed). |
-| **L3: Specifications**| Working Set | [`.spec/`](file:///.spec/) | Feature requirements, invariant definitions, tasks & plans. |
+| **L3: Specifications**| Working Set | [`.spec/`](file:///.spec/) | Feature requirements, architecture specifications, tasks & plans. |
 | **L4: Source Code** | Implementation Evidence | [`src/`](file:///src/), [`core/`](file:///core/), [`fraud/`](file:///fraud/) | Targeted files modified strictly within specification bounds. |
 
 > **Context Hygiene Rule**: Never load entire classes or massive command outputs into memory. When executing a task, isolate focus using the **Active Task Card Protocol**.
@@ -22,22 +22,22 @@ To maximize reasoning efficiency and prevent context window degradation ("lost i
 
 ## 🔄 Spec-Driven Development (SDD) Pipeline — V2 Deterministic Edition
 
-Every significant feature, refactor, or architectural change follows the **8-Stage Spec Kit Pipeline**:
+Every significant feature, refactor, or architectural change follows the **9-Stage Spec Kit Pipeline**:
 
 ```mermaid
 flowchart LR
-    PreFlight[0. Pre-Flight] --> Specify[1. Specify] --> Clarify[2. Clarify] --> Plan[3. Plan] --> Tasks[4. Tasks] --> Analyze[5. Analyze] --> Implement[6. Implement] --> Converge[7. Converge]
+    PreFlight[0. Pre-Flight] --> Specify[1. Specify] --> Clarify[2. Clarify] --> Arch[3. Architecture] --> Plan[4. Plan] --> Tasks[5. Tasks] --> Analyze[6. Analyze] --> Implement[7. Implement] --> Converge[8. Converge]
 ```
 
 1. **Pre-Flight**: Audit `.histories/` and preceding `SUMMARY-*.md` for past ADRs and established invariants.
 2. **Specify** (`.spec/SPEC-XXX.md`): Define user intent, atomic slice ($\le 250$ lines), **MoSCoW requirements** (`[MUST]`, `[SHOULD]`, `[COULD]`, `[WON'T]`), **Cross-Feature Impact Matrix**, and **mathematical invariants**.
 3. **Clarify**: Resolve ambiguities, trade-offs, and edge cases with the human engineer.
-4. **Plan** (`.spec/plans/PLAN-XXX.md`): Modulith boundaries, interface contracts, ADRs, and concurrency strategy.
-5. **Tasks** (`.spec/tasks/TASKS-XXX.md`): Prioritized atomic TDD task breakdown with Active Task Cards (`[MUST]` tasks executed first).
-
-6. **Analyze**: Pre-implementation consistency gate verifying 100% traceability between Spec, Plan, and Tasks.
-7. **Implement**: TDD execution (Red $\rightarrow$ Green $\rightarrow$ Refactor) with Zero Vibe Coding (exact `BigDecimal` scale 2 arithmetic, mandatory test triads).
-8. **Converge**: Bi-directional equivalence verification (zero spec-code drift), architecture test pass, coverage verification, and Practical Verification Guide with seed data (`I-SDD-002`, `I-SDD-003`).
+4. **Architecture** (`.spec/architecture/ARCH-XXX.md`): Macro-topology, storage models, failure domains, and cross-cutting platform topologies.
+5. **Plan** (`.spec/plans/PLAN-XXX.md`): Modulith boundaries, interface contracts, ADRs, and concurrency strategy.
+6. **Tasks** (`.spec/tasks/TASKS-XXX.md`): Prioritized atomic TDD task breakdown with Active Task Cards (`[MUST]` tasks executed first).
+7. **Analyze**: Pre-implementation consistency gate verifying 100% traceability between Spec, Arch, Plan, and Tasks.
+8. **Implement**: TDD execution (Red $\rightarrow$ Green $\rightarrow$ Refactor) with Zero Vibe Coding (exact `BigDecimal` scale 2 arithmetic, mandatory test triads).
+9. **Converge**: Bi-directional equivalence verification (zero spec-code drift), architecture test pass, coverage verification, and Practical Verification Guide with seed data (`I-SDD-002`, `I-SDD-003`).
 
 ---
 

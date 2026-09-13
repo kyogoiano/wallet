@@ -2,9 +2,11 @@ package br.com.wallet.infrastructure.messaging.status;
 
 import br.com.wallet.edge.api.LocalOperationStatusBroadcaster;
 import br.com.wallet.edge.api.OperationStatusBroadcaster;
+import br.com.wallet.edge.api.StatusEventMessage;
 import io.nats.client.Connection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Primary;
@@ -24,7 +26,7 @@ import java.util.UUID;
 @ConditionalOnBean(Connection.class)
 public class NatsOperationStatusBroadcaster implements OperationStatusBroadcaster {
 
-    public static final String STATUS_SUBJECT = "events.operations.status";
+    public static final String STATUS_TOPIC_PREFIX = "operations.status.";
     private static final Logger log = LoggerFactory.getLogger(NatsOperationStatusBroadcaster.class);
 
     private final Connection connection;
@@ -34,7 +36,7 @@ public class NatsOperationStatusBroadcaster implements OperationStatusBroadcaste
 
     public NatsOperationStatusBroadcaster(
             Connection connection,
-            LocalOperationStatusBroadcaster localHub,
+            @Autowired(required = false) LocalOperationStatusBroadcaster localHub,
             ObjectMapper objectMapper,
             @Value("${edge.instance-id:#{T(java.util.UUID).randomUUID().toString()}}") String instanceId
     ) {
@@ -51,7 +53,7 @@ public class NatsOperationStatusBroadcaster implements OperationStatusBroadcaste
             localHub.publishStatus(operationId, status, message);
         }
 
-        // 2. Publish to NATS for cluster-wide peer fan-out
+        // 2. Publish to NATS for cluster-wide peer fan-out on canonical operation status subject (REQ-PRC-007)
         if (connection != null && connection.getStatus() == Connection.Status.CONNECTED) {
             try {
                 StatusEventMessage event = new StatusEventMessage(
@@ -62,7 +64,7 @@ public class NatsOperationStatusBroadcaster implements OperationStatusBroadcaste
                         instanceId
                 );
                 byte[] data = objectMapper.writeValueAsBytes(event);
-                connection.publish(STATUS_SUBJECT, data);
+                connection.publish(STATUS_TOPIC_PREFIX + operationId, data);
             } catch (Exception e) {
                 log.error("Failed to publish status event to NATS for opId {}: {}", operationId, e.getMessage(), e);
             }

@@ -8,6 +8,8 @@ import br.com.wallet.edge.internal.journal.spi.DurableSpilloverJournal;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.channels.FileLock;
+import java.nio.channels.OverlappingFileLockException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -50,11 +52,9 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
     private FileChannel activeChannel;
     private Path activeSegmentPath;
     private long currentSegmentOffset;
+    private FileChannel lockChannel;
+    private FileLock lockFile;
     private volatile boolean closed = false;
-
-    public SegmentedFileJournal(Path spoolDirectory) throws IOException {
-        this(spoolDirectory, DEFAULT_SEGMENT_SIZE_BYTES, DEFAULT_MAX_SPOOL_BYTES, DEFAULT_MAX_BATCH_SIZE, DEFAULT_BATCH_WAIT_MS);
-    }
 
     public SegmentedFileJournal(
             Path spoolDirectory,
@@ -77,10 +77,32 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
     public void start() throws IOException {
         writeLock.lock();
         try {
+            acquireSpoolLock();
             recoverOrInitActiveSegment();
             groupCommitEngine.start();
         } finally {
             writeLock.unlock();
+        }
+    }
+
+    private void acquireSpoolLock() throws IOException {
+        Path lockFilePath = spoolDirectory.resolve(".spool.lock");
+        this.lockChannel = FileChannel.open(
+                lockFilePath,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.READ,
+                StandardOpenOption.WRITE
+        );
+        try {
+            this.lockFile = this.lockChannel.tryLock();
+        } catch (OverlappingFileLockException e) {
+            this.lockChannel.close();
+            throw new IllegalStateException("Spool directory already locked by active Edge instance: " + spoolDirectory, e);
+        }
+
+        if (this.lockFile == null) {
+            this.lockChannel.close();
+            throw new IllegalStateException("Spool directory already locked by active Edge instance: " + spoolDirectory);
         }
     }
 
@@ -229,7 +251,7 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
 
     @Override
     public long currentSpoolUsageBytes() {
-        try (Stream<Path> stream = Files.list(spoolDirectory)) {
+        try (final Stream<Path> stream = Files.list(spoolDirectory)) {
             return stream.filter(p -> p.toString().endsWith(".wal"))
                     .mapToLong(p -> {
                         try {
@@ -250,7 +272,7 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
 
     @Override
     public List<Path> listSegmentFiles() {
-        try (Stream<Path> stream = Files.list(spoolDirectory)) {
+        try (final Stream<Path> stream = Files.list(spoolDirectory)) {
             return stream.filter(p -> p.toString().endsWith(".wal"))
                     .sorted(Comparator.comparing(Path::getFileName))
                     .toList();
@@ -262,7 +284,7 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
     @Override
     public List<JournalRecord> readSegmentRecords(Path segmentFile) {
         List<JournalRecord> records = new ArrayList<>();
-        try (FileChannel ch = FileChannel.open(segmentFile, StandardOpenOption.READ)) {
+        try (final FileChannel ch = FileChannel.open(segmentFile, StandardOpenOption.READ)) {
             // Verify segment header
             ByteBuffer headerBuf = ByteBuffer.allocate(SegmentHeader.HEADER_SIZE);
             int bytesRead = ch.read(headerBuf, 0);
@@ -353,6 +375,18 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
             if (activeChannel != null && activeChannel.isOpen()) {
                 activeChannel.force(true);
                 activeChannel.close();
+            }
+            if (lockFile != null && lockFile.isValid()) {
+                try {
+                    lockFile.release();
+                } catch (IOException ignored) {
+                }
+            }
+            if (lockChannel != null && lockChannel.isOpen()) {
+                try {
+                    lockChannel.close();
+                } catch (IOException ignored) {
+                }
             }
         } finally {
             writeLock.unlock();

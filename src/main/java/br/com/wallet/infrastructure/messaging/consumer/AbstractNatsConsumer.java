@@ -39,52 +39,83 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
 
     protected void setupGeneralSubscription(@NonNull final String streamName,
                                             @NonNull final String consumerName) throws IOException, JetStreamApiException {
-        final var jetStream = natsConnection.jetStream();
-        final var jsm = natsConnection.jetStreamManagement();
+        IOException lastIoException = null;
+        JetStreamApiException lastJsException = null;
 
-        // Configure consumer for at-least-once delivery, backoff follows current retry strategy
-        final var consumerConfig = ConsumerConfiguration.builder()
-                .durable(consumerName)
-                .filterSubject(subject)
-                .ackPolicy(AckPolicy.Explicit)
-                .maxDeliver(maxDeliver)
-                .backoff(backoffSequence)
-                .deliverPolicy(DeliverPolicy.All) // ensure un-acked messages in stream are processed
-                .build();
+        for (int attempt = 1; attempt <= 3; attempt++) {
+            try {
+                final var jetStream = natsConnection.jetStream();
+                final var jsm = natsConnection.jetStreamManagement();
 
-        try {
-            final var existing = jsm.getConsumerInfo(streamName, consumerName);
-            if (existing != null) {
-                final String existingFilter = existing.getConsumerConfiguration().getFilterSubject();
-                if (existingFilter != null && !existingFilter.equals(subject)) {
-                    log.info("Consumer '{}' filter subject changed from '{}' to '{}'. Recreating consumer...",
-                            consumerName, existingFilter, subject);
-                    jsm.deleteConsumer(streamName, consumerName);
-                }
-            }
-            jsm.addOrUpdateConsumer(streamName, consumerConfig);
-        } catch (JetStreamApiException e) {
-            if (e.getApiErrorCode() == 10014 || e.getApiErrorCode() == 404) {
-                jsm.addOrUpdateConsumer(streamName, consumerConfig);
-            } else {
+                // Configure consumer for at-least-once delivery, backoff follows current retry strategy
+                final var consumerConfig = ConsumerConfiguration.builder()
+                        .durable(consumerName)
+                        .filterSubject(subject)
+                        .ackPolicy(AckPolicy.Explicit)
+                        .maxDeliver(maxDeliver)
+                        .backoff(backoffSequence)
+                        .deliverPolicy(DeliverPolicy.All) // ensure un-acked messages in stream are processed
+                        .build();
+
                 try {
-                    jsm.deleteConsumer(streamName, consumerName);
+                    final var existing = jsm.getConsumerInfo(streamName, consumerName);
+                    if (existing != null) {
+                        final String existingFilter = existing.getConsumerConfiguration().getFilterSubject();
+                        if (existingFilter != null && !existingFilter.equals(subject)) {
+                            log.info("Consumer '{}' filter subject changed from '{}' to '{}'. Recreating consumer...",
+                                    consumerName, existingFilter, subject);
+                            jsm.deleteConsumer(streamName, consumerName);
+                        }
+                    }
                     jsm.addOrUpdateConsumer(streamName, consumerConfig);
-                } catch (Exception ex) {
-                    log.warn("Could not auto-recreate consumer '{}' via management API: {}", consumerName, ex.getMessage());
+                } catch (JetStreamApiException e) {
+                    if (e.getApiErrorCode() == 10014 || e.getApiErrorCode() == 404) {
+                        jsm.addOrUpdateConsumer(streamName, consumerConfig);
+                    } else {
+                        try {
+                            jsm.deleteConsumer(streamName, consumerName);
+                            jsm.addOrUpdateConsumer(streamName, consumerConfig);
+                        } catch (Exception ex) {
+                            log.warn("Could not auto-recreate consumer '{}' via management API: {}", consumerName, ex.getMessage());
+                        }
+                    }
+                }
+
+                final var pullSubscribeOptions = PullSubscribeOptions.builder()
+                        .stream(streamName)
+                        .durable(consumerName)
+                        .bind(true)
+                        .build();
+
+                // Subscribe by binding directly to the durable consumer on the stream
+                subscription = jetStream.subscribe(null, pullSubscribeOptions);
+                log.info("Subscribed to NATS JetStream subject '{}' with durable consumer '{}'.", subject, consumerName);
+                return;
+            } catch (IOException e) {
+                lastIoException = e;
+                log.warn("Attempt {}/3 to setup subscription for '{}' on stream '{}' encountered IO issue: {}",
+                        attempt, consumerName, streamName, e.getMessage());
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            } catch (JetStreamApiException e) {
+                lastJsException = e;
+                log.warn("Attempt {}/3 to setup subscription for '{}' on stream '{}' encountered JetStream API issue: {}",
+                        attempt, consumerName, streamName, e.getMessage());
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    break;
                 }
             }
         }
 
-        final var pullSubscribeOptions = PullSubscribeOptions.builder()
-                .stream(streamName)
-                .durable(consumerName)
-                .bind(true)
-                .build();
-
-        // Subscribe by binding directly to the durable consumer on the stream
-        subscription = jetStream.subscribe(null, pullSubscribeOptions);
-        log.info("Subscribed to NATS JetStream subject '{}' with durable consumer '{}'.", subject, consumerName);
+        if (lastIoException != null) throw lastIoException;
+        throw lastJsException;
     }
 
     private void pollForMessages() {

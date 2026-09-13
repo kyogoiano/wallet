@@ -9,6 +9,8 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -26,8 +28,17 @@ public class TracingAspect {
         this.tracer = tracer;
     }
 
+    @Autowired
+    public TracingAspect(final ObjectProvider<Tracer> tracerProvider) {
+        this.tracer = tracerProvider.getIfAvailable();
+    }
+
     @Around("@annotation(traceable)")
     public Object trace(final ProceedingJoinPoint pjp, final Traceable traceable) throws Throwable {
+        if (tracer == null) {
+            return pjp.proceed();
+        }
+
         log.debug("Aspect triggered for: {}", traceable.value());
 
         final ScopedSpan span = tracer.startScopedSpan(traceable.value());

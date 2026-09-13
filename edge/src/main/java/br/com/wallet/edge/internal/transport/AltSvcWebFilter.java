@@ -5,7 +5,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.jspecify.annotations.NonNull;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -15,7 +14,6 @@ import java.io.IOException;
  * Injects the standard Alt-Svc response header:
  * Alt-Svc: h3=":8443"; ma=86400; persist=1
  */
-@Component
 public class AltSvcWebFilter extends OncePerRequestFilter {
 
     public static final String ALT_SVC_HEADER = "Alt-Svc";

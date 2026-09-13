@@ -1,7 +1,8 @@
 package br.com.wallet.edge.internal;
 
-import br.com.wallet.edge.internal.journal.segmented.SegmentedFileJournal;
+import br.com.wallet.edge.internal.journal.spi.DurableSpilloverJournal;
 import br.com.wallet.edge.internal.resilience.IngressBulkhead;
+import br.com.wallet.edge.internal.ingress.ConditionalOnEdgeIngress;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -14,6 +15,7 @@ import java.util.concurrent.atomic.AtomicLong;
  * 14 Micrometer SLO and operational metrics for Reactive Edge Gateway (PLAN-000.9 Section 6).
  */
 @Configuration
+@ConditionalOnEdgeIngress
 public class EdgeObservabilityConfig {
 
     private final Counter ingressRequestsTotal;
@@ -31,7 +33,7 @@ public class EdgeObservabilityConfig {
     public EdgeObservabilityConfig(
             MeterRegistry registry,
             IngressBulkhead bulkhead,
-            SegmentedFileJournal journal
+            DurableSpilloverJournal journal
     ) {
         // Counters
         this.ingressRequestsTotal = Counter.builder("edge_ingress_requests_total")
@@ -72,11 +74,11 @@ public class EdgeObservabilityConfig {
                 .description("Current number of active inflight requests inside the edge bulkhead")
                 .register(registry);
 
-        Gauge.builder("edge_journal_usage_bytes", journal, SegmentedFileJournal::currentSpoolUsageBytes)
+        Gauge.builder("edge_journal_usage_bytes", journal, DurableSpilloverJournal::currentSpoolUsageBytes)
                 .description("Total disk storage utilized by spool journal files in bytes")
                 .register(registry);
 
-        Gauge.builder("edge_journal_usage_percent", journal, SegmentedFileJournal::spoolUsagePercent)
+        Gauge.builder("edge_journal_usage_percent", journal, DurableSpilloverJournal::spoolUsagePercent)
                 .description("Spool journal capacity utilization percentage")
                 .register(registry);
 

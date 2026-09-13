@@ -1,4 +1,16 @@
+server:
+  port: ${SERVER_PORT:8081}
+  shutdown: graceful
+
+wallet:
+  runtime:
+    mode: ${WALLET_RUNTIME_MODE:multi-process}
+  edge:
+    enabled: false
+
 spring:
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
   datasource:
     url: jdbc:postgresql://localhost:5432/wallet
     username: wallet
@@ -14,7 +26,7 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
   application:
-    name: wallet
+    name: wallet-core
   threads:
     virtual:
       enabled: true
@@ -75,8 +87,8 @@ logging:
     level: "%5p [traceId=%X{traceId} spanId=%X{spanId} operationId=%X{operationId}]"
 
 nats:
-  url: nats://nats:4222
-  token: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+  url: ${NATS_URL:nats://nats:4222}
+  token: ${NATS_TOKEN:dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n}
 
 redis:
   socket:

@@ -51,7 +51,8 @@ public class WalletOperationsDao {
             SET status = 'FAILED',
                 error_message = EXCLUDED.error_message,
                 failure_type = EXCLUDED.failure_type,
-                updated_at = NOW();
+                updated_at = NOW()
+            WHERE wallet_operations.status != 'COMPLETED';
         """, operationId, errorMessage, failureType);
     }
 

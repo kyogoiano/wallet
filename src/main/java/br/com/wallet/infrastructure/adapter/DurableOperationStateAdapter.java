@@ -3,6 +3,7 @@ package br.com.wallet.infrastructure.adapter;
 import br.com.wallet.edge.api.DurableOperationStateProvider;
 import br.com.wallet.edge.api.DurableOperationStatus;
 import br.com.wallet.ledger.api.OperationQueryUseCase;
+import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
 import java.util.Optional;
@@ -12,6 +13,7 @@ import java.util.UUID;
  * Adapter bridging core ledger OperationQueryUseCase to the Edge's DurableOperationStateProvider SPI (I-EDGE-007).
  */
 @Component
+@Primary
 public class DurableOperationStateAdapter implements DurableOperationStateProvider {
 
     private final OperationQueryUseCase operationQueryUseCase;

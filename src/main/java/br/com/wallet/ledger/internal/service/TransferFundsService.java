@@ -22,7 +22,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.util.stream.Stream;
 
-@Service
+@Service("transferFundsUseCase")
 public class TransferFundsService implements TransferFundsUseCase {
 
     private static final Logger log = LoggerFactory.getLogger(TransferFundsService.class);

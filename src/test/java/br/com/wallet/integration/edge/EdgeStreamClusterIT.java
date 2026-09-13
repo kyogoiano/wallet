@@ -2,7 +2,7 @@ package br.com.wallet.integration.edge;
 
 import br.com.wallet.edge.internal.ingress.OperationStatusHub;
 import br.com.wallet.infrastructure.messaging.status.NatsOperationStatusBroadcaster;
-import br.com.wallet.infrastructure.messaging.status.NatsOperationStatusListener;
+import br.com.wallet.edge.internal.status.NatsOperationStatusListener;
 import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.IntegrationTestBase;
 import io.nats.client.Connection;

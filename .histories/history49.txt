@@ -1,0 +1,278 @@
+Yes. This task revision is **much stronger**. The important architectural gaps from the previous review have been converted into concrete TDD tasks and convergence gates.
+
+I would now rate it **~9.7/10** and consider it essentially ready for implementation/convergence. I would make only a few final adjustments.
+
+### What is now correctly closed
+
+* **Contract direction** is explicit: `Edge → Contracts ← Core`, with a dedicated `TASK-PRC-2.2`. This closes the biggest boundary-verification gap.
+* **Spool ownership** is now tested in both directions: same directory must reject concurrent writers, different directories must coexist. `TASK-PRC-3.3b` is exactly the test we wanted.
+* **Durable status recovery** is now an actual implementation, not merely a requirement: `DurableOperationStateProvider` + NATS Request/Reply + PostgreSQL authoritative resolution. This is the biggest improvement.
+* **Timeout behavior** is no longer silently treated as "just listen for future events"; you explicitly model `DEGRADED_UNAVAILABLE`.
+* **Terminal monotonicity** is implemented at the DAO level rather than merely being an application convention.
+* **Graceful ACK semantics** now have a dedicated test.
+* The final E2E test includes **idempotency + financial commitment + status recovery**, which makes it a meaningful architectural test rather than a connectivity test.
+
+The traceability matrix now maps those additions cleanly into implementation and verification.
+
+---
+
+## One change I would still make: `REQ-PRC-020` wording
+
+Your task says:
+
+> `NOT_FOUND` maps to in-flight processing
+
+That's reasonable, but there's an important semantic distinction.
+
+`NOT_FOUND` can mean:
+
+1. the operation hasn't reached Core yet;
+2. the operation is currently being processed but state hasn't been persisted;
+3. the operation ID is genuinely unknown/invalid.
+
+Those aren't necessarily equivalent.
+
+So I would avoid making:
+
+```text
+NOT_FOUND → IN_FLIGHT
+```
+
+an unconditional semantic rule.
+
+I'd instead define:
+
+```text
+QUERY_NOT_FOUND
+    ↓
+operation state unavailable
+    ↓
+SSE may represent "PROCESSING / UNKNOWN"
+```
+
+unless Core has a stronger invariant proving that every accepted operation must eventually have a durable operation record.
+
+If `WalletOperationsDao` already guarantees that operation state is created atomically with command acceptance, then your current behavior is fine. **The task document itself doesn't establish that guarantee**, so I'd leave the distinction explicit.
+
+---
+
+# The other important thing: test `DEGRADED_UNAVAILABLE` as a client-visible state
+
+You have:
+
+```text
+timeout → DEGRADED_UNAVAILABLE
+```
+
+and the convergence gate says:
+
+> query timeout emits degraded response without hanging
+
+Good.
+
+But I'd make sure the test verifies **both sides**:
+
+```text
+NATS Request/Reply timeout
+        ↓
+NatsDurableOperationStateProvider
+        ↓
+DEGRADED_UNAVAILABLE
+        ↓
+SSE/API
+        ↓
+client gets explicit degraded state
+```
+
+rather than simply asserting that an exception doesn't occur.
+
+The architectural principle should be:
+
+> **Never fabricate current operation state when the authoritative state cannot be reached.**
+
+That's especially important for a financial system.
+
+---
+
+# One potential naming inconsistency
+
+Your matrix says:
+
+```text
+REQ-PRC-014 → I-GRACEFUL-001
+```
+
+while:
+
+```text
+REQ-PRC-022 → I-GRACEFUL-001
+```
+
+also exists.
+
+That's not wrong, but I'd make the distinction clearer:
+
+```text
+I-GRACEFUL-001
+  ├── shutdown lifecycle
+  └── ACK safety
+```
+
+or introduce something like:
+
+```text
+I-ACK-001
+```
+
+for:
+
+> Never ACK a command before the financial effect is durable.
+
+I actually prefer the latter because ACK safety is broader than SIGTERM. It applies to:
+
+* normal processing
+* crashes
+* exceptions
+* shutdown
+* consumer rebalance
+* process termination
+
+So:
+
+```text
+I-GRACEFUL-001
+    graceful lifecycle
+
+I-ACK-001
+    ACK only after durable financial effect
+```
+
+would be architecturally cleaner.
+
+This isn't necessary if you want to minimize scope, though.
+
+---
+
+# I would also slightly improve TASK-PRC-7.3
+
+It currently says:
+
+> executing end-to-end command dispatch ... with idempotent delivery, financial ledger commitment, and durable status recovery.
+
+Excellent.
+
+I'd make the actual scenario explicit:
+
+```text
+POST(operationId=A)
+        ↓
+202
+        ↓
+Core processes A
+        ↓
+Ledger effect = 1
+        ↓
+COMPLETED persisted
+        ↓
+status event intentionally dropped
+        ↓
+SSE reconnect
+        ↓
+operations.query(A)
+        ↓
+COMPLETED
+```
+
+And then:
+
+```text
+POST(operationId=A) again
+        ↓
+financial effects remain = 1
+```
+
+That one test would exercise almost the entire reason for 000.9.1.
+
+---
+
+# One thing I would NOT change
+
+I would **not add deployment-specific tasks** here.
+
+Your current tasks correctly stop at:
+
+```text
+Edge runtime
+Core runtime
+NATS boundary
+local spool
+resource isolation
+lifecycle
+container portability
+```
+
+while the deployment topology remains outside this task set.
+
+That's consistent with the SPEC's decision to defer platform orchestration to 000.9.2. Good separation of concerns.
+
+---
+
+# Final task structure
+
+At this point the architecture is essentially:
+
+```text
+                ┌─────────────────────┐
+                │       EDGE          │
+                │                     │
+HTTP/QUIC ─────►│ EdgeApplication      │
+                │     │               │
+                │     ├── Journal      │
+                │     ├── SSE Hub      │
+                │     └── NATS         │
+                └─────┼───────────────┘
+                      │
+                JetStream IPC
+                      │
+                ┌─────▼───────────────┐
+                │       CORE          │
+                │                     │
+                │ CoreApplication      │
+                │     │               │
+                │     ├── Consumer     │
+                │     ├── Ledger       │
+                │     ├── Operation DB │
+                │     └── Status       │
+                └─────────────────────┘
+```
+
+And status recovery:
+
+```text
+Core
+ │
+ ├── durable operation state ── PostgreSQL
+ │
+ └── live status ── NATS ──► Edge SSE
+                         ▲
+                         │
+                 dropped event?
+                         │
+Edge ── Request/Reply ───┘
+          operations.query.<id>
+```
+
+That is a **very solid separation**.
+
+### My recommendation
+
+I would make only these final edits:
+
+1. Clarify `NOT_FOUND` semantics.
+2. Ensure `DEGRADED_UNAVAILABLE` is explicitly client-visible.
+3. Optionally split `I-GRACEFUL-001` from a general `I-ACK-001`.
+4. Make the exact duplicate-operation/dropped-status scenario explicit in `TASK-PRC-7.3`.
+
+Then **freeze SPEC/TASKS-000.9.1** and move to the implementation/convergence phase rather than continuing to architecturally expand it.
+
+At that point, the next artifact I would review is **PLAN-000.9.1**, because the task set is now sufficiently stable that the plan should be checked for any ordering/dependency mismatch before you spend more implementation effort.

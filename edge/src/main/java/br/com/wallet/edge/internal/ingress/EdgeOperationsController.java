@@ -22,6 +22,7 @@ import java.util.concurrent.CompletableFuture;
  */
 @RestController
 @RequestMapping("/operations")
+@ConditionalOnEdgeIngress
 public class EdgeOperationsController {
 
     private final EdgeCommandIngress ingress;
@@ -31,8 +32,7 @@ public class EdgeOperationsController {
     }
 
     @PostMapping("/transfers")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    public CompletableFuture<ResponseEntity<?>> acceptTransfer(
+    public ResponseEntity<?> acceptTransfer(
             @RequestHeader(value = "Idempotency-Key", required = false) UUID idempotencyKey,
             @RequestBody String requestJson,
             HttpServletRequest request
@@ -41,8 +41,7 @@ public class EdgeOperationsController {
     }
 
     @PostMapping("/deposits")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    public CompletableFuture<ResponseEntity<?>> acceptDeposit(
+    public ResponseEntity<?> acceptDeposit(
             @RequestHeader(value = "Idempotency-Key", required = false) UUID idempotencyKey,
             @RequestBody String requestJson,
             HttpServletRequest request
@@ -51,8 +50,7 @@ public class EdgeOperationsController {
     }
 
     @PostMapping("/withdrawals")
-    @ResponseStatus(HttpStatus.ACCEPTED)
-    public CompletableFuture<ResponseEntity<?>> acceptWithdrawal(
+    public ResponseEntity<?> acceptWithdrawal(
             @RequestHeader(value = "Idempotency-Key", required = false) UUID idempotencyKey,
             @RequestBody String requestJson,
             HttpServletRequest request
@@ -60,7 +58,7 @@ public class EdgeOperationsController {
         return handleCommand(CommandType.WITHDRAW, idempotencyKey, requestJson, request);
     }
 
-    private CompletableFuture<ResponseEntity<?>> handleCommand(
+    private ResponseEntity<?> handleCommand(
             CommandType type,
             UUID idempotencyKey,
             String requestJson,
@@ -71,7 +69,8 @@ public class EdgeOperationsController {
 
         CommandEnvelope envelope = CommandEnvelope.create(opId, type, requestJson, clientIp);
 
-        return ingress.acceptCommand(envelope).thenApply(result -> mapResultToResponse(result, opId));
+        EdgeCommandResult result = ingress.acceptCommand(envelope).join();
+        return mapResultToResponse(result, opId);
     }
 
     private ResponseEntity<?> mapResultToResponse(EdgeCommandResult result, UUID opId) {

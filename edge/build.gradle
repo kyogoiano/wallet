@@ -1,19 +1,42 @@
+plugins {
+    id 'org.springframework.boot'
+}
+
 group = 'br.com.wallet.edge'
+
+bootJar {
+    enabled = true
+    archiveFileName = 'wallet-edge.jar'
+    mainClass = 'br.com.wallet.edge.EdgeApplication'
+}
+
+jar {
+    enabled = true
+    archiveClassifier = 'plain'
+}
 
 dependencies {
     implementation project(":core")
     implementation 'org.springframework.boot:spring-boot-starter-web'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
+    implementation "io.nats:jnats:${rootProject.ext.jnatsVersion}"
+    implementation 'tools.jackson.core:jackson-databind'
     implementation 'io.projectreactor:reactor-core'
     implementation 'io.micrometer:micrometer-core'
     implementation 'org.slf4j:slf4j-api'
     implementation 'jakarta.servlet:jakarta.servlet-api'
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+    testImplementation 'org.springframework.boot:spring-boot-webtestclient'
     testImplementation 'io.projectreactor:reactor-test'
+    testImplementation "com.tngtech.archunit:archunit:${rootProject.ext.archunitVersion}"
+    testImplementation "com.tngtech.archunit:archunit-junit5:${rootProject.ext.archunitVersion}"
+    testImplementation "org.ow2.asm:asm:${rootProject.ext.asmVersion}"
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }
 
 test {
     useJUnitPlatform()
 }
+

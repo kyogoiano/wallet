@@ -1,0 +1,803 @@
+Yes. Now that we have the **actual TASKS-000.9.1 breakdown**, I would review it somewhat differently from the SPEC itself.
+
+The task breakdown is **quite good and, importantly, it reflects that the implementation has already moved beyond the first draft of the specification**. I would not redesign it. I would make a few corrections before calling it fully converged.
+
+## Overall assessment
+
+**Architecture/task quality: ~9/10.**
+
+The execution order is coherent:
+
+```text
+Build/package
+   ↓
+Architecture boundary
+   ↓
+Edge standalone
+   ↓
+Core standalone
+   ↓
+NATS IPC
+   ↓
+SSE fanout
+   ↓
+Runtime profiles
+   ↓
+E2E verification
+```
+
+That is exactly the right progression for this change.
+
+The biggest issue is not the implementation task ordering. It's **traceability and a few semantics that the tasks currently imply but don't explicitly verify**.
+
+---
+
+# 1. The first thing I'd fix: traceability drift
+
+There is already evidence that the task document has evolved beyond the original SPEC-000.9.1.
+
+For example, your task matrix contains:
+
+```text
+REQ-PRC-014 I-GRACEFUL-001
+REQ-PRC-015 I-EDGE-004
+REQ-PRC-016 I-RESOURCE-001
+```
+
+and:
+
+```text
+REQ-PRC-010 I-JOURNAL-001
+REQ-PRC-009 I-CONSUME-001
+```
+
+These were not part of the initial specification draft we reviewed.
+
+That's not necessarily bad—in fact, the new requirements are improvements—but under your:
+
+> **Zero Spec-Drift Reconciliation (I-SDD-003): Code, schemas, and specifications match 100%**
+
+this means you now have to decide which artifact is authoritative.
+
+### I recommend
+
+**Don't change the tasks back.**
+
+Instead, update SPEC-000.9.1 so that it explicitly contains the invariants now represented by the implementation:
+
+```text
+I-CONSUME-001
+I-JOURNAL-001
+I-GRACEFUL-001
+I-RESOURCE-001
+```
+
+and corresponding:
+
+```text
+REQ-PRC-014
+REQ-PRC-015
+REQ-PRC-016
+```
+
+Otherwise your final `I-SDD-003` reconciliation will fail conceptually even if all code works.
+
+---
+
+# 2. Phase 1 is good, but TASK-PRC-1.2 deserves one clarification
+
+You have:
+
+> Configure root `build.gradle` to package `wallet-core.jar` as a headless Spring Boot application.
+
+Good.
+
+But I'd make the architectural assertion stronger:
+
+```text
+wallet-core.jar MUST NOT expose public Edge ingress routes/controllers
+when wallet.runtime.mode=multi-process.
+```
+
+You already test that later with `CoreApplicationIT`, so this is mostly wording.
+
+The important distinction is:
+
+```text
+Core can still contain Web/Actuator infrastructure
+                 ≠
+Core is an HTTP financial ingress service
+```
+
+Your architecture should remain:
+
+```text
+Internet
+   │
+   ▼
+EDGE :8080/:8443
+   │
+   │ JetStream
+   ▼
+CORE :8081 management only
+```
+
+That's good.
+
+---
+
+# 3. TASK-PRC-2.1 is one of the most important tasks
+
+This one is excellent:
+
+> ArchUnit asserting `:edge` contains zero imports of ledger/fraud/savings/goals...
+
+But I would strengthen the test slightly.
+
+Right now you're testing:
+
+```text
+Edge ─X→ ledger
+Edge ─X→ fraud
+Edge ─X→ savings
+Edge ─X→ goals
+Edge ─X→ persistence
+```
+
+You should also explicitly test:
+
+```text
+Edge → Contracts ← Core
+```
+
+and **not**:
+
+```text
+Edge → Core implementation
+```
+
+For example, architecturally:
+
+```text
+              ┌───────────────┐
+              │   contracts   │
+              └───────▲───────┘
+                      │
+             ┌────────┴────────┐
+             │                 │
+           EDGE               CORE
+```
+
+Not:
+
+```text
+EDGE ───────────────→ CORE
+```
+
+This becomes especially important once the two applications are packaged independently.
+
+### I'd add
+
+```text
+assertEdgeDependsOnlyOnPublishedContracts()
+assertCoreDoesNotExposeEdgeImplementation()
+```
+
+This is probably the **single most valuable architectural test in the whole spec**.
+
+---
+
+# 4. TASK-PRC-3.3: good, but there's an important interpretation
+
+You implemented:
+
+```java
+FileChannel.tryLock()
+```
+
+on:
+
+```text
+.spool.lock
+```
+
+That's correct for **single-writer protection of one journal directory**.
+
+But it must not accidentally become:
+
+> only one Edge instance may exist.
+
+The intended topology should be:
+
+```text
+Edge-1
+  └── /spool/edge-1/
+
+Edge-2
+  └── /spool/edge-2/
+
+Edge-3
+  └── /spool/edge-3/
+```
+
+not:
+
+```text
+Edge-1 ─┐
+Edge-2 ─┼── /shared/spool/
+Edge-3 ─┘
+```
+
+because your journal is explicitly **node-local durability**, not a distributed queue.
+
+So I'd add a test:
+
+```text
+SpoolLockFileTest.shouldRejectSecondWriterForSameSpool()
+```
+
+and a deployment invariant:
+
+```text
+Each Edge runtime MUST own an exclusive local journal directory.
+A journal directory MUST NOT be shared concurrently between Edge instances.
+```
+
+That is an important distinction.
+
+---
+
+# 5. TASK-PRC-3.4 is doing too much
+
+This task currently combines:
+
+```text
+ports
++
+QUIC
++
+Actuator
++
+journal recovery readiness
+```
+
+It works, but from a TDD/task perspective I'd split it conceptually:
+
+```text
+3.4a Port configuration
+3.4b Readiness integration
+```
+
+Not because it is necessary for implementation, but because these are different failure domains.
+
+The important readiness state is:
+
+```text
+STARTING
+   ↓
+RECOVERING_JOURNAL
+   ↓
+REPLAY_READY
+   ↓
+READY
+```
+
+and **not merely "Spring Boot started".**
+
+Your existing task captures that correctly.
+
+---
+
+# 6. Core status is the biggest architectural concern
+
+This is where I'd spend the most attention.
+
+You currently have:
+
+```text
+CoreCommandConsumer
+       │
+       ▼
+CoreStatusPublisher
+       │
+       ▼
+operations.status.<operationId>
+       │
+       ▼
+OperationStatusHub
+       │
+       ▼
+SSE
+```
+
+That's good for **live distribution**.
+
+But NATS status publication is not necessarily sufficient as the **durable source of current operation state**.
+
+You already recognized this in the previous 000.9 design.
+
+Imagine:
+
+```text
+Core
+ │
+ ├── transaction commits COMPLETED
+ │
+ ├── publishes NATS status
+ │
+ X
+Edge crashes
+```
+
+or:
+
+```text
+Core
+ │
+ ├── publishes status
+ │
+ X
+NATS consumer/fanout unavailable
+```
+
+A later SSE client needs:
+
+```text
+GET /operations/{operationId}
+```
+
+or an equivalent:
+
+```text
+DurableOperationStatusProvider
+```
+
+to obtain the current state.
+
+Your task matrix mentions:
+
+> `Dropped status message -> Edge SSE fallback query`
+
+but **there is no actual implementation task for the durable status provider in the task list.**
+
+That's a gap.
+
+### I'd add
+
+```text
+TASK-PRC-5.2 [MUST]
+Implement DurableOperationStatusProvider SPI and ensure SSE
+bootstraps current durable operation state before subscribing
+to live OperationStatusHub events.
+```
+
+Then:
+
+```text
+TASK-PRC-5.3 [MUST]
+RED: SSE reconnect after dropped NATS status event
+GREEN: durable bootstrap + live fanout
+```
+
+This is more important than several of the deployment details.
+
+---
+
+# 7. NATS status subject deserves one explicit requirement
+
+You have:
+
+```text
+operations.status.<operationId>
+```
+
+and Edge subscribes:
+
+```text
+operations.status.*
+```
+
+That's perfectly reasonable.
+
+But the JetStream configuration needs to explicitly support:
+
+```text
+operations.status.>
+```
+
+if the stream contains the status subjects.
+
+Given the earlier `events.*` vs `events.>` issue you encountered, I would **absolutely put a regression test around this**.
+
+Something like:
+
+```text
+StatusStreamConfigurationTest.shouldMatchNestedOperationStatusSubjects()
+```
+
+with:
+
+```text
+operations.status.<operationId>
+```
+
+actually published and consumed through the configured stream.
+
+This prevents another subtle subject topology bug.
+
+---
+
+# 8. TASK-PRC-4.3 needs idempotency awareness
+
+You have:
+
+> broadcast status via `CoreStatusPublisher` upon use case execution completion.
+
+But Core is consuming JetStream, therefore:
+
+```text
+at-least-once delivery
+```
+
+means potentially:
+
+```text
+Command
+   ↓
+Core
+   ↓
+financial transaction commits
+   ↓
+status COMPLETED published
+   ↓
+ACK lost
+   ↓
+same command delivered again
+```
+
+Financial idempotency protects the ledger.
+
+But status publication should also be **idempotent or semantically monotonic**.
+
+You should ensure:
+
+```text
+COMPLETED
+COMPLETED
+COMPLETED
+```
+
+doesn't create problematic state transitions.
+
+And never:
+
+```text
+COMPLETED
+   ↓
+FAILED
+```
+
+for the same operation because of a duplicate/late processing path.
+
+I'd add a test around terminal-state monotonicity.
+
+---
+
+# 9. TASK-PRC-5.1: excellent direction, but don't use one NATS consumer per SSE
+
+This implementation:
+
+```text
+NATS
+  operations.status.*
+        │
+        ▼
+OperationStatusHub
+        │
+    ┌───┼───┐
+    ▼   ▼   ▼
+   SSE SSE SSE
+```
+
+is exactly what you want.
+
+Avoid:
+
+```text
+SSE connection
+   ↓
+create NATS consumer
+```
+
+That would become ugly very quickly at scale.
+
+The task wording:
+
+> subscribe to NATS subject `operations.status.*`
+
+suggests the correct architecture.
+
+I'd preserve this.
+
+---
+
+# 10. TASK-PRC-6.1: monolith mode should remain explicitly non-production
+
+You currently have:
+
+```text
+multi-process = default
+monolith = test mode
+```
+
+Excellent.
+
+The warning should ideally be unmissable:
+
+```text
+WARNING: wallet.runtime.mode=monolith is intended for
+development/test only. Production deployment MUST use
+multi-process mode.
+```
+
+And I'd test not only:
+
+```text
+shouldEmitStartupWarning()
+```
+
+but also:
+
+```text
+shouldDefaultToMultiProcess()
+```
+
+because defaults are architectural controls.
+
+---
+
+# 11. TASK-PRC-6.2 graceful shutdown is good, but verify message semantics
+
+This is another place where the task could be more precise.
+
+During SIGTERM:
+
+```text
+stop accepting new ingress
+       ↓
+drain in-flight work
+       ↓
+flush journal batch
+       ↓
+finish/persist current operation
+       ↓
+ACK only completed NATS messages
+       ↓
+shutdown
+```
+
+The dangerous behavior would be:
+
+```text
+SIGTERM
+  ↓
+ACK
+  ↓
+process dies
+```
+
+before the financial effect is durable.
+
+So I'd add explicit tests:
+
+```text
+GracefulShutdownIT.shouldNotAckUnprocessedCommand()
+GracefulShutdownIT.shouldAckOnlyAfterFinancialEffect()
+GracefulShutdownIT.shouldFlushJournalBeforeTermination()
+```
+
+Your existing task says "flush batch", which is good, but the **ACK semantics** are even more important.
+
+---
+
+# 12. TASK-PRC-7.3 is the right final test
+
+This is probably the most valuable integration test:
+
+```text
+HTTP POST
+   ↓
+Edge
+   ↓
+202
+   ↓
+JetStream
+   ↓
+Core
+   ↓
+Ledger
+   ↓
+status
+   ↓
+NATS
+   ↓
+Edge
+   ↓
+SSE COMPLETED
+```
+
+I'd make the acceptance criterion stronger:
+
+```text
+POST /transfer
+→ 202 + operationId
+
+same operationId
+→ repeated request remains idempotent
+
+Core processes command
+→ exactly one financial effect
+
+SSE
+→ COMPLETED
+
+GET /operations/{operationId}
+→ COMPLETED
+```
+
+That turns it into a genuine **end-to-end architectural invariant test**, not merely connectivity testing.
+
+---
+
+# 13. Your convergence checklist needs one addition
+
+You have:
+
+> Zero compiler / linter warnings across all subprojects
+
+Fine, although I'd avoid making *all warnings* a hard architectural gate unless your build is already warning-clean.
+
+More importantly, I would add:
+
+```text
+[ ] Edge runtime can be started with Core completely unavailable
+[ ] Core runtime can be started without public Edge ingress
+[ ] Two Edge instances do not share a spool directory
+[ ] Duplicate operationId produces <=1 financial effect
+[ ] Dropped status event is recoverable through durable status
+[ ] Core duplicate JetStream delivery does not create duplicate financial effect
+[ ] Terminal operation status is monotonic
+[ ] SIGTERM does not ACK unprocessed financial commands
+```
+
+These are more valuable than the linter criterion.
+
+---
+
+# 14. One thing I would NOT add
+
+I would **not** add Kubernetes/Rancher/vCluster/GKE/Cloud Foundry tasks here.
+
+Keep 000.9.1 about:
+
+```text
+PROCESS
+CONTRACT
+IPC
+STATE
+SCALING
+LIFECYCLE
+```
+
+and later have something like:
+
+```text
+SPEC-000.9.2
+Deployment & Platform Profiles
+```
+
+with:
+
+```text
+Docker/Podman
+RKE2
+Rancher
+GKE
+OpenShift
+Cloud Foundry
+vCluster
+```
+
+That separation is architecturally cleaner.
+
+---
+
+# My recommended final task delta
+
+I wouldn't rewrite the whole document. I'd make these additions/changes:
+
+### Add to Phase 2
+
+```text
+- [ ] TASK-PRC-2.2 [MUST]:
+  Assert dependency direction:
+  Edge → Contracts ← Core.
+  Edge MUST NOT depend on Core implementation packages.
+```
+
+### Add to Phase 5
+
+```text
+- [ ] TASK-PRC-5.2 [MUST]:
+  Implement DurableOperationStatusProvider and SSE durable-state bootstrap.
+
+- [ ] TASK-PRC-5.3 [MUST]:
+  RED/GREEN test for dropped NATS status event and SSE reconnect,
+  proving durable status recovery.
+
+- [ ] TASK-PRC-5.4 [MUST]:
+  Verify terminal operation status is monotonic/idempotent.
+```
+
+### Add to Phase 6
+
+```text
+- [ ] TASK-PRC-6.3 [MUST]:
+  RED/GREEN tests proving graceful shutdown ACK semantics:
+  unprocessed commands are never ACKed before financial durability.
+```
+
+### Add to Phase 7
+
+Strengthen `TASK-PRC-7.3` to prove:
+
+```text
+202
+→ JetStream
+→ Core
+→ exactly one financial effect
+→ terminal durable status
+→ NATS status fanout
+→ SSE
+→ GET status
+```
+
+---
+
+## One more important observation
+
+The fact that **all implementation tasks are `[x]` but the convergence checklist is still `[ ]` is actually correct**.
+
+Don't change those checklist items to `[x]` just because the implementation exists.
+
+You have two different states:
+
+```text
+Implementation complete
+        ≠
+Architecture verified
+```
+
+That's exactly what the convergence phase should prove.
+
+So I'd keep:
+
+```text
+TASKS = [x]
+CONVERGENCE = [ ]
+```
+
+until the real build/integration/architecture tests have been executed.
+
+### Final verdict
+
+I would classify the current TASKS-000.9.1 as:
+
+**🟢 Implementation-ready / largely implemented, with a small convergence gap.**
+
+The two areas I'd treat as **MUST-fix before declaring 000.9.1 closed** are:
+
+1. **Durable operation status recovery** — NATS status fanout cannot be the sole source of truth for SSE.
+2. **Spec/task traceability reconciliation** — the newer `REQ-PRC-014..016` and invariants need to exist in SPEC-000.9.1 if `I-SDD-003` really means 100% reconciliation.
+
+Everything else is mostly hardening rather than architectural rework.

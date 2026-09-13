@@ -61,11 +61,6 @@ public class IntegrationTestBase {
     }
 
     @Bean
-    public GenericContainer<?> nats() {
-        return NATS_CONTAINER;
-    }
-
-    @Bean
     @Primary
     public EventPublisher eventPublisher() {
         return new FailingEventPublisher();

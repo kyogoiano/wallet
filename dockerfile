@@ -61,29 +61,57 @@ RUN ./gradlew dependencies --no-daemon || true
 # Copia o código fonte do projeto principal
 COPY src src
 
-# Executa o build do projeto raiz explicitamente
-# O clean garante que não haja lixo de builds anteriores
-RUN ./gradlew clean :bootJar --no-daemon
+# Executa o build de ambos os módulos de runtime (core e edge)
+RUN ./gradlew clean :bootJar :edge:bootJar --no-daemon
 
-# Runtime stage
-FROM oraclelinux:9-slim
+# =========================================================
+# Edge Runtime Stage (wallet-edge)
+# =========================================================
+FROM oraclelinux:9-slim AS edge
 
 ENV JAVA_HOME=/usr/java/valhalla-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-# Install native C++ runtime and OpenMP dependencies required by embedded ONNX Runtime (I-FUSION-004)
+# Install curl for container healthcheck
 RUN set -eux; \
-    microdnf install -y libstdc++ libgomp; \
+    microdnf install -y curl; \
     microdnf clean all
 
-# Re-copy only the Valhalla JDK from stage 1 to keep things consistent
+# Re-copy only the Valhalla JDK from stage 1
 COPY --from=builder /usr/java/valhalla-jdk /usr/java/valhalla-jdk
 
 WORKDIR /app
 
-# Copia o JAR gerado (usando um wildcard mais seguro)
-COPY --from=builder /app/build/libs/*.jar app.jar
+# Pre-create spool directory for journal
+RUN mkdir -p /spool && chmod 777 /spool
 
-EXPOSE 8080
+COPY --from=builder /app/edge/build/libs/wallet-edge.jar app.jar
 
-ENTRYPOINT ["java", "-Djavax.net.debug=ssl:handshake", "-jar", "app.jar"]
+VOLUME ["/spool"]
+EXPOSE 8080 8443/udp
+
+ENTRYPOINT ["java", "-Duser.timezone=UTC", "-jar", "app.jar"]
+
+# =========================================================
+# Core Runtime Stage (wallet-core / default)
+# =========================================================
+FROM oraclelinux:9-slim AS core
+
+ENV JAVA_HOME=/usr/java/valhalla-jdk
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# Install native C++ runtime, OpenMP for ONNX Runtime (I-FUSION-004), and curl for healthcheck
+RUN set -eux; \
+    microdnf install -y libstdc++ libgomp curl; \
+    microdnf clean all
+
+# Re-copy only the Valhalla JDK from stage 1
+COPY --from=builder /usr/java/valhalla-jdk /usr/java/valhalla-jdk
+
+WORKDIR /app
+
+COPY --from=builder /app/build/libs/wallet-core.jar app.jar
+
+EXPOSE 8081
+
+ENTRYPOINT ["java", "-Duser.timezone=UTC", "--enable-native-access=ALL-UNNAMED", "-jar", "app.jar"]

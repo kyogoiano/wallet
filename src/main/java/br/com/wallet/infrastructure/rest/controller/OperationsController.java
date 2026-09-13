@@ -37,7 +37,7 @@ public class OperationsController implements OperationsApi {
         this.operationQueryUseCase = operationQueryUseCase;
     }
 
-    @GetMapping("/{operationId}")
+    @GetMapping("/{operationId:[0-9a-fA-F\\-]+}")
     @Override
     public OperationStatusResponse getOperationStatus(@PathVariable final UUID operationId) {
         return operationQueryUseCase.getOperationStatus(operationId)

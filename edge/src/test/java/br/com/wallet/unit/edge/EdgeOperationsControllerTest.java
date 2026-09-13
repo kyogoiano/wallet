@@ -44,7 +44,7 @@ class EdgeOperationsControllerTest {
                         new EdgeCommandResult.Accepted(opId, "/operations/" + opId, false)
                 ));
 
-        ResponseEntity<?> response = controller.acceptTransfer(opId, "{\"amount\": 100.00}", request).get();
+        ResponseEntity<?> response = controller.acceptTransfer(opId, "{\"amount\": 100.00}", request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.ACCEPTED);
         assertThat(response.getHeaders().getLocation()).isEqualTo(URI.create("/operations/" + opId));
@@ -60,7 +60,7 @@ class EdgeOperationsControllerTest {
                         new EdgeCommandResult.RateLimited("Rate limited", 1)
                 ));
 
-        ResponseEntity<?> response = controller.acceptDeposit(null, "{\"amount\": 50.00}", request).get();
+        ResponseEntity<?> response = controller.acceptDeposit(null, "{\"amount\": 50.00}", request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.TOO_MANY_REQUESTS);
         assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("1");
@@ -74,7 +74,7 @@ class EdgeOperationsControllerTest {
                         new EdgeCommandResult.ContentTooLarge(70000, 65536)
                 ));
 
-        ResponseEntity<?> response = controller.acceptWithdrawal(null, "{}", request).get();
+        ResponseEntity<?> response = controller.acceptWithdrawal(null, "{}", request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONTENT_TOO_LARGE);
     }
@@ -87,7 +87,7 @@ class EdgeOperationsControllerTest {
                         new EdgeCommandResult.Saturated("Spool full", 5)
                 ));
 
-        ResponseEntity<?> response = controller.acceptTransfer(null, "{}", request).get();
+        ResponseEntity<?> response = controller.acceptTransfer(null, "{}", request);
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("5");

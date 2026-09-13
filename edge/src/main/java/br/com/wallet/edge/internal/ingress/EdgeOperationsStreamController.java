@@ -21,6 +21,7 @@ import java.util.UUID;
  */
 @RestController
 @RequestMapping("/operations")
+@ConditionalOnEdgeIngress
 public class EdgeOperationsStreamController {
 
     private final OperationStatusHub statusHub;
@@ -33,24 +34,46 @@ public class EdgeOperationsStreamController {
 
     @GetMapping(value = "/{operationId}/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamOperationStatus(@PathVariable("operationId") UUID operationId) {
-        // I-EDGE-007: Check durable state first before attaching to live hub
+        // I-EDGE-007 & REQ-PRC-020: Check durable state first before attaching to live hub
         Optional<DurableOperationStatus> durable = durableStateProvider.findOperationStatus(operationId);
-        if (durable.isPresent() && durable.get().isTerminal()) {
-            SseEmitter emitter = new SseEmitter(60_000L);
-            try {
-                emitter.send(SseEmitter.event()
-                        .name("status")
-                        .data(new OperationStatusResponse(
-                                operationId,
-                                durable.get().status(),
-                                durable.get().timestamp(),
-                                durable.get().message()
-                        )));
-                emitter.complete();
-            } catch (IOException e) {
-                emitter.completeWithError(e);
+        if (durable.isPresent()) {
+            DurableOperationStatus status = durable.get();
+            if (status.isTerminal()) {
+                SseEmitter emitter = new SseEmitter(60_000L);
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("status")
+                            .data(new OperationStatusResponse(
+                                    operationId,
+                                    status.status(),
+                                    status.timestamp(),
+                                    status.message()
+                            )));
+                    emitter.complete();
+                } catch (IOException e) {
+                    emitter.completeWithError(e);
+                }
+                return emitter;
             }
-            return emitter;
+
+            if (status.isDegraded()) {
+                // REQ-PRC-020: Do NOT claim operation is current or silently attach live-only listener on timeout
+                SseEmitter emitter = new SseEmitter(60_000L);
+                try {
+                    emitter.send(SseEmitter.event()
+                            .name("degraded")
+                            .data(new OperationStatusResponse(
+                                    operationId,
+                                    status.status(),
+                                    status.timestamp(),
+                                    status.message()
+                            )));
+                    emitter.complete();
+                } catch (IOException e) {
+                    emitter.completeWithError(e);
+                }
+                return emitter;
+            }
         }
 
         // 60-second timeout for financial status resolution
@@ -59,8 +82,14 @@ public class EdgeOperationsStreamController {
 
         // Send immediate initial status event
         try {
-            String initialStatus = durable.map(DurableOperationStatus::status).orElse(OperationStatusResponse.STATUS_PROCESSING);
-            String initialMsg = durable.map(DurableOperationStatus::message).orElse("Operation accepted and queued for settlement");
+            String initialStatus = durable
+                    .filter(s -> !s.isNotFound())
+                    .map(DurableOperationStatus::status)
+                    .orElse(OperationStatusResponse.STATUS_PROCESSING);
+            String initialMsg = durable
+                    .filter(s -> !s.isNotFound())
+                    .map(DurableOperationStatus::message)
+                    .orElse("Operation accepted and queued for settlement");
             Instant initialTime = durable.map(DurableOperationStatus::timestamp).orElseGet(Instant::now);
 
             emitter.send(SseEmitter.event()

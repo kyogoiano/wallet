@@ -73,8 +73,10 @@ subprojects {
 		maven { url 'https://repo.spring.io/snapshot' }
 	}
 
-	bootJar {
-		enabled = false
+	if (project.name != 'edge') {
+		bootJar {
+			enabled = false
+		}
 	}
 
 	jar {
@@ -89,6 +91,7 @@ subprojects {
 
 bootJar {
 	enabled = true
+	archiveFileName = 'wallet-core.jar'
 }
 
 dependencies {

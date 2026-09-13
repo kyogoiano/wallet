@@ -126,7 +126,9 @@ gantt
     SPEC-000.6 Temporal Decay           :done, p00_8, 2026-09-03, 3d
     SPEC-000.8 Signal Fusion & Micro-ML :done, p00_10, 2026-09-07, 3d
     SPEC-000.9 Reactive Edge Ingress    :done, p00_11, 2026-09-09, 3d
-    SPEC-000.10 Financial Security      :p00_12, after p00_11, 3d
+    SPEC-000.9.1 Edge/Core Runtimes     :done, p00_11_1, 2026-09-10, 2d
+    SPEC-000.9.2 Container Topology     :active, p00_11_2, after p00_11_1, 3d
+    SPEC-000.10 Financial Security      :p00_12, after p00_11_2, 3d
     SPEC-000.11 Tiered DLQ & Recovery   :p00_13, after p00_12, 3d
     section Phase 1 Programmable Money
     SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
@@ -330,6 +332,34 @@ gantt
   - [`plans/PLAN-000.9-reactive-edge-gateway-and-ingress-resilience.md`](file:///.spec/plans/PLAN-000.9-reactive-edge-gateway-and-ingress-resilience.md) (Approved)
   - [`tasks/TASKS-000.9-reactive-edge-gateway-and-ingress-resilience.md`](file:///.spec/tasks/TASKS-000.9-reactive-edge-gateway-and-ingress-resilience.md) (Verified)
   - [`summaries/SUMMARY-000.9-reactive-edge-gateway-and-ingress-resilience.md`](file:///.spec/summaries/SUMMARY-000.9-reactive-edge-gateway-and-ingress-resilience.md) (Completed)
+
+---
+
+### 🔹 Phase 000.9.1: Edge & Core Independent Runtimes & Process Separation
+**Spec Identifier**: [`SPEC-000.9.1-edge-core-independent-runtimes`](file:///.spec/SPEC-000.9.1-edge-core-independent-runtimes.md)  
+**Status**: 🟢 **Verified**  
+**Core Abstraction**: `Independent OS Processes, Zero-DB Edge Runtime, Stable Command Contract & Dual-Profile Execution`
+
+- **Intent**: Eliminate the single-JVM failure coupling of Phase 000.9 by separating `:edge` and `:core` into independently runnable Spring Boot applications (`EdgeApplication` and `CoreApplication`). Edge runs lean with zero relational database connections, binding public ingress ports (8080/8443), while Core operates headless on management port 8081. Communications across the process boundary occur over NATS JetStream, with dual-profile support (`multi-process` for production crash isolation, `monolith` for single-JVM local development ergonomics).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.9.1-edge-core-independent-runtimes.md`](file:///.spec/SPEC-000.9.1-edge-core-independent-runtimes.md) (Ratified)
+  - [`plans/PLAN-000.9.1-edge-core-independent-runtimes.md`](file:///.spec/plans/PLAN-000.9.1-edge-core-independent-runtimes.md) (Approved)
+  - [`tasks/TASKS-000.9.1-edge-core-independent-runtimes.md`](file:///.spec/tasks/TASKS-000.9.1-edge-core-independent-runtimes.md) (Verified)
+  - [`summaries/SUMMARY-000.9.1-edge-core-independent-runtimes.md`](file:///.spec/summaries/SUMMARY-000.9.1-edge-core-independent-runtimes.md) (Verified)
+
+---
+
+### 🔹 Phase 000.9.2: Containerized Multi-Process Topology & Platform Packaging
+**Spec Identifier**: [`SPEC-000.9.2-containerized-multi-process-topology`](file:///.spec/SPEC-000.9.2-containerized-multi-process-topology.md)  
+**Status**: 🟡 **Ratified**  
+**Core Abstraction**: `Minimal OCI Artifacts, Asymmetric Horizontal Scaling, Isolated Spool PV Mounts & Tiered Deployment Matrix`
+
+- **Intent**: Formalize container packaging and orchestration for the multi-process architecture. Generates discrete, hardened OCI container images (`wallet-edge` and `wallet-core`) using multi-stage builds. Defines an abstract, cloud-agnostic Wallet Runtime Contract (12-Factor config, standard health probes, graceful shutdown) and establishes a multi-tier deployment matrix spanning local Docker Compose, on-prem RKE2/Rancher, multi-tenant vCluster appliances, and GKE Standard. Enables independent horizontal scaling ($N$ Edge $\neq M$ Core) and isolated persistent volume mounts for Edge `/spool` storage.
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.9.2-containerized-multi-process-topology.md`](file:///.spec/SPEC-000.9.2-containerized-multi-process-topology.md) (Ratified)
+  - `plans/PLAN-000.9.2-containerized-multi-process-topology.md` (Pending)
+  - `tasks/TASKS-000.9.2-containerized-multi-process-topology.md` (Pending)
+  - `summaries/SUMMARY-000.9.2-containerized-multi-process-topology.md` (Pending)
 
 ---
 

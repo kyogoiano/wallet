@@ -1,8 +1,8 @@
-package br.com.wallet.unit.infrastructure.messaging;
+package br.com.wallet.unit.edge;
 
 import br.com.wallet.edge.api.CommandEnvelope;
 import br.com.wallet.edge.api.CommandType;
-import br.com.wallet.infrastructure.messaging.publisher.NatsEdgeCommandPublisher;
+import br.com.wallet.edge.internal.publisher.NatsEdgeCommandPublisher;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.Message;
@@ -30,7 +30,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("NatsEdgeCommandPublisher Unit Tests (REQ-EDG-021 & I-DEDUP-001)")
+@DisplayName("NatsEdgeCommandPublisher Unit Tests (REQ-EDG-021, REQ-PRC-006 & I-DEDUP-001)")
 class NatsEdgeCommandPublisherTest {
 
     @Mock

@@ -9,6 +9,10 @@ redis:
     enabled: false
 
 wallet:
+  runtime:
+    mode: multi-process
+  edge:
+    enabled: false
   outbox:
     relay:
       initial-delay: 3600000
@@ -17,6 +21,10 @@ wallet:
     replay:
       initial-delay: 3600000
       fixed-delay: 3600000
+
+edge:
+  spool:
+    directory: ${java.io.tmpdir}/wallet-spool-${random.uuid}
 
 fraud:
   fusion:

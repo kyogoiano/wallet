@@ -107,6 +107,7 @@ services:
   openobserve:
     image: openobserve/openobserve:latest-amd64-simd
     container_name: openobserve
+    stop_grace_period: 30s
     environment:
       - ZO_ROOT_USER_EMAIL=leandro.ueg@gmail.com
       - ZO_ROOT_USER_PASSWORD=Admin123!@#
@@ -122,6 +123,8 @@ services:
     image: otel/opentelemetry-collector:latest
     container_name: otel-collector
     command: [ "--config=/etc/otel-collector-config.yml" ]
+    depends_on:
+      - openobserve
     volumes:
       - ./docker/otel-collector-config.yml:/etc/otel-collector-config.yml
     ports:
@@ -133,18 +136,28 @@ services:
           - otel-collector
 
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: dockerfile
+      target: core
     container_name: wallet-app
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
-      otel-collector:
+      nats:
         condition: service_started
       dragonfly:
         condition: service_healthy
+      otel-collector:
+        condition: service_started
     volumes:
       - redis-socket:/var/run/redis
     environment:
+      SERVER_PORT: 8081
+      WALLET_RUNTIME_MODE: multi-process
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet
       SPRING_DATASOURCE_USERNAME: wallet
       SPRING_DATASOURCE_PASSWORD: wallet
@@ -154,10 +167,53 @@ services:
       REDIS_SOCKET_PATH: /var/run/redis/redis.sock
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet,service.version=0.0.1-SNAPSHOT
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-core,service.version=0.0.1-SNAPSHOT
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
     ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks:
+      - wallet-net
+
+  edge:
+    build:
+      context: .
+      dockerfile: dockerfile
+      target: edge
+    container_name: wallet-edge
+    restart: unless-stopped
+    depends_on:
+      nats:
+        condition: service_started
+      app:
+        condition: service_healthy
+    volumes:
+      - edge-spool:/spool
+    environment:
+      SERVER_PORT: 8080
+      WALLET_RUNTIME_MODE: multi-process
+      WALLET_EDGE_ENABLED: "true"
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+      EDGE_SPOOL_DIR: /spool
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-edge,service.version=0.0.1-SNAPSHOT
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC"
+    ports:
       - "8080:8080"
+      - "8443:8443/udp"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     networks:
       - wallet-net
 
@@ -166,6 +222,7 @@ volumes:
   openobserve-data:
   dragonfly-data:
   redis-socket:
+  edge-spool:
 
 networks:
   backend:

@@ -133,4 +133,15 @@ class JournalRecoveryWorkerTest {
         verify(ackTracker, times(1)).acknowledgeRecord(seg1, 20L);
         verify(ackTracker).reclaimIfFullyAcknowledged(seg1);
     }
+
+    @Test
+    @DisplayName("Should execute recovery scan and transition to READY via ApplicationRunner.run() (I-EDGE-004)")
+    void shouldTriggerRecoveryScanViaApplicationRunner() {
+        when(journal.listSegmentFiles()).thenReturn(List.of());
+
+        worker.run(mock(org.springframework.boot.ApplicationArguments.class));
+
+        assertThat(healthIndicator.getCurrentState()).isEqualTo(EdgeReadinessState.READY);
+        assertThat(healthIndicator.health().block().getStatus().getCode()).isEqualTo("UP");
+    }
 }

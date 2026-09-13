@@ -1,0 +1,45 @@
+server:
+  port: ${SERVER_PORT:8080}
+  shutdown: graceful
+
+spring:
+  application:
+    name: wallet-edge
+  threads:
+    virtual:
+      enabled: true
+  lifecycle:
+    timeout-per-shutdown-phase: 30s
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,edgeReadiness
+
+nats:
+  url: ${NATS_URL:nats://localhost:4222}
+  token: ${NATS_TOKEN:}
+
+wallet:
+  runtime:
+    mode: ${WALLET_RUNTIME_MODE:multi-process}
+  edge:
+    enabled: true
+
+edge:
+  instance-id: ${EDGE_INSTANCE_ID:${random.uuid}}
+  runtime:
+    mode: ${WALLET_RUNTIME_MODE:multi-process}
+  spool:
+    directory: ${EDGE_SPOOL_DIR:${java.io.tmpdir}/wallet-spool}
+    segment-size-bytes: 67108864
+    max-capacity-bytes: 10737418240

@@ -13,7 +13,6 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 import java.time.Instant;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 /**
  * Non-blocking Edge Gateway REST Controller (PLAN-000.9 Section 1).

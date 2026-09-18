@@ -1,0 +1,18 @@
+{{- if .Values.edge.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "wallet-platform.fullname" . }}-edge-spool
+  labels:
+    {{- include "wallet-platform.labels" . | nindent 4 }}
+    {{- include "wallet-platform.edgeSelectorLabels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.edge.persistence.accessMode }}
+  {{- if .Values.edge.persistence.storageClass }}
+  storageClassName: {{ .Values.edge.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.edge.persistence.size }}
+{{- end }}

@@ -1,0 +1,33 @@
+# ==============================================================================
+# Plan D: Public Cloud Elastic Scale (GKE Standard / EKS) (REQ-TOP-007)
+# High-concurrency elasticity with Cloud SSD PersistentDisk and HPA.
+# ==============================================================================
+
+global:
+  environment: cloud
+  infrastructure: gke
+
+edge:
+  replicaCount: 4
+  persistence:
+    enabled: true
+    storageClass: "premium-rwo"
+    accessMode: ReadWriteOnce
+    size: 50Gi
+    mountPath: /spool
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 65
+
+core:
+  replicaCount: 4
+  hpa:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 15
+    targetConsumerLag: 200
+
+networkPolicy:
+  enabled: true

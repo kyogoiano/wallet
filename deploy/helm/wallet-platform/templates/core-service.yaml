@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wallet-platform.fullname" . }}-core
+  labels:
+    {{- include "wallet-platform.labels" . | nindent 4 }}
+    {{- include "wallet-platform.coreSelectorLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.core.service.type }}
+  ports:
+    - name: management
+      port: {{ .Values.core.service.port }}
+      targetPort: 8081
+      protocol: TCP
+  selector:
+    {{- include "wallet-platform.coreSelectorLabels" . | nindent 4 }}

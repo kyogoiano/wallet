@@ -2,83 +2,91 @@
 
 - **Status**: 🟢 **Ratified**
 - **Author**: Antigravity Platform Infrastructure & Edge Resilience Team
-- **Date**: 2026-09-10
+- **Date**: 2026-09-10 (Revised: 2026-09-13 per Cost-Tier & On-Prem Review)
 - **Target Release**: Wallet Service V4 — Phase 000.9.2
 - **Bounded Context**: Container Packaging, Deployment Topologies, Spool Storage Provisioning, and Platform Orchestration
-- **Line Budget**: Max 250 lines (`I-SDD-006`). Strictly focused on containerization, topology scaling, storage bindings, and deployment tiers.
+- **Line Budget**: Max 250 lines (`I-SDD-006`). Strictly focused on packaging, scaling, storage bindings, and cost-tiered deployment profiles.
 
 ---
 
 ## 0. Pre-Flight History & Context Audit
 
 - **Histories Audited**:
-  - [`.histories/history44.txt`](file:///.histories/history44.txt): Evaluated platform portability (Docker Compose, RKE2, Rancher, GKE Standard, Cloud Foundry); established NATS JetStream as the decoupled scaling fabric ($N$ Edge instances $\to$ JetStream $\to$ $M$ Core instances).
-  - [`.histories/history45.txt`](file:///.histories/history45.txt): Formulated the Wallet Runtime Contract; analyzed SUSE Virtualization, RKE2, Rancher, and vCluster for private-cloud multi-tenant appliance packaging without vendor lock-in.
+  - [`.histories/history45.txt`](file:///.histories/history45.txt): Formulated cost-tiered deployment strategy (Plan A local, Plan B low-cost appliance without K8s, Plan C enterprise Rancher, Plan D GKE).
+  - [`.histories/history53.txt`](file:///.histories/history53.txt): Removed invalid $N \ne M$ constraint; formalized independent horizontal scaling; differentiated HostPath vs CSI durability; defined Edge/Core shutdown sequences.
+  - [`.histories/history54.txt`](file:///.histories/history54.txt): Ratified sequencing: `000.9.2` (Physical Topology) precedes `000.9.3` (Security Boundary).
   - [`SPEC-000.9.1`](file:///.spec/SPEC-000.9.1-edge-core-independent-runtimes.md): Decoupled Edge and Core into independent OS processes and bootJars.
-- **Constitutional Constraints**:
-  - `I-EDGE-001` & `I-EDGE-006`: Durable acceptance and local journal fsync scope.
-  - `I-PROCESS-001` & `I-PORT-001`: Process isolation and network port segregation.
+- **Governing Skills**: [`onprem-infrastructure`](file:///.agents/skills/onprem-infrastructure/SKILL.md) (Rancher, SUSE Virtualization, vCluster, and HCI add-on architecture).
 
 ---
 
 ## 1. Intent & Business Value
 
-Following the process separation in `SPEC-000.9.1`, this specification formalizes the **packaging, orchestration, and deployment topology** of the multi-process Wallet Platform.
-Because Edge (I/O, rate limiting, SSE, journal fsync) and Core (CPU, PostgreSQL ACID transactions, fraud graph queries) exhibit fundamentally different operational and scaling profiles, they require **asymmetric horizontal scaling** ($N$ Edge $\neq M$ Core) and isolated storage volumes.
-This specification packages Edge and Core into discrete OCI container images, defines a cloud-agnostic **Wallet Runtime Contract** (12-Factor config, standard health probes, graceful shutdown), and establishes a **multi-tier deployment matrix** spanning local Docker Compose, on-prem RKE2/Rancher, multi-tenant vCluster appliances, and GKE Standard.
+Following the logical separation in `SPEC-000.9.1`, this specification formalizes the **packaging, orchestration, and physical deployment topology** of the Wallet Platform across a **cost-conscious deployment progression**:
+1. **Plan A (Local Dev / CI)**: Single-host Docker Compose with zero infrastructure cost.
+2. **Plan B (Low-Cost Lean Appliance)**: Non-Kubernetes / lightweight container runtime on commodity bare-metal server or VM, leveraging Docker Compose or free Rancher Open Source capabilities. Slashes control plane RAM/CPU overhead ($<8\text{GB}$ total) and eliminates software licensing.
+3. **Plan C (Medium-Cost Enterprise On-Prem / Rancher Full)**: Full-stack SUSE Virtualization (Harvester HCI) + Rancher Open Source + RKE2 + Harvester Add-ons (VM Auto-Balance, Kube-OVN, LVM Local Storage) + vCluster for isolated multi-tenancy.
+4. **Plan D (Public Cloud Elastic Scale / GKE)**: Hyperscale GKE Standard with HPA on RPS and consumer lag.
 
 ---
 
 ## 2. Mathematical & System Invariants
 
-- **`I-CONTAINER-001` (Discrete Minimal OCI Artifacts)**: Edge and Core are packaged into independent OCI container images. `wallet-edge` MUST NOT contain relational database drivers or JPA libraries:
-  $$\text{Image}(\text{wallet-edge}) \ne \text{Image}(\text{wallet-core}), \quad \text{JDBCDrivers}(\text{wallet-edge}) = \emptyset$$
-- **`I-TOPOLOGY-001` (Asymmetric Scaling Fabric)**: Edge and Core scale with independent replica counts without direct service discovery. NATS JetStream competing consumers distribute traffic across Core replicas:
-  $$\text{Replicas}(\text{Edge}) = N, \quad \text{Replicas}(\text{Core}) = M \quad (N \ge 2, M \ge 2, N \neq M)$$
-- **`I-STORAGE-001` (Durable Spool Storage Isolation & Volume Profiles)**: Spool journals MUST mount dedicated persistent storage at `/spool`, completely isolated from PostgreSQL database volumes:
-  $$\text{Mount}(\text{Edge}_{\text{spool}}) = \text{Option A (Local NVMe HostPath)} \lor \text{Option B (Dedicated CSI Block PV ReadWriteOnce)}$$
-- **`I-PLATFORM-001` (Orchestration Neutrality & Runtime Contract)**: Workloads MUST NOT depend on Kubernetes or vCluster APIs, relying strictly on environment variables, standard signals, and HTTP health probes:
-  $$\text{Deps}(\text{Workload}) \cap \{\text{KubernetesClient}, \text{vClusterAPI}\} = \emptyset$$
-- **`I-GRACEFUL-001` (Coordinated Pod Drain & Spool Flush)**: On SIGTERM, Edge stops accepting ingress, marks readiness `OUT_OF_SERVICE`, flushes in-flight group commits, and halts cleanly within grace period ($T \le 30\text{s}$):
-  $$\text{SIGTERM} \to \text{Readiness}=\text{OUT\_OF\_SERVICE} \to \text{force}(\text{Batch}) \to \text{Exit}(0)$$
+- **`I-CONTAINER-001` (Discrete Hardened OCI Artifacts)**: Edge and Core are packaged into independent OCI container images. `wallet-edge` MUST NOT contain JDBC drivers, JPA/Hibernate, PostgreSQL drivers, or Flyway:
+  $$\text{Deps}(\text{Edge}) \cap \{\text{JDBC}, \text{PostgreSQLDriver}, \text{Hibernate}, \text{Flyway}\} = \emptyset, \quad \text{UID}(\text{Process}) \ne 0$$
+- **`I-TOPOLOGY-001` (Independent Horizontal Scaling)**: Edge and Core replica counts scale independently without process affinity. Core consumer groups distribute load dynamically:
+  $$\text{Replicas}(\text{Edge}) = N, \quad \text{Replicas}(\text{Core}) = M \quad (N \ge 1, M \ge 1; N \text{ and } M \text{ configured independently})$$
+- **`I-STORAGE-001` (Single-Writer Spool Ownership)**: Each Edge instance MUST possess exclusive ownership of its `/spool` directory/volume. Concurrent multi-writer mounts are strictly forbidden:
+  $$\forall i \ne j, \quad \text{SpoolMount}(\text{Edge}_i) \cap \text{SpoolMount}(\text{Edge}_j) = \emptyset$$
+- **`I-STORAGE-002` (Explicit Durability Scope)**: HostPath NVMe provides node-local restart durability while the host survives (no pod-reschedule durability). Dedicated CSI Block Volume (`ReadWriteOnce`) provides reschedule durability where the CSI provider supports dynamic reattachment.
+- **`I-MESSAGING-001` (Broker-Mediated IPC)**: Edge MUST NOT invoke Core directly via HTTP or RPC. All cross-boundary command execution is mediated via NATS JetStream:
+  $$\text{DirectCalls}(\text{Edge} \to \text{Core}) = \emptyset, \quad \text{Ingress}(\text{Core}) \subset \text{NATS}(\text{commands.wallet.*})$$
+- **`I-PLATFORM-001` (Runtime Portability)**: Images MUST NOT embed Kubernetes, vCluster, or orchestrator client libraries (`Deps} \cap \{\text{K8sClient}\} = \emptyset$). Configuration is injected via standard environment variables and mounted files.
+- **`I-LIFECYCLE-001` (Edge Shutdown Ordering)**: On SIGTERM, Edge marks readiness `OUT_OF_SERVICE`, halts new ingress, drains in-flight durable acceptance, forces pending journal batches, and exits cleanly within grace period ($T_{\text{grace}} \ge T_{\text{shutdown}} + 10\text{s}$).
+- **`I-LIFECYCLE-002` (Core ACK Safety)**: Core MUST NOT acknowledge JetStream delivery before the corresponding financial transaction commits successfully in PostgreSQL.
 
 ---
 
 ## 3. MoSCoW Requirements
 
-### 3.1 Pillar A: OCI Container Packaging & Multi-Stage Builds [MUST]
-- **`REQ-TOP-001` [MUST]**: Provide multi-stage Docker build producing hardened, minimal OCI images for `wallet-edge` (lean WebFlux/Netty, no JDBC) and `wallet-core` (transactional engine) on Java 27.
-- **`REQ-TOP-002` [MUST]**: Adhere to 12-Factor principles; all environment-specific configs (`NATS_URL`, `REDIS_HOST`, `DB_URL`, `SPOOL_DIR`) MUST be injected via environment variables.
+### 3.1 Pillar A: Hardened OCI Packaging & Resource Isolation [MUST]
+- **`REQ-TOP-001` [MUST]**: Multi-stage Docker build producing hardened OCI images on Java 27 running as non-root UID ($\ge 10001$). Edge contains zero relational/JDBC dependencies (`I-CONTAINER-001`).
+- **`REQ-TOP-002` [MUST]**: 12-Factor external configuration: all environment-specific configs (`NATS_URL`, `DB_URL`, `SPOOL_DIR`) MUST be externally supplied via environment variables or mounted files.
+- **`REQ-TOP-003` [MUST]**: Edge and Core deployments MUST support independently configurable CPU/memory requests and limits (`I-TOPOLOGY-001`).
 
-### 3.2 Pillar B: Tiered Deployment Profiles [MUST]
-- **`REQ-TOP-003` [MUST]**: **Tier 0 (Developer/Small Appliance)**: Docker Compose profile running discrete containers (`edge`, `core`, `nats`, `dragonfly`, `postgres`) with health-dependent startup order.
-- **`REQ-TOP-004` [MUST]**: **Tier 1 & 2 (Enterprise On-Prem / RKE2)**: Helm charts provisioning separate `Deployment` manifests for Edge and Core, `StatefulSet` for NATS and PostgreSQL, and `PodDisruptionBudget` ($N-1$).
-- **`REQ-TOP-005` [MUST]**: **Tier 3 & 4 (vCluster & Public Cloud GKE)**: Workloads MUST deploy into virtual Kubernetes clusters (vCluster) and GKE Standard without code or image modification (`I-PLATFORM-001`).
+### 3.2 Pillar B: Cost-Tiered Deployment Profiles [MUST]
+- **`REQ-TOP-004` [MUST]**: **Plan A (Local Dev & CI / Zero Cost)**: Docker Compose booting discrete `edge`, `core`, `nats`, `dragonfly`, `postgres` on developer workstation with healthcheck dependencies.
+- **`REQ-TOP-005` [MUST]**: **Plan B (Low-Cost Lean Appliance / No Heavy K8s)**: Multi-container deployment on single bare-metal host/VM without full Kubernetes control plane tax, using Docker Compose or free Rancher Open Source capabilities (e.g. lightweight node agent / K3s single-node). Direct HostPath NVMe storage (`I-STORAGE-002`), $<8\text{GB}$ RAM total footprint.
+- **`REQ-TOP-006` [MUST]**: **Plan C (Medium-Cost Enterprise On-Prem / Rancher Full)**: Helm charts deploying to SUSE Virtualization (Harvester HCI) + Rancher Open Source + RKE2 + Harvester Add-ons (VM Auto-Balance, Kube-OVN, LVM Local Storage for direct NVMe IOPS) + vCluster for isolated multi-tenancy.
+- **`REQ-TOP-007` [MUST]**: **Plan D (Public Cloud Elastic Scale / GKE)**: OCI images and Helm charts deploy to GKE Standard / EKS with cloud-managed load balancers, Cloud Persistent Disks, and HPA elasticity without code or image modification (`I-PLATFORM-001`).
 
 ### 3.3 Pillar C: Storage Volume & Spool Binding [MUST]
-- **`REQ-TOP-006` [MUST]**: Manifests MUST provision dedicated persistent volumes for Edge mounted at `/spool` supporting Option A (Node-Local NVMe HostPath for max performance) and Option B (Dedicated CSI Block Volume `ReadWriteOnce` via StatefulSet `volumeClaimTemplates` for cloud pod reschedule reattachment), with zero concurrent-locking overhead (`I-STORAGE-001`).
-- **`REQ-TOP-007` [MUST]**: In degraded broker scenarios, SpoolWatermarkGate MUST enforce the 95%/85% hysteresis threshold against the mounted persistent volume (`I-EDGE-005`).
+- **`REQ-TOP-008` [MUST]**: Manifests provision dedicated persistent volumes for Edge mounted at `/spool` supporting Option A (Node-Local NVMe HostPath) and Option B (Dedicated CSI Block Volume `ReadWriteOnce`), ensuring single-writer isolation (`I-STORAGE-001`, `I-STORAGE-002`).
+- **`REQ-TOP-009` [MUST]**: In degraded broker scenarios, SpoolWatermarkGate MUST enforce 95%/85% hysteresis against the mounted persistent volume (`I-EDGE-005`).
 
-### 3.4 Pillar D: Probes & Coordinated Lifecycle [MUST]
-- **`REQ-TOP-008` [MUST]**: Edge and Core expose HTTP probes: `/actuator/health/liveness` and `/actuator/health/readiness`. Edge readiness probe reflects `JournalRecoveryWorker` completion status (`I-EDGE-004`).
-- **`REQ-TOP-009` [MUST]**: Container runtimes MUST configure `terminationGracePeriodSeconds` ($\ge 30\text{s}$). Edge catches SIGTERM, marks readiness `OUT_OF_SERVICE`, completes active group commits, and drains (`I-GRACEFUL-001`).
+### 3.4 Pillar D: Probes & Coordinated Shutdown Lifecycle [MUST]
+- **`REQ-TOP-010` [MUST]**: Edge and Core expose HTTP probes: `/actuator/health/liveness` and `/actuator/health/readiness`. Edge readiness reflects `JournalRecoveryWorker` completion (`I-EDGE-004`).
+- **`REQ-TOP-011` [MUST]**: Containers configure `terminationGracePeriodSeconds` ($\ge 30\text{s}$) exceeding application shutdown timeout (20s). Edge executes strict shutdown ordering (`I-LIFECYCLE-001`); Core commits transactions prior to JetStream ACK (`I-LIFECYCLE-002`).
 
-### 3.5 Operational Governance [SHOULD / COULD / WON'T]
-- **`REQ-TOP-010` [SHOULD]**: Provide Kubernetes Horizontal Pod Autoscaler (HPA) templates: Edge scales on CPU/RPS; Core scales on NATS JetStream consumer lag.
-- **`REQ-TOP-011` [COULD]**: Provide unified Prometheus/Grafana dashboard definitions monitoring multi-pod Edge/Core metrics and NATS queue depths.
-- **`REQ-TOP-012` [WON'T]**: Embedded Kubernetes client libraries, CRDs, or custom operator controllers inside the Wallet application runtime.
+### 3.5 Pillar E: Security & Secret Injection Boundary (Hook for 000.9.3) [MUST]
+- **`REQ-TOP-012` [MUST]**: Topology manifests MUST support TLS 1.3-capable ingress listeners and NATS connections. Credentials and secrets MUST be injected via platform-native Secret mounts without baking into images. Core network policies MUST restrict direct public ingress.
+
+### 3.6 Operational Governance [SHOULD / COULD / WON'T]
+- **`REQ-TOP-013` [SHOULD]**: Horizontal Pod Autoscaler (HPA) templates: Edge scales on CPU/RPS/active connections; Core scales on NATS consumer lag/processing latency.
+- **`REQ-TOP-014` [COULD]**: Unified Prometheus/Grafana dashboard definitions monitoring Edge/Core metrics and NATS queue depths.
+- **`REQ-TOP-015` [WON'T]**: Embedded Kubernetes client libraries, CRDs, or custom operators inside application runtimes.
 
 ---
 
 ## 4. Cross-Feature Impact Matrix (`I-SDD-005`)
 
-| Participating Module | Affected Flow / Contract | Potential Failure Mode | Invariant / Mitigation |
+| Module | Affected Flow | Potential Failure Mode | Invariant / Mitigation |
 | :--- | :--- | :--- | :--- |
-| **`edge`** (Container) | Ingress scaling & pod termination | Pod killed during fsync group commit | `I-GRACEFUL-001`: SIGTERM hook flushes active batch before container exit |
-| **`core`** (Deployment) | Asymmetric horizontal scaling | Core scaled to 8 replicas with 10 Edge nodes | `I-TOPOLOGY-001`: JetStream competing consumers load-balance dynamically |
-| **`storage`** (PV/PVC) | Spillover journal write path | Ephemeral container storage cleared on restart | `I-STORAGE-001`: Dedicated PVC mount at `/spool` survives pod crashes |
-| **`nats`** (StatefulSet) | Inter-process message bus | NATS pod rescheduled or restarting | `I-EDGE-001`: Edge spools to persistent volume until NATS recovers |
-| **`platform`** (RKE2/GKE) | Multi-cloud / appliance portability | Hardcoded platform APIs break portability | `I-PLATFORM-001`: Strictly 12-Factor environment variable configuration |
+| **`edge`** (Container) | Ingress scaling & pod termination | Pod killed during fsync group commit | `I-LIFECYCLE-001`: SIGTERM hook flushes active batch before container exit |
+| **`core`** (Deployment) | Independent horizontal scaling | Core scaled to 8 replicas with 3 Edge nodes | `I-TOPOLOGY-001`: JetStream competing consumer group load-balances dynamically |
+| **`storage`** (PV/PVC) | Spillover journal write path | Ephemeral container storage cleared on restart | `I-STORAGE-001`, `I-STORAGE-002`: Dedicated volume mount survives container restart |
+| **`nats`** (Broker) | Inter-process message bus | NATS pod rescheduled or restarting | `I-MESSAGING-001`: Edge spools locally until NATS recovers; broker decouples runtimes |
+| **`platform`** (RKE2/GKE) | Multi-cloud / appliance portability | Hardcoded platform APIs break portability | `I-PLATFORM-001`: 12-Factor external config; zero orchestrator library deps |
 
 ---
 
@@ -87,19 +95,20 @@ This specification packages Edge and Core into discrete OCI container images, de
 | Requirement | 1. Positive Canonical Test | 2. Invalid Input / Boundary Gate | 3. Invariant Breach Gate |
 | :--- | :--- | :--- | :--- |
 | `REQ-TOP-001` (`I-CONTAINER-001`) | `ContainerImageVerificationTest.verifyEdgeImage()` | JDBC driver found in `wallet-edge` $\to$ Fail | Root user execution $\to$ Non-root gate fail |
-| `REQ-TOP-003` (`I-TOPOLOGY-001`) | `DockerComposeSmokeIT.shouldRunMultiProcessCluster()` | Core down $\to$ Edge remains healthy and accepts | Port conflict $\to$ Abort startup |
-| `REQ-TOP-006` (`I-STORAGE-001`) | `SpoolVolumePersistenceIT.shouldPersistAcrossPodCrash()` | Mount missing/read-only $\to$ Edge readiness OUT_OF_SERVICE | Spool full $\to$ Reject degraded acceptance (503) |
-| `REQ-TOP-008` (`REQ-TOP-009`) | `GracefulShutdownIT.shouldFlushBatchOnSigterm()` | Kill -9 $\to$ Next pod start executes journal replay | Hanging shutdown $\to$ Force kill at 30s |
-| `REQ-TOP-010` (HPA Lag Scaling) | `ScalingTopologyTest.verifyHpaManifests()` | Zero consumer replicas $\to$ NATS buffers without loss | Monolithic scaling $\to$ Fail architecture rule |
+| `REQ-TOP-005` (Plan B Appliance) | `LowCostApplianceSmokeIT.shouldRunWithoutKubernetes()` | Missing HostPath dir $\to$ Abort fast at boot | Port conflict on 8080/8081 $\to$ Abort |
+| `REQ-TOP-008` (`I-STORAGE-001`) | `SpoolVolumePersistenceIT.shouldPersistAcrossPodCrash()` | Mount missing/read-only $\to$ Edge readiness OUT_OF_SERVICE | Spool full $\to$ Reject degraded acceptance (503) |
+| `REQ-TOP-011` (`I-LIFECYCLE-001`) | `GracefulShutdownIT.shouldFlushBatchOnSigterm()` | Kill -9 $\to$ Next start executes recovery replay | Hanging shutdown $\to$ Force kill after grace period |
+| `REQ-TOP-013` (HPA Lag Scaling) | `ScalingTopologyTest.verifyHpaManifests()` | Zero consumer replicas $\to$ NATS buffers without loss | Monolithic scaling $\to$ Fail architecture rule |
 
 ---
 
 ## 6. Acceptance Criteria
 
-- [ ] Multi-stage Docker builds generate discrete, minimal OCI images for `wallet-edge` and `wallet-core`.
-- [ ] Docker Compose environment boots discrete `edge` and `core` containers communicating exclusively via NATS.
-- [ ] Helm charts template asymmetric replicas ($N_{\text{edge}} \ne M_{\text{core}}$) and dedicated PV mounts at `/spool`.
+- [ ] Multi-stage Docker builds generate discrete, hardened OCI images for `wallet-edge` (non-root, no JDBC) and `wallet-core`.
+- [ ] Plan B lean appliance operates reliably on single Linux host/VM without Kubernetes, using Docker Compose or free Rancher (`REQ-TOP-005`).
+- [ ] Edge and Core scale independently ($N \ge 1, M \ge 1$) without process affinity (`I-TOPOLOGY-001`).
+- [ ] Helm charts template dedicated single-writer persistent volumes for Edge at `/spool` (`I-STORAGE-001`).
+- [ ] SIGTERM lifecycle hook proves in-flight group commits are persisted before process termination (`I-LIFECYCLE-001`).
+- [ ] Core commits financial transaction to PostgreSQL before ACKing JetStream message (`I-LIFECYCLE-002`).
 - [ ] Zero Kubernetes client libraries or proprietary orchestrator APIs exist in application dependencies (`I-PLATFORM-001`).
-- [ ] SIGTERM lifecycle hook proves in-flight group commits are persisted before process termination (`I-GRACEFUL-001`).
-- [ ] Spool storage survives pod rescheduling and replays backlogged commands to NATS upon restart (`I-STORAGE-001`).
 - [ ] Total lines in this specification do not exceed 250 lines (`I-SDD-006`).

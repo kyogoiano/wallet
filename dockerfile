@@ -72,25 +72,28 @@ FROM oraclelinux:9-slim AS edge
 ENV JAVA_HOME=/usr/java/valhalla-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-# Install curl for container healthcheck
+# Install curl for container healthcheck and create non-root wallet user
 RUN set -eux; \
     microdnf install -y curl; \
-    microdnf clean all
+    microdnf clean all; \
+    useradd -u 10001 -m -s /bin/sh wallet; \
+    mkdir -p /spool; \
+    chown -R 10001:10001 /spool; \
+    chmod 700 /spool
 
 # Re-copy only the Valhalla JDK from stage 1
 COPY --from=builder /usr/java/valhalla-jdk /usr/java/valhalla-jdk
 
 WORKDIR /app
 
-# Pre-create spool directory for journal
-RUN mkdir -p /spool && chmod 777 /spool
+COPY --from=builder --chown=10001:10001 /app/edge/build/libs/wallet-edge.jar app.jar
 
-COPY --from=builder /app/edge/build/libs/wallet-edge.jar app.jar
+USER 10001:10001
 
 VOLUME ["/spool"]
 EXPOSE 8080 8443/udp
 
-ENTRYPOINT ["java", "-Duser.timezone=UTC", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Duser.timezone=UTC", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
 
 # =========================================================
 # Core Runtime Stage (wallet-core / default)
@@ -100,18 +103,21 @@ FROM oraclelinux:9-slim AS core
 ENV JAVA_HOME=/usr/java/valhalla-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
 
-# Install native C++ runtime, OpenMP for ONNX Runtime (I-FUSION-004), and curl for healthcheck
+# Install native C++ runtime, OpenMP for ONNX Runtime (I-FUSION-004), curl for healthcheck, and create non-root wallet user
 RUN set -eux; \
     microdnf install -y libstdc++ libgomp curl; \
-    microdnf clean all
+    microdnf clean all; \
+    useradd -u 10001 -m -s /bin/sh wallet
 
 # Re-copy only the Valhalla JDK from stage 1
 COPY --from=builder /usr/java/valhalla-jdk /usr/java/valhalla-jdk
 
 WORKDIR /app
 
-COPY --from=builder /app/build/libs/wallet-core.jar app.jar
+COPY --from=builder --chown=10001:10001 /app/build/libs/wallet-core.jar app.jar
+
+USER 10001:10001
 
 EXPOSE 8081
 
-ENTRYPOINT ["java", "-Duser.timezone=UTC", "--enable-native-access=ALL-UNNAMED", "-jar", "app.jar"]
+ENTRYPOINT ["java", "-Duser.timezone=UTC", "--enable-native-access=ALL-UNNAMED", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]

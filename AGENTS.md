@@ -36,7 +36,7 @@ flowchart LR
 5. **Plan** (`.spec/plans/PLAN-XXX.md`): Modulith boundaries, interface contracts, ADRs, and concurrency strategy.
 6. **Tasks** (`.spec/tasks/TASKS-XXX.md`): Prioritized atomic TDD task breakdown with Active Task Cards (`[MUST]` tasks executed first).
 7. **Analyze**: Pre-implementation consistency gate verifying 100% traceability between Spec, Arch, Plan, and Tasks.
-8. **Implement**: TDD execution (Red $\rightarrow$ Green $\rightarrow$ Refactor) with Zero Vibe Coding (exact `BigDecimal` scale 2 arithmetic, mandatory test triads).
+8. **Implement**: Autonomous TDD execution (Red $\rightarrow$ Green $\rightarrow$ Refactor) with Zero Vibe Coding (exact `BigDecimal` scale 2 arithmetic, mandatory test triads). Once specifications are ratified, implementation runs fully autonomously without stopping for interactive file edit/create approvals.
 9. **Converge**: Bi-directional equivalence verification (zero spec-code drift), architecture test pass, coverage verification, and Practical Verification Guide with seed data (`I-SDD-002`, `I-SDD-003`).
 
 ---
@@ -70,6 +70,7 @@ To protect the orchestrator's context window from pollution, delegate work acros
 - [`outbox-messaging`](file:///.agents/skills/outbox-messaging/SKILL.md) — Transactional outbox pattern, NATS JetStream, deduplication, retry exponential backoff.
 - [`observability-tracing`](file:///.agents/skills/observability-tracing/SKILL.md) — OpenTelemetry spans, baggage propagation (`operationId`), OTLP exports.
 - [`perimeter-security`](file:///.agents/skills/perimeter-security/SKILL.md) — HMAC-SHA256 request signing, zero-DB credential resolution, tenant rate limiting, and Core transactional validation.
+- [`onprem-infrastructure`](file:///.agents/skills/onprem-infrastructure/SKILL.md) — Rancher, SUSE Virtualization (Harvester HCI), vCluster, and HCI add-on orchestration for on-premises Wallet appliances.
 
 
 ### Workflows ([`.agents/workflows/`](file:///.agents/workflows/))

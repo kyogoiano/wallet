@@ -8,5 +8,7 @@ public enum EdgeReadinessState {
     INITIALIZING,
     RECOVERING,
     READY,
-    DEGRADED
+    DEGRADED,
+    OUT_OF_SERVICE
 }
+

@@ -1,10 +1,16 @@
 version: "3.9"
 
+# ==============================================================================
+# 🏢 Plan B: Low-Cost Lean On-Premises Appliance Topology (REQ-TOP-005)
+# Slashes the Kubernetes Tax: Runs on commodity x86 server/VM without K8s control plane.
+# Direct HostPath NVMe mounts (Option A, I-STORAGE-002), total footprint < 8GB RAM.
+# ==============================================================================
+
 services:
 
   nats:
     image: nats:2.14.5-alpine
-    container_name: nats_main
+    container_name: wallet-appliance-nats
     restart: always
     ports:
       - "4222:4222"
@@ -13,24 +19,21 @@ services:
       - ./nats-data:/data/jetstream
       - ./docker/nats.conf:/etc/nats.conf
     command: [ "-c", "/etc/nats.conf" ]
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
     networks:
-      - wallet-net
-
-  nats-client:
-    image: natsio/nats-box
-    container_name: nats_client
-    restart: always
-    depends_on:
-      - nats
-    entrypoint: /bin/sh
-    tty: true
-    environment:
-      - NATS_URL=nats://nats:4222
-      - NATS_TOKEN=dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+      - appliance-net
 
   postgres:
     image: pgvector/pgvector:pg18
-    container_name: wallet-postgres
+    container_name: wallet-appliance-postgres
+    restart: always
     environment:
       POSTGRES_DB: wallet
       POSTGRES_USER: wallet
@@ -38,20 +41,28 @@ services:
     ports:
       - "5432:5432"
     volumes:
-    - postgres_data:/var/lib/postgresql
-    - ./docker/init:/docker-entrypoint-initdb.d
+      - ./postgres-data:/var/lib/postgresql/data
+      - ./docker/init:/docker-entrypoint-initdb.d
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U wallet"]
       interval: 5s
-      timeout: 5s
+      timeout: 3s
       retries: 5
     networks:
-      - wallet-net
+      - appliance-net
 
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1
-    container_name: dragonfly
-    restart: unless-stopped
+    container_name: wallet-appliance-dragonfly
+    restart: always
     ports:
       - "6379:6379"
     entrypoint:
@@ -59,12 +70,10 @@ services:
       - "-c"
       - |
         mkdir -p /var/run/redis
-        chown -R 999:999 /var/run/redis 2>/dev/null || chown -R dfly:dfly /var/run/redis 2>/dev/null || true
         chmod 777 /var/run/redis
         rm -f /var/run/redis/redis.sock
         exec entrypoint.sh "$$@"
       - "--"
-
     command:
       - "--logtostderr"
       - "--proactor_threads=2"
@@ -72,76 +81,35 @@ services:
       - "--unixsocketperm=777"
       - "--maxmemory=512mb"
       - "--cache_mode=true"
-
     volumes:
-      - dragonfly-data:/data
+      - ./dragonfly-data:/data
       - redis-socket:/var/run/redis
-
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
     healthcheck:
       test: ["CMD-SHELL", "test -S /var/run/redis/redis.sock"]
       interval: 2s
       timeout: 2s
       retries: 10
-      start_period: 1s
-
     networks:
-      wallet-net:
+      appliance-net:
         aliases:
           - redis
           - dragonfly
 
-  dragonfly-client:
-    image: redis:alpine
-    container_name: dragonfly-client
-    restart: always
-    depends_on:
-      dragonfly:
-        condition: service_healthy
-    entrypoint: /bin/sh
-    tty: true
-    volumes:
-      - redis-socket:/var/run/redis
-    networks:
-      - wallet-net
-
-  openobserve:
-    image: openobserve/openobserve:latest-amd64-simd
-    container_name: openobserve
-    stop_grace_period: 30s
-    environment:
-      - ZO_ROOT_USER_EMAIL=leandro.ueg@gmail.com
-      - ZO_ROOT_USER_PASSWORD=Admin123!@#
-      - ZO_TELEMETRY=false
-    ports:
-      - "5080:5080"
-    volumes:
-      - openobserve-data:/data
-    networks:
-      - wallet-net
-
-  otel-collector:
-    image: otel/opentelemetry-collector:latest
-    container_name: otel-collector
-    command: [ "--config=/etc/otel-collector-config.yml" ]
-    depends_on:
-      - openobserve
-    volumes:
-      - ./docker/otel-collector-config.yml:/etc/otel-collector-config.yml
-    ports:
-      - "4317:4317" # gRPC
-      - "4318:4318" # HTTP
-    networks:
-      wallet-net:
-        aliases:
-          - otel-collector
-
-  app:
+  core:
     build:
       context: .
       dockerfile: dockerfile
       target: core
-    container_name: wallet-app
-    restart: unless-stopped
+    container_name: wallet-appliance-core
+    restart: always
     user: "10001:10001"
     depends_on:
       postgres:
@@ -150,13 +118,12 @@ services:
         condition: service_started
       dragonfly:
         condition: service_healthy
-      otel-collector:
-        condition: service_started
     volumes:
       - redis-socket:/var/run/redis
     environment:
       SERVER_PORT: 8081
       WALLET_RUNTIME_MODE: multi-process
+      WALLET_EDGE_ENABLED: "false"
       NATS_URL: nats://nats:4222
       NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet
@@ -166,12 +133,17 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       REDIS_SOCKET_ENABLED: "true"
       REDIS_SOCKET_PATH: /var/run/redis/redis.sock
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-core,service.version=0.0.1-SNAPSHOT
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
     ports:
       - "8081:8081"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 1024M
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
       interval: 5s
@@ -179,23 +151,24 @@ services:
       retries: 10
       start_period: 20s
     networks:
-      - wallet-net
+      - appliance-net
 
   edge:
     build:
       context: .
       dockerfile: dockerfile
       target: edge
-    container_name: wallet-edge
-    restart: unless-stopped
+    container_name: wallet-appliance-edge
+    restart: always
     user: "10001:10001"
     depends_on:
       nats:
         condition: service_started
-      app:
+      core:
         condition: service_healthy
     volumes:
-      - edge-spool:/spool
+      # Option A: Direct HostPath NVMe Mount for single-writer spool journal (I-STORAGE-001, I-STORAGE-002)
+      - ./spool-data:/spool
     environment:
       SERVER_PORT: 8080
       WALLET_RUNTIME_MODE: multi-process
@@ -203,13 +176,18 @@ services:
       NATS_URL: nats://nats:4222
       NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
       EDGE_SPOOL_DIR: /spool
-      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
-      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-edge,service.version=0.0.1-SNAPSHOT
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC"
     ports:
       - "8080:8080"
       - "8443:8443/udp"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
     healthcheck:
       test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/readiness || exit 1"]
       interval: 5s
@@ -217,16 +195,11 @@ services:
       retries: 10
       start_period: 10s
     networks:
-      - wallet-net
+      - appliance-net
 
 volumes:
-  postgres_data:
-  openobserve-data:
-  dragonfly-data:
   redis-socket:
-  edge-spool:
 
 networks:
-  backend:
-  wallet-net:
+  appliance-net:
     driver: bridge

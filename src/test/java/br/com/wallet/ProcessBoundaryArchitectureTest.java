@@ -80,4 +80,19 @@ class ProcessBoundaryArchitectureTest {
 
         rule.check(allProductionClasses);
     }
+
+    @Test
+    @DisplayName("REQ-TOP-015 & I-PLATFORM-001: Application packages must not depend on Kubernetes or container orchestrator SDKs")
+    void assertZeroKubernetesOrPlatformDependencies() {
+        ArchRule rule = noClasses()
+                .that().resideInAnyPackage("br.com.wallet..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "io.fabric8..",
+                        "io.kubernetes..",
+                        "com.github.dockerjava..",
+                        "org.mandas.docker.."
+                );
+
+        rule.check(allProductionClasses);
+    }
 }

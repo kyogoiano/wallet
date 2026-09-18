@@ -83,6 +83,10 @@ subprojects {
 		enabled = true
 	}
 
+	tasks.withType(Test).configureEach {
+		jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
+	}
+
 	dependencies {
 		implementation 'org.springframework.boot:spring-boot-starter'
 		implementation 'org.springframework.modulith:spring-modulith-starter-core'
@@ -146,6 +150,7 @@ tasks.named('test') {
 	useJUnitPlatform {
 		excludeTags 'integration-slm'
 	}
+	jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
 	finalizedBy jacocoTestReport
 }
 

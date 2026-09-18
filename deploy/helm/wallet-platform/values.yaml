@@ -1,0 +1,93 @@
+# ==============================================================================
+# Wallet Platform Helm Values — Default Baseline (REQ-TOP-006, REQ-TOP-007)
+# ==============================================================================
+
+global:
+  environment: production
+  runtimeMode: multi-process
+
+edge:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: wallet-edge
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: LoadBalancer
+    port: 8080
+    quicPort: 8443
+  persistence:
+    enabled: true
+    storageClass: ""
+    accessMode: ReadWriteOnce
+    size: 10Gi
+    mountPath: /spool
+  resources:
+    limits:
+      cpu: "2000m"
+      memory: "2048Mi"
+    requests:
+      cpu: "500m"
+      memory: "1024Mi"
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001
+    runAsNonRoot: true
+  podSecurityContext:
+    fsGroup: 10001
+  terminationGracePeriodSeconds: 30
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+
+core:
+  enabled: true
+  replicaCount: 2
+  image:
+    repository: wallet-core
+    tag: latest
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 8081
+  resources:
+    limits:
+      cpu: "4000m"
+      memory: "4096Mi"
+    requests:
+      cpu: "1000m"
+      memory: "2048Mi"
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001
+    runAsNonRoot: true
+  podSecurityContext:
+    fsGroup: 10001
+  terminationGracePeriodSeconds: 30
+  hpa:
+    enabled: false
+    minReplicas: 2
+    maxReplicas: 8
+    targetConsumerLag: 500
+
+nats:
+  url: "nats://nats:4222"
+  secretName: "wallet-nats-secret"
+
+postgres:
+  url: "jdbc:postgresql://postgres:5432/wallet"
+  secretName: "wallet-postgres-secret"
+
+dragonfly:
+  host: "dragonfly"
+  port: 6379
+
+networkPolicy:
+  enabled: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

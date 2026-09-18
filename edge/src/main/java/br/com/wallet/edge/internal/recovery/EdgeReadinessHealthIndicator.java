@@ -26,7 +26,7 @@ public class EdgeReadinessHealthIndicator implements ReactiveHealthIndicator {
         EdgeReadinessState current = state.get();
         return switch (current) {
             case READY -> Health.up().withDetail("edgeState", current.name()).build();
-            case RECOVERING, INITIALIZING -> Health.outOfService()
+            case RECOVERING, INITIALIZING, OUT_OF_SERVICE -> Health.outOfService()
                     .withDetail("edgeState", current.name())
                     .withDetail("reason", detailMessage.get())
                     .build();
@@ -35,6 +35,18 @@ public class EdgeReadinessHealthIndicator implements ReactiveHealthIndicator {
                     .withDetail("reason", detailMessage.get())
                     .build();
         };
+    }
+
+    public void markReady() {
+        transitionTo(EdgeReadinessState.READY, "Gateway ready");
+    }
+
+    public void markOutOfService(String reason) {
+        transitionTo(EdgeReadinessState.OUT_OF_SERVICE, reason);
+    }
+
+    public void markOutOfService() {
+        markOutOfService("Gateway entering shutdown sequence");
     }
 
     public void transitionTo(EdgeReadinessState newState, String reason) {

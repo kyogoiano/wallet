@@ -101,7 +101,7 @@ public class GroupCommitEngine implements Closeable {
                 batch.clear();
                 buffer.clear();
             } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
+                // Interrupted while waiting; break to drain remaining records
                 break;
             } catch (Exception e) {
                 // Unexpected loop error
@@ -109,10 +109,18 @@ public class GroupCommitEngine implements Closeable {
         }
 
         // Drain any remaining records upon shutdown
-        if (!queue.isEmpty()) {
+        // Clear interrupted status so NIO FileChannel flush doesn't throw ClosedByInterruptException
+        boolean wasInterrupted = Thread.interrupted();
+        try {
             queue.drainTo(batch);
             if (!batch.isEmpty()) {
                 processBatch(batch, buffer);
+                batch.clear();
+                buffer.clear();
+            }
+        } finally {
+            if (wasInterrupted) {
+                Thread.currentThread().interrupt();
             }
         }
     }

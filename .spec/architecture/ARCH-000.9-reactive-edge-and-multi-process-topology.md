@@ -105,10 +105,10 @@ flowchart TD
 
 ### 3.3 Subsystem C: Asynchronous IPC & Scaling Fabric
 - **Broker Quorum**: Client receives `202 ACCEPTED` only upon JetStream durable PUBACK or local segment `force(false)` (`I-EDGE-001`).
-- **Asymmetric Scaling Fabric (`I-TOPOLOGY-001`)**:
-  - Edge scales horizontally ($N \ge 2$) based on perimeter network concurrency and RPS.
-  - Core scales independently ($M \ge 2$) based on database thread pools and fraud computation limits.
-  - Core instances join a durable JetStream competing consumer group on `commands.wallet.*`. JetStream dynamically load-balances across all healthy Core replicas without peer service discovery.
+- **Independent Horizontal Scaling (`I-TOPOLOGY-001`)**:
+  - Edge scales horizontally ($N \ge 1$) based on perimeter network concurrency, active connections, and RPS.
+  - Core scales independently ($M \ge 1$) based on database thread pools, consumer lag, and fraud computation limits.
+  - Core instances join a durable JetStream competing consumer group on `commands.wallet.*`. JetStream dynamically load-balances across all healthy Core replicas without peer service discovery or process affinity.
 - **Traceability & Deduplication (`I-IDEMPOTENCY-001`, `I-DEDUP-001`, `I-OBS-001`)**:
   - Every message carries `Nats-Msg-Id: <operationId>`, traceparent, and baggage headers. Duplicate replays are silently discarded by JetStream or handled idempotently by Core.
 
@@ -118,7 +118,7 @@ flowchart TD
 
 | Failure Scenario | Immediate Detection | System Impact | Automated Recovery / Mitigation |
 | :--- | :--- | :--- | :--- |
-| **Core Process Crash / OOM** | NATS consumer heartbeats drop | Zero impact on Edge ingress | Edge continues accepting commands, spools to JetStream/local disk. Core pod restarts and resumes consumer group (`I-PROCESS-001`). |
+| **Core Process Crash / OOM** | NATS consumer heartbeats drop | Zero impact on Edge ingress | Edge continues accepting commands while broker/spool capacity permits. Core pod restarts and resumes consumer group (`I-PROCESS-001`). |
 | **NATS JetStream Outage** | `BrokerCircuitBreaker` trips `OPEN` ($>10\%$ errors or $P99 > 50\text{ms}$) | Edge switches to local degraded journal | Edge appends commands to preallocated 64MB segment with group-commit `fsync`, returns `202 ACCEPTED` (`I-EDGE-001`). |
 | **Edge Host VM Destruction (Option B)** | K8s node failure detector | Pod terminated | K8s StatefulSet schedules replacement pod on healthy node, re-attaches same `ReadWriteOnce` PV. `JournalRecoveryWorker` scans spool and replays to NATS. |
 | **Journal File Corruption** | CRC32C checksum mismatch during recovery scan | Recovery scan halted on corrupted segment | Segment moved to `.corrupt` forensic isolation; critical alert raised. Corrupt bytes NEVER enter application DLQ (`I-EDGE-018`). |
@@ -136,13 +136,12 @@ flowchart LR
     Tier3 --> Tier4["Tier 4: Public Cloud<br/>GKE Standard<br/>Cloud SSD PV + HPA"]
 ```
 
-| Deployment Tier | Edge Model | Core Model | Storage Profile | Target Environment |
-| :--- | :--- | :--- | :--- | :--- |
-| **Tier 0 (Developer)** | Single container (8080) | Single container (8081) | Named Volume / Local Directory | Local Docker / CI |
-| **Tier 1 (Small Appliance)** | 2 replicas (`StatefulSet`) | 2 replicas (`Deployment`) | **Option A**: Local NVMe HostPath | RKE2 3-node bare-metal cluster |
-| **Tier 2 (Enterprise On-Prem)**| 4+ replicas (`StatefulSet`) | 2+ replicas (`Deployment`) | **Option B**: Dedicated CSI RWO Block Volume | Rancher-managed RKE2 / SAN |
-| **Tier 3 (Multi-Tenant)** | Asymmetric per vCluster | Asymmetric per vCluster | **Option B**: Dedicated CSI RWO Block Volume | RKE2 + SUSE vCluster |
-| **Tier 4 (Public Cloud)** | HPA autoscaling on RPS | HPA autoscaling on lag | **Option B**: Cloud Persistent Disk (RWO) | GKE Standard / EKS |
+| Profile | Environment | Edge Model | Core Model | Storage Profile | Target Scenario |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **Profile D0** | Docker Compose | Single container (8080) | Single container (8081) | Named Volume / Local Directory | Local Dev / Small Appliance |
+| **Profile P1** | Kubernetes / RKE2 | $N$ replicas (`Deployment`) | $M$ replicas (`Deployment`) | Dedicated Volume per Pod | Private Enterprise On-Prem |
+| **Profile P2** | vCluster | $N$ replicas (`Deployment`) | $M$ replicas (`Deployment`) | Dedicated CSI RWO Block Volume | Multi-Tenant Appliance |
+| **Profile P3** | Public Cloud GKE | HPA (RPS/connections) | HPA (Consumer Lag) | Dedicated Cloud Persistent Disk | Public Cloud Elastic Scale |
 
 ---
 
@@ -155,8 +154,11 @@ flowchart LR
 | **`I-EDGE-005`** | Spool Hysteresis | $\text{Usage} \ge 95\% \implies \text{RejectDegraded}; \quad \text{Resume} \iff \text{Usage} < 85\%$ |
 | **`I-PROCESS-001`**| Crash Isolation | $\text{Crash}(\text{Core}) \not\to \text{Crash}(\text{Edge})$ |
 | **`I-CONTRACT-001`**| Contract Decoupling | $\text{Deps}(\text{Edge}) \cap \{\text{ledger.internal}, \text{fraud.internal}, \text{persistence}, \text{JDBC}\} = \emptyset$ |
-| **`I-JOURNAL-001`**| Single-Writer Spool | $\text{ConcurrentWriters}(\text{SpoolSegment}) = 1, \quad \text{AccessMode} = \text{ReadWriteOnce}$ |
+| **`I-JOURNAL-001`**| Single-Writer Spool | $\text{ConcurrentWriters}(\text{SpoolSegment}) = 1, \quad \text{Spool}(\text{Pod}_i) \cap \text{Spool}(\text{Pod}_j) = \emptyset$ |
 | **`I-STORAGE-001`**| Volume Isolation | $\text{Storage}(\text{Spool}) \cap \text{Storage}(\text{PostgreSQL}) = \emptyset$ |
-| **`I-TOPOLOGY-001`**| Asymmetric Scaling | $\text{Replicas}(\text{Edge}) = N, \quad \text{Replicas}(\text{Core}) = M \quad (N \ne M)$ |
+| **`I-STORAGE-002`**| Explicit Durability Scope | $\text{HostPath}=\text{NodeLocalRestartOnly}; \quad \text{CSI RWO}=\text{PodRescheduleDurability}$ |
+| **`I-TOPOLOGY-001`**| Independent Scaling | $\text{Replicas}(\text{Edge}) = N, \quad \text{Replicas}(\text{Core}) = M \quad (N \ge 1, M \ge 1; N, M \text{ independent})$ |
+| **`I-MESSAGING-001`**| Broker-Mediated IPC | $\text{DirectCalls}(\text{Edge} \to \text{Core}) = \emptyset; \quad \text{IPC} \subset \text{NATS}(\text{commands.wallet.*})$ |
 | **`I-PLATFORM-001`**| Orchestrator Neutrality| $\text{Deps}(\text{Runtime}) \cap \{\text{KubernetesClient}, \text{vClusterAPI}\} = \emptyset$ |
-| **`I-GRACEFUL-001`**| Coordinated Drain | $\text{SIGTERM} \to \text{Readiness}=\text{OUT\_OF\_SERVICE} \to \text{force}(\text{Batch}) \to \text{Exit}(0)$ |
+| **`I-GRACEFUL-001`**| Coordinated Edge Drain | $\text{SIGTERM} \to \text{Readiness}=\text{OUT\_OF\_SERVICE} \to \text{force}(\text{Batch}) \to \text{Exit}(0)$ |
+| **`I-LIFECYCLE-002`**| Core ACK Safety | $\text{ACK}(\text{NATS}) \iff \text{Commit}(\text{PostgreSQL Transaction})$ |

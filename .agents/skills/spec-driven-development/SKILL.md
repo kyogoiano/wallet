@@ -97,8 +97,10 @@ This skill implements the **GitHub Spec Kit** methodology rigorously adapted for
   3. Verify: Zero orphan tasks exist without specification backing.
   4. Verify: Concurrency, error paths, and seed data prerequisites are fully specified.
 
-### Stage 7: Implement (Zero Vibe Coding — `I-TDD-002`)
+### Stage 7: Implement (Zero Vibe Coding — `I-TDD-002` & Autonomous Execution)
 - **Goal**: Deterministic Red $\to$ Green $\to$ Refactor execution.
+- **Autonomous Execution Protocol**:
+  Once a Specification (`SPEC-XXX`), Plan (`PLAN-XXX`), and Task list (`TASKS-XXX`) are ratified, the agent executes implementation **fully autonomously**. The agent MUST NOT pause or ask the human engineer for authorization to edit, create, or delete files, or to run commands. The agent drives the TDD cycle directly to completion.
 - **Actions**:
   1. **Red**: Write a failing unit/integration test. Verify that it fails for the expected domain reason.
   2. **Mandatory Test Triad**: Positive path + Invalid input gate + Invariant breach rejection.

@@ -12,9 +12,7 @@ import br.com.wallet.edge.internal.recovery.SpoolAckTracker;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.mockito.ArgumentCaptor;
 
-import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.UUID;
@@ -23,8 +21,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.Mockito.*;
 
 @DisplayName("Spool Volume Persistence & Recovery Integration Test (I-STORAGE-001, I-STORAGE-002, REQ-TOP-008)")
 class SpoolVolumePersistenceIT {

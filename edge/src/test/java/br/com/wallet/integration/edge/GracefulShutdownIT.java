@@ -2,7 +2,6 @@ package br.com.wallet.integration.edge;
 
 import br.com.wallet.edge.api.CommandType;
 import br.com.wallet.edge.api.EdgeReadinessState;
-import br.com.wallet.edge.internal.journal.segmented.BinaryRecordCodec;
 import br.com.wallet.edge.internal.journal.segmented.JournalRecord;
 import br.com.wallet.edge.internal.journal.segmented.SegmentedFileJournal;
 import br.com.wallet.edge.internal.recovery.EdgeReadinessHealthIndicator;

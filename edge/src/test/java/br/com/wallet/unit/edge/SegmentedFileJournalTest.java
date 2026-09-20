@@ -15,6 +15,7 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -41,7 +42,7 @@ class SegmentedFileJournalTest {
         }
         if (spoolDir != null && Files.exists(spoolDir)) {
             try (var stream = Files.walk(spoolDir)) {
-                stream.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                stream.sorted(Comparator.reverseOrder()).forEach(p -> {
                     try {
                         Files.deleteIfExists(p);
                     } catch (IOException ignored) {}
@@ -152,7 +153,7 @@ class SegmentedFileJournalTest {
         } finally {
             testDir.toFile().setWritable(true);
             try (var stream = Files.walk(testDir)) {
-                stream.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                stream.sorted(Comparator.reverseOrder()).forEach(p -> {
                     try {
                         Files.deleteIfExists(p);
                     } catch (IOException ignored) {}

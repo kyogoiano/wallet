@@ -30,7 +30,7 @@ public class EdgeOperationsController {
         this.ingress = ingress;
     }
 
-    @PostMapping("/transfers")
+    @PostMapping({"/transfers", "/transfer"})
     public ResponseEntity<?> acceptTransfer(
             @RequestHeader(value = "Idempotency-Key", required = false) UUID idempotencyKey,
             @RequestBody String requestJson,
@@ -39,7 +39,7 @@ public class EdgeOperationsController {
         return handleCommand(CommandType.TRANSFER, idempotencyKey, requestJson, request);
     }
 
-    @PostMapping("/deposits")
+    @PostMapping({"/deposits", "/deposit"})
     public ResponseEntity<?> acceptDeposit(
             @RequestHeader(value = "Idempotency-Key", required = false) UUID idempotencyKey,
             @RequestBody String requestJson,
@@ -48,7 +48,7 @@ public class EdgeOperationsController {
         return handleCommand(CommandType.DEPOSIT, idempotencyKey, requestJson, request);
     }
 
-    @PostMapping("/withdrawals")
+    @PostMapping({"/withdrawals", "/withdrawal", "/withdraw"})
     public ResponseEntity<?> acceptWithdrawal(
             @RequestHeader(value = "Idempotency-Key", required = false) UUID idempotencyKey,
             @RequestBody String requestJson,

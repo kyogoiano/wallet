@@ -6,7 +6,7 @@
 - **Author**: Antigravity Platform Infrastructure & Edge Resilience Guild
 - **Date**: 2026-09-13
 - **Target Modules**: `:edge` (`wallet-edge.jar`), Root Application (`wallet-core.jar`), Container Infrastructure (`dockerfile`, `docker-compose.yaml`, `deploy/helm/wallet-platform`)
-- **Architectural Scope**: Enforces independent horizontal scaling (`I-TOPOLOGY-001`), discrete hardened OCI packaging (`I-CONTAINER-001`), single-writer spool volume isolation (`I-STORAGE-001`, `I-STORAGE-002`), broker-mediated IPC (`I-MESSAGING-001`), coordinated shutdown lifecycles (`I-LIFECYCLE-001`, `I-LIFECYCLE-002`), and security plumbing hooks for Phase 000.9.3 (`REQ-TOP-014`).
+- **Architectural Scope**: Enforces independent horizontal scaling (`I-TOPOLOGY-001`), discrete hardened OCI packaging (`I-CONTAINER-001`), single-writer spool volume isolation (`I-STORAGE-001`, `I-STORAGE-002`), broker-mediated IPC (`I-MESSAGING-001`), coordinated shutdown lifecycles (`I-LIFECYCLE-001`, `I-LIFECYCLE-002`), and security plumbing hooks for Phase 000.9.3 (`REQ-TOP-012`).
 - **Governing Skills**: [`onprem-infrastructure`](file:///.agents/skills/onprem-infrastructure/SKILL.md) (Rancher, SUSE Virtualization, vCluster, and HCI add-on architecture).
 
 ---
@@ -15,7 +15,7 @@
 
 `PLAN-000.9.2` physicalizes the logical separation established in Phase 000.9.1. Edge and Core exhibit fundamentally different operational, resource, and failure characteristics:
 - **Edge Gateway (`wallet-edge`)**: I/O-bound reactive Netty runtime handling external HTTP/3 (QUIC) and HTTP/2 ingress, rate limiting, and local segmented journal `fsync`. Zero relational persistence dependencies (`I-CONTAINER-001`). Scales on network concurrency, active SSE streams, and request rate.
-- **Core Financial Engine (`wallet-core`)**: CPU- and transaction-bound engine executing ACID ledger mutations, `SELECT FOR UPDATE` account locks, fraud graphs, and smart savings sweeps. Headless, zero public HTTP ingress. Scales on NATS JetStream consumer lag and processing latency.
+- **Core Financial Engine (`wallet-core`)**: CPU- and transaction-bound engine executing ACID ledger mutations, `SELECT FOR UPDATE` account locks, fraud graphs, and smart savings sweeps. Exposes internal ClusterIP Service on port 8081 strictly for management/metrics, zero public HTTP ingress. Scales on NATS JetStream consumer lag and processing latency (`I-MESSAGING-001`).
 
 ```mermaid
 flowchart TD
@@ -43,7 +43,7 @@ flowchart TD
         NATS["NATS JetStream Cluster (TLS 1.3)<br/>Stream: commands (commands.wallet.*)<br/>Stream: operations (operations.status.*)"]
     end
 
-    subgraph CoreCluster["Core Financial Transaction Tier (Headless)"]
+    subgraph CoreCluster["Core Financial Transaction Tier (Internal ClusterIP Management)"]
         direction TB
         C1["wallet-core Pod 1<br/>Port 8081 (Internal Mgmt)"]
         C2["wallet-core Pod 2<br/>Port 8081 (Internal Mgmt)"]
@@ -51,7 +51,7 @@ flowchart TD
     end
 
     subgraph PersistenceTier["ACID Persistence Stores"]
-        PG[("PostgreSQL 17/19<br/>Ledger & Accounts")]
+        PG[("PostgreSQL 18.x (pgvector)<br/>Ledger & Accounts")]
         DF[("DragonflyDB Cluster<br/>Hot Cache & Velocity")]
     end
 
@@ -69,7 +69,7 @@ flowchart TD
 ## 2. Packaging & Container Hardening Design
 
 ### 2.1 Multi-Stage OCI Dockerfile
-The repository Dockerfile (`dockerfile`) uses multi-stage builds producing hardened, minimal OCI images on Eclipse Temurin / Valhalla JDK 27:
+The repository Dockerfile (`dockerfile`) uses multi-stage builds producing hardened, minimal OCI images on JDK 27 runtime (pinned in Dockerfile to Valhalla Early Access):
 
 ```dockerfile
 # Stage 1: Build
@@ -109,10 +109,14 @@ Automated test `ContainerImageVerificationTest` validates that `wallet-edge.jar`
 
 ## 3. Storage Architecture & Single-Writer Isolation
 
-### 3.1 Single-Writer Spool Ownership (`I-STORAGE-001`)
+### 3.1 Single-Writer Spool Ownership & Non-Root Permissions (`I-STORAGE-001`, `I-CONTAINER-001`)
 - Each `wallet-edge` container exclusively owns its mounted `/spool` directory.
 - `SegmentedFileJournal` acquires an OS-level file lock on `${SPOOL_DIR}/.spool.lock` via `FileChannel.tryLock()`.
 - If a container is rescheduled or cloned and attempts to mount an active directory, startup halts with `IllegalStateException`.
+- Under non-root execution (`UID 10001:10001`), mounted volumes are guaranteed write access via:
+  - **Docker Compose (Plan A & B)**: An ephemeral `spool-init` helper container mounts the volume as root before Edge starts, executing `mkdir -p /spool && chown -R 10001:10001 /spool && chmod 700 /spool && chmod -R u+rwX /spool`.
+  - **Kubernetes (Plan C & D)**: `podSecurityContext.fsGroup: 10001` automatically configures volume group ownership.
+  - **Runtime Diagnostics**: `SegmentedFileJournal` wraps `AccessDeniedException` on lock or segment acquisition with actionable remediation messages.
 
 ### 3.2 Dual Storage Profile Durability Scopes (`I-STORAGE-002`)
 | Profile | Volume Mechanism | Durability Guarantee | Target Topology |
@@ -149,12 +153,14 @@ In broker-degraded scenarios, `SpoolWatermarkGate` monitors disk capacity:
   - Infrastructure: `postgres` (pgvector 18), `dragonfly` (v1.40.1 UDS + TCP), `nats` (JetStream enabled), `otel-collector`, `openobserve`.
 - Healthcheck orchestration: Core checks `/actuator/health`; Edge checks `/actuator/health/readiness`.
 
-### 4.2 Plan B: Low-Cost Lean On-Prem Appliance (Non-K8s / Free Rancher Capabilities)
+### 4.2 Plan B: Low-Cost Lean On-Prem Appliance (Pure Non-K8s Docker Compose + Portainer CE)
 - **Target**: Branch appliances, single bare-metal servers, and budget-constrained deployments.
-- **Cost Minimization**: Avoids full Kubernetes control plane tax (no multi-node etcd, no API server overhead; saves $>8\text{GB}$ RAM and 4+ CPU cores).
-- **Orchestration**: Runs multi-container stack via Docker Compose or free Rancher Open Source capabilities (e.g. lightweight node agent / single-node K3s).
+- **Cost Minimization**: Eliminates Kubernetes control plane tax entirely (no multi-node etcd, no API server overhead; saves $>8\text{GB}$ RAM and 4+ CPU cores).
+- **Orchestration**: Runs multi-container stack via Docker Engine & Docker Compose directly on bare-metal host or lightweight VM (`docker-compose.appliance.yaml`). Zero Kubernetes or K3s overhead.
+- **Visual Management UI**: Bundles **Portainer CE** (`portainer/portainer-ce:latest`) listening on HTTP `9000` / HTTPS `9443` bound to `/var/run/docker.sock`. Gives operators visual stack deployments, container health monitoring, log viewing, and restart controls without needing CLI access.
+- **Ultra-Light Telemetry**: Employs **VictoriaLogs** (`victoriametrics/victoria-logs:latest`, ~30–50MB RAM) for structured logs and **VictoriaTraces** (`victoriametrics/victoria-traces:latest`, ~40–60MB RAM) for distributed traces, ingested via OpenTelemetry Collector (`docker/otel-collector-appliance-config.yml`). Slashes telemetry overhead from ~1.5GB (OpenObserve) to $<150\text{MB}$ RAM total.
 - **Storage**: Direct HostPath NVMe mounts at `/spool` for Edge and direct disk for PostgreSQL (`Option A`, `I-STORAGE-002`). Zero storage licensing, zero network SAN latency.
-- **Footprint**: Fits comfortably in 4–8 vCPUs and 8–16 GB RAM total.
+- **Footprint**: Resource limits strictly capped at ~5.8 GB RAM total (including Portainer 128MB, VictoriaLogs 256MB, VictoriaTraces 256MB), fitting comfortably well below the $<8\text{GB}$ constraint.
 
 ### 4.3 Plan C: Medium-Cost Enterprise On-Prem (Rancher Full + SUSE Virtualization / Harvester HCI)
 - **Target**: Regional enterprise data centers, regulated private banking clouds, multi-tenant appliances.
@@ -163,7 +169,7 @@ In broker-degraded scenarios, `SpoolWatermarkGate` monitors disk capacity:
   - **Kube-OVN**: Distributed firewall, micro-segmentation isolating Core port `8081` (`REQ-TOP-012`).
   - **LVM Local Storage**: Direct NVMe IOPS for `/spool` and PostgreSQL, bypassing Longhorn 3x network replication penalty.
   - **vCluster**: Isolated virtual Kubernetes control planes per tenant inside a shared RKE2 guest cluster.
-- **Manifests**: Helm chart under `deploy/helm/wallet-platform` with independent Edge/Core deployments and PodDisruptionBudget.
+- **Manifests**: Helm chart under `deploy/helm/wallet-platform` with independent Edge deployment, internal Core ClusterIP management Service (port 8081), and PodDisruptionBudget.
 
 ### 4.4 Plan D: Public Cloud Elastic Scale (GKE Standard / EKS)
 - **Target**: Hyperscale multi-region deployments with elastic autoscaling.
@@ -204,16 +210,52 @@ During shutdown:
 
 ---
 
-## 6. Security & Secret Injection Boundary (Hook for 000.9.3)
+## 6. Security & Secret Injection Boundary (Hook for 000.9.3 — REQ-TOP-012)
 
-`REQ-TOP-014` establishes the platform infrastructure required by Phase 000.9.3:
-1. **TLS 1.3 Termination**: Ingress manifests and Docker Compose support TLS certificates mounted into `/etc/ssl/certs/`.
+`REQ-TOP-012` establishes the platform infrastructure required by Phase 000.9.3:
+1. **TLS Transport Capabilities**: Ingress manifests and Docker Compose support TLS certificates mounted into `/etc/ssl/certs/`. TLS termination and re-encryption policies are deployment-profile concerns finalized in `SPEC-000.9.3`.
 2. **Secret Externalization**: Secrets (`NATS_TOKEN`, `SPRING_DATASOURCE_PASSWORD`, future HMAC keys) are injected via platform-native Kubernetes Secrets / environment variables, never committed to git or baked into OCI layers.
-3. **Core Network Isolation**: Core container exposes port `8081` internally only. Public Ingress routes `/operations/*` strictly to `wallet-edge`.
+3. **Core Network Isolation**: Core exposes internal management port `8081` only via ClusterIP Service and NetworkPolicy. Public Ingress routes strictly to `wallet-edge`. All financial command processing is broker-mediated over NATS JetStream (`I-MESSAGING-001`).
 
 ---
 
-## 7. Architecture Decision Records (ADRs)
+## 7. Automated OCI Delivery & Appliance GitOps (`REQ-TOP-016` to `REQ-TOP-019`)
+
+```mermaid
+flowchart LR
+    Dev[Developer Push] --> GitHub[GitHub Actions]
+    GitHub -->|Build Multi-Stage| OCI[GHCR Images: wallet-edge & wallet-core]
+    GitHub -->|helm package & push| HelmOCI[GHCR OCI Helm: oci://ghcr.io/charts/wallet-platform]
+    GitHub -.->|Invoke Webhook| Portainer[Portainer CE Webhook :9000]
+    Portainer -->|Pull & Redeploy| Appliance[Plan B Appliance Containers]
+    HelmOCI -->|helm install oci://...| HelmClient[Rancher / ArgoCD / Helm CLI]
+```
+
+### 7.1 GitHub Container Registry (GHCR) Publishing (`REQ-TOP-016`)
+- Workflow `.github/workflows/ci-cd-appliance.yml` activates on push to `main` branch and `v*` release tags.
+- Uses `docker/build-push-action` with Docker Buildx and GitHub Actions cache (`type=gha`).
+- Multi-stage targets: builds `edge` (`ghcr.io/${{ github.repository }}/wallet-edge`) and `core` (`ghcr.io/${{ github.repository }}/wallet-core`).
+- Tags generated: `latest`, branch slug, and short git commit SHA.
+
+### 7.2 Unified Helm OCI Artifact Distribution (`REQ-TOP-017`)
+- Leverages native Helm 3.8+ OCI registry support, eliminating the legacy `gh-pages` branch, `index.yaml`, and static web server overhead.
+- Packages `deploy/helm/wallet-platform` and pushes the `.tgz` archive as an OCI artifact directly to `oci://ghcr.io/${{ github.repository }}/charts` authenticated via `GITHUB_TOKEN`.
+- Consumed friction-free by Plan C (Harvester HCI / Rancher) and Plan D (GKE) without needing `helm repo add`:
+  ```bash
+  helm upgrade --install wallet-platform oci://ghcr.io/<owner>/charts/wallet-platform \
+    --version 0.1.0 \
+    -f deploy/helm/wallet-platform/values-harvester.yaml
+  ```
+- Supports referencing charts by immutable digest (`@sha256:...`) for enterprise zero-trust supply chain compliance (`REQ-TOP-019`).
+
+### 7.3 Portainer GitOps & Appliance Continuous Deployment (`REQ-TOP-018`)
+- Plan B on-prem appliance integrates with CI/CD via:
+  1. **Webhook-Triggered Auto-Deploy (Primary)**: Portainer exposes a unique webhook URL for the appliance stack. The CI/CD workflow invokes `POST $PORTAINER_WEBHOOK_URL` following successful GHCR image publishing. Portainer immediately pulls updated images and performs an in-place restart.
+  2. **Git-Backed Stack Polling (Fallback)**: Alternatively, Portainer connects directly to the repository Git URL and polls for changes to `docker-compose.appliance.yaml` at configured intervals.
+
+---
+
+## 8. Architecture Decision Records (ADRs)
 
 ### ADR-000.9.2-01: Discrete Hardened OCI Containers with Non-Root Execution
 - **Context**: Running containers as root introduces severe container breakout vulnerabilities. Packaging single images with conditional binaries violates `I-CONTAINER-001`.
@@ -233,9 +275,14 @@ During shutdown:
 - **Context**: Rolling container upgrades risk dropping in-flight journal writes or premature NATS message ACKs before PostgreSQL commits.
 - **Decision**: Enforce coordinated shutdown ordering for Edge (`I-LIFECYCLE-001`) and assert Core commits transactions before ACKing (`I-LIFECYCLE-002`).
 
+### ADR-000.9.2-05: Unified GHCR OCI Distribution for Images and Helm Charts
+- **Context**: Distributing container images on GHCR while maintaining a separate GitHub Pages branch for Helm `index.yaml` creates fragmented infrastructure and branch management complexity.
+- **Decision**: Consolidate all artifacts into GitHub Container Registry (`ghcr.io`) using native OCI artifact support for both Docker containers and Helm charts (`oci://ghcr.io/...`). Plan B appliance auto-deploys via Portainer Webhooks.
+- **Consequence**: Zero auxiliary infrastructure, zero extra branches (`gh-pages` eliminated), uniform authentication (`GITHUB_TOKEN`), and support for immutable sha256 digest pinning across both images and charts.
+
 ---
 
-## 8. Failure Modes & Boundary Resilience
+## 9. Failure Modes & Boundary Resilience
 
 | Scenario | Immediate Detection | System Impact | Automated Recovery / Mitigation |
 | :--- | :--- | :--- | :--- |
@@ -247,7 +294,7 @@ During shutdown:
 
 ---
 
-## 9. Zero Spec-Drift Verification Plan
+## 10. Zero Spec-Drift Verification Plan
 
 1. **Packaging & Boundary Verification**:
    - `ContainerImageVerificationTest`: Inspects `wallet-edge.jar` classpath to assert absence of JDBC/JPA/Postgres classes, and inspects Dockerfile layers for non-root UID `10001`.

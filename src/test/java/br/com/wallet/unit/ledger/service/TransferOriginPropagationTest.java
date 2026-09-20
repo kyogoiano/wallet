@@ -15,13 +15,12 @@ import br.com.wallet.ledger.internal.persistence.WalletOperationsDao;
 import br.com.wallet.ledger.internal.service.DepositFundsService;
 import br.com.wallet.ledger.internal.service.TransferFundsService;
 import br.com.wallet.ledger.internal.service.WalletOperationService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
-import org.mockito.Spy;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
 
@@ -45,6 +44,7 @@ class TransferOriginPropagationTest {
     @Mock
     private AccountDao accountDao;
     @Mock
+    @SuppressWarnings("rawtypes")
     private OutboxDao outboxDao;
     @Mock
     private WalletOperationsDao operationsDao;
@@ -52,13 +52,32 @@ class TransferOriginPropagationTest {
     private WalletOperationService walletOperationService;
     @Mock
     private ApplicationEventPublisher applicationEventPublisher;
-    @Spy
-    private Clock clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneId.of("UTC"));
 
-    @InjectMocks
+    private Clock clock;
     private TransferFundsService transferFundsService;
-    @InjectMocks
     private DepositFundsService depositFundsService;
+
+    @BeforeEach
+    @SuppressWarnings("unchecked")
+    void setUp() {
+        clock = Clock.fixed(Instant.parse("2026-08-23T12:00:00Z"), ZoneId.of("UTC"));
+        transferFundsService = new TransferFundsService(
+                walletOperationService,
+                outboxDao,
+                operationsDao,
+                accountDao,
+                clock,
+                applicationEventPublisher
+        );
+        depositFundsService = new DepositFundsService(
+                walletOperationService,
+                operationsDao,
+                outboxDao,
+                accountDao,
+                clock,
+                applicationEventPublisher
+        );
+    }
 
     private final UUID fromWallet = UUID.randomUUID();
     private final UUID toWallet = UUID.randomUUID();

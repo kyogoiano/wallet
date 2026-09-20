@@ -9,7 +9,7 @@ version: "3.9"
 services:
 
   nats:
-    image: nats:2.14.5-alpine
+    image: nats:2.15.0-alpine
     container_name: wallet-appliance-nats
     restart: always
     ports:
@@ -41,7 +41,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./postgres-data:/var/lib/postgresql/data
+      - ./postgres-data:/var/lib/postgresql
       - ./docker/init:/docker-entrypoint-initdb.d
     deploy:
       resources:
@@ -133,6 +133,9 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       REDIS_SOCKET_ENABLED: "true"
       REDIS_SOCKET_PATH: /var/run/redis/redis.sock
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-appliance-core,service.version=0.0.1-SNAPSHOT
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
     ports:
       - "8081:8081"
@@ -153,6 +156,16 @@ services:
     networks:
       - appliance-net
 
+  spool-init:
+    image: oraclelinux:9-slim
+    container_name: wallet-appliance-spool-init
+    user: "0:0"
+    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 700 /spool && chmod -R u+rwX /spool"]
+    volumes:
+      - ./spool-data:/spool
+    networks:
+      - appliance-net
+
   edge:
     build:
       context: .
@@ -166,6 +179,8 @@ services:
         condition: service_started
       core:
         condition: service_healthy
+      spool-init:
+        condition: service_completed_successfully
     volumes:
       # Option A: Direct HostPath NVMe Mount for single-writer spool journal (I-STORAGE-001, I-STORAGE-002)
       - ./spool-data:/spool
@@ -176,6 +191,9 @@ services:
       NATS_URL: nats://nats:4222
       NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
       EDGE_SPOOL_DIR: /spool
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-appliance-edge,service.version=0.0.1-SNAPSHOT
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC"
     ports:
       - "8080:8080"
@@ -197,8 +215,110 @@ services:
     networks:
       - appliance-net
 
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: wallet-appliance-portainer
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      - appliance-net
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:latest
+    container_name: wallet-appliance-victorialogs
+    restart: unless-stopped
+    profiles:
+      - telemetry
+    command:
+      - "-storageDataPath=/vlogs-data"
+    ports:
+      - "9428:9428"
+    volumes:
+      - victorialogs-data:/vlogs-data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      appliance-net:
+        aliases:
+          - victorialogs
+
+  victoriatraces:
+    image: victoriametrics/victoria-traces:latest
+    container_name: wallet-appliance-victoriatraces
+    restart: unless-stopped
+    profiles:
+      - telemetry
+    command:
+      - "-storageDataPath=/victoria-traces-data"
+    ports:
+      - "10428:10428"
+    volumes:
+      - victoriatraces-data:/victoria-traces-data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      appliance-net:
+        aliases:
+          - victoriatraces
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: wallet-appliance-otel-collector
+    restart: unless-stopped
+    profiles:
+      - telemetry
+    command: [ "--config=/etc/otel-collector-config.yml" ]
+    depends_on:
+      - victorialogs
+      - victoriatraces
+    volumes:
+      - ./docker/otel-collector-appliance-config.yml:/etc/otel-collector-config.yml
+    ports:
+      - "4317:4317" # gRPC
+      - "4318:4318" # HTTP
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      appliance-net:
+        aliases:
+          - otel-collector
+
 volumes:
   redis-socket:
+  portainer-data:
+  victorialogs-data:
+  victoriatraces-data:
 
 networks:
   appliance-net:

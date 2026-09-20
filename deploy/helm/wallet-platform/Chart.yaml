@@ -3,7 +3,7 @@ name: wallet-platform
 description: Helm Chart for Wallet Service V4 (Edge Gateway & Core Transaction Engine)
 type: application
 version: 0.1.0
-appVersion: "4.2.0"
+appVersion: "4.3.0"
 keywords:
   - wallet
   - financial

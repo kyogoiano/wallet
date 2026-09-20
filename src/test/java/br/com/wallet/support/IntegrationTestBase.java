@@ -37,7 +37,7 @@ public class IntegrationTestBase {
                 .withInitScript("schema.sql");
     }
 
-    private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.14.5-alpine");
+    private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.15.0-alpine");
 
     public static final GenericContainer<?> NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
             .withExposedPorts(4222, 8222)

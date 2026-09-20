@@ -48,6 +48,30 @@ class LowCostApplianceSmokeIT {
         // Verify Zero Kubernetes dependencies / images
         assertThat(content).doesNotContain("k8s");
         assertThat(content).doesNotContain("kube");
+
+        // Verify PostgreSQL 18.x with pgvector and major-version data path (/var/lib/postgresql)
+        assertThat(content).contains("image: pgvector/pgvector:pg18");
+        assertThat(content).contains("./postgres-data:/var/lib/postgresql");
+        assertThat(content).doesNotContain("/var/lib/postgresql/data");
+
+        // Verify spool-init volume permission auto-remediation (I-CONTAINER-001, I-STORAGE-002)
+        assertThat(content).contains("spool-init:");
+        assertThat(content).contains("chown -R 10001:10001 /spool");
+        assertThat(content).contains("condition: service_completed_successfully");
+
+        // Verify Portainer CE management UI (REQ-TOP-005)
+        assertThat(content).contains("image: portainer/portainer-ce:latest");
+        assertThat(content).contains("9000:9000");
+        assertThat(content).contains("9443:9443");
+        assertThat(content).contains("/var/run/docker.sock:/var/run/docker.sock");
+
+        // Verify Telemetry profile configuration (VictoriaLogs + VictoriaTraces + OTel Collector)
+        assertThat(content).contains("profiles:\n      - telemetry");
+        assertThat(content).contains("image: victoriametrics/victoria-logs:latest");
+        assertThat(content).contains("image: victoriametrics/victoria-traces:latest");
+        assertThat(content).contains("image: otel/opentelemetry-collector:latest");
+        assertThat(content).contains("OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318");
+        assertThat(content).doesNotContain("openobserve");
     }
 
     @Test
@@ -65,6 +89,12 @@ class LowCostApplianceSmokeIT {
         assertThat(content).contains("edge-spool:/spool");
         assertThat(content).contains("container_name: wallet-app");
         assertThat(content).contains("container_name: wallet-edge");
+        assertThat(content).contains("image: pgvector/pgvector:pg18");
+
+        // Verify spool-init volume permission auto-remediation (I-CONTAINER-001)
+        assertThat(content).contains("spool-init:");
+        assertThat(content).contains("chown -R 10001:10001 /spool");
+        assertThat(content).contains("condition: service_completed_successfully");
     }
 
     @Test

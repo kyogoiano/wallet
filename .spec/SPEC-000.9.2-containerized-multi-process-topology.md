@@ -24,7 +24,7 @@
 
 Following the logical separation in `SPEC-000.9.1`, this specification formalizes the **packaging, orchestration, and physical deployment topology** of the Wallet Platform across a **cost-conscious deployment progression**:
 1. **Plan A (Local Dev / CI)**: Single-host Docker Compose with zero infrastructure cost.
-2. **Plan B (Low-Cost Lean Appliance)**: Non-Kubernetes / lightweight container runtime on commodity bare-metal server or VM, leveraging Docker Compose or free Rancher Open Source capabilities. Slashes control plane RAM/CPU overhead ($<8\text{GB}$ total) and eliminates software licensing.
+2. **Plan B (Low-Cost Lean Appliance)**: Non-Kubernetes container runtime on commodity bare-metal server or VM, leveraging Docker Engine & Docker Compose. Slashes control plane RAM/CPU overhead ($<8\text{GB}$ total) and eliminates software licensing.
 3. **Plan C (Medium-Cost Enterprise On-Prem / Rancher Full)**: Full-stack SUSE Virtualization (Harvester HCI) + Rancher Open Source + RKE2 + Harvester Add-ons (VM Auto-Balance, Kube-OVN, LVM Local Storage) + vCluster for isolated multi-tenancy.
 4. **Plan D (Public Cloud Elastic Scale / GKE)**: Hyperscale GKE Standard with HPA on RPS and consumer lag.
 
@@ -56,7 +56,7 @@ Following the logical separation in `SPEC-000.9.1`, this specification formalize
 
 ### 3.2 Pillar B: Cost-Tiered Deployment Profiles [MUST]
 - **`REQ-TOP-004` [MUST]**: **Plan A (Local Dev & CI / Zero Cost)**: Docker Compose booting discrete `edge`, `core`, `nats`, `dragonfly`, `postgres` on developer workstation with healthcheck dependencies.
-- **`REQ-TOP-005` [MUST]**: **Plan B (Low-Cost Lean Appliance / No Heavy K8s)**: Multi-container deployment on single bare-metal host/VM without full Kubernetes control plane tax, using Docker Compose or free Rancher Open Source capabilities (e.g. lightweight node agent / K3s single-node). Direct HostPath NVMe storage (`I-STORAGE-002`), $<8\text{GB}$ RAM total footprint.
+- **`REQ-TOP-005` [MUST]**: **Plan B (Low-Cost Lean Appliance / No Heavy K8s)**: Multi-container deployment on single bare-metal host/VM without Kubernetes control plane tax, using Docker Engine & Docker Compose with Portainer CE for lightweight visual stack management (~50-128MB RAM). Direct HostPath NVMe storage (`I-STORAGE-002`), $<8\text{GB}$ RAM total footprint.
 - **`REQ-TOP-006` [MUST]**: **Plan C (Medium-Cost Enterprise On-Prem / Rancher Full)**: Helm charts deploying to SUSE Virtualization (Harvester HCI) + Rancher Open Source + RKE2 + Harvester Add-ons (VM Auto-Balance, Kube-OVN, LVM Local Storage for direct NVMe IOPS) + vCluster for isolated multi-tenancy.
 - **`REQ-TOP-007` [MUST]**: **Plan D (Public Cloud Elastic Scale / GKE)**: OCI images and Helm charts deploy to GKE Standard / EKS with cloud-managed load balancers, Cloud Persistent Disks, and HPA elasticity without code or image modification (`I-PLATFORM-001`).
 
@@ -71,9 +71,15 @@ Following the logical separation in `SPEC-000.9.1`, this specification formalize
 ### 3.5 Pillar E: Security & Secret Injection Boundary (Hook for 000.9.3) [MUST]
 - **`REQ-TOP-012` [MUST]**: Topology manifests MUST support TLS 1.3-capable ingress listeners and NATS connections. Credentials and secrets MUST be injected via platform-native Secret mounts without baking into images. Core network policies MUST restrict direct public ingress.
 
-### 3.6 Operational Governance [SHOULD / COULD / WON'T]
+### 3.6 Pillar F: Automated OCI Delivery & Appliance GitOps [MUST]
+- **`REQ-TOP-016` [MUST]**: Multi-Stage OCI Image Publishing Pipeline: GitHub Actions workflow (`ci-cd-appliance.yml`) MUST compile and publish `wallet-edge` and `wallet-core` OCI images to GitHub Container Registry (`ghcr.io`) tagged with commit SHA and `latest`.
+- **`REQ-TOP-017` [MUST]**: Unified Helm OCI Artifact Distribution: Workflow (`ci-cd-appliance.yml`) MUST package `deploy/helm/wallet-platform` and push the Helm chart as an OCI artifact directly to GHCR (`oci://ghcr.io/<owner>/charts/wallet-platform`), eliminating static HTTP chart repositories and git branch divergence.
+- **`REQ-TOP-018` [MUST]**: Portainer GitOps Continuous Deployment: Plan B appliance MUST support automated redeployment triggered via Portainer Webhook invocation from the CI/CD pipeline, with Git repository polling as a secondary fallback.
+- **`REQ-TOP-019` [SHOULD]**: Immutable Artifact Referencing: OCI images and Helm charts SHOULD be deployable by immutable version tag and sha256 digest references.
+
+### 3.7 Operational Governance [SHOULD / COULD / WON'T]
 - **`REQ-TOP-013` [SHOULD]**: Horizontal Pod Autoscaler (HPA) templates: Edge scales on CPU/RPS/active connections; Core scales on NATS consumer lag/processing latency.
-- **`REQ-TOP-014` [COULD]**: Unified Prometheus/Grafana dashboard definitions monitoring Edge/Core metrics and NATS queue depths.
+- **`REQ-TOP-014` [COULD]**: Portainer Edge Agent fleet management mode (`EDGE=1`) for centrally managing multi-branch appliances via reverse tunnel.
 - **`REQ-TOP-015` [WON'T]**: Embedded Kubernetes client libraries, CRDs, or custom operators inside application runtimes.
 
 ---
@@ -87,6 +93,7 @@ Following the logical separation in `SPEC-000.9.1`, this specification formalize
 | **`storage`** (PV/PVC) | Spillover journal write path | Ephemeral container storage cleared on restart | `I-STORAGE-001`, `I-STORAGE-002`: Dedicated volume mount survives container restart |
 | **`nats`** (Broker) | Inter-process message bus | NATS pod rescheduled or restarting | `I-MESSAGING-001`: Edge spools locally until NATS recovers; broker decouples runtimes |
 | **`platform`** (RKE2/GKE) | Multi-cloud / appliance portability | Hardcoded platform APIs break portability | `I-PLATFORM-001`: 12-Factor external config; zero orchestrator library deps |
+| **`delivery`** (GHCR OCI) | Appliance automated updates | Bad build deployed to appliance | `REQ-TOP-016` to `018`: Images tested before GHCR push; atomic webhook redeploy |
 
 ---
 
@@ -99,16 +106,18 @@ Following the logical separation in `SPEC-000.9.1`, this specification formalize
 | `REQ-TOP-008` (`I-STORAGE-001`) | `SpoolVolumePersistenceIT.shouldPersistAcrossPodCrash()` | Mount missing/read-only $\to$ Edge readiness OUT_OF_SERVICE | Spool full $\to$ Reject degraded acceptance (503) |
 | `REQ-TOP-011` (`I-LIFECYCLE-001`) | `GracefulShutdownIT.shouldFlushBatchOnSigterm()` | Kill -9 $\to$ Next start executes recovery replay | Hanging shutdown $\to$ Force kill after grace period |
 | `REQ-TOP-013` (HPA Lag Scaling) | `ScalingTopologyTest.verifyHpaManifests()` | Zero consumer replicas $\to$ NATS buffers without loss | Monolithic scaling $\to$ Fail architecture rule |
+| `REQ-TOP-016` to `018` (GitOps Delivery) | `PlatformDeliveryWorkflowTest.verifyWorkflows()` | Missing GHCR credentials $\to$ Fail CI gracefully | Insecure webhook transport $\to$ Abort |
 
 ---
 
 ## 6. Acceptance Criteria
-
-- [ ] Multi-stage Docker builds generate discrete, hardened OCI images for `wallet-edge` (non-root, no JDBC) and `wallet-core`.
-- [ ] Plan B lean appliance operates reliably on single Linux host/VM without Kubernetes, using Docker Compose or free Rancher (`REQ-TOP-005`).
-- [ ] Edge and Core scale independently ($N \ge 1, M \ge 1$) without process affinity (`I-TOPOLOGY-001`).
-- [ ] Helm charts template dedicated single-writer persistent volumes for Edge at `/spool` (`I-STORAGE-001`).
-- [ ] SIGTERM lifecycle hook proves in-flight group commits are persisted before process termination (`I-LIFECYCLE-001`).
-- [ ] Core commits financial transaction to PostgreSQL before ACKing JetStream message (`I-LIFECYCLE-002`).
-- [ ] Zero Kubernetes client libraries or proprietary orchestrator APIs exist in application dependencies (`I-PLATFORM-001`).
-- [ ] Total lines in this specification do not exceed 250 lines (`I-SDD-006`).
+- [x] Multi-stage Docker builds generate discrete, hardened OCI images for `wallet-edge` (non-root, no JDBC) and `wallet-core`.
+- [x] Plan B lean appliance operates reliably on single Linux host/VM without Kubernetes, using Docker Compose, Portainer CE visual management, and VictoriaLogs/Traces (`REQ-TOP-005`).
+- [x] Edge and Core scale independently ($N \ge 1, M \ge 1$) without process affinity (`I-TOPOLOGY-001`).
+- [x] Helm charts template dedicated single-writer persistent volumes for Edge at `/spool` (`I-STORAGE-001`).
+- [x] SIGTERM lifecycle hook proves in-flight group commits are persisted before process termination (`I-LIFECYCLE-001`).
+- [x] Core commits financial transaction to PostgreSQL before ACKing JetStream message (`I-LIFECYCLE-002`).
+- [x] Zero Kubernetes client libraries or proprietary orchestrator APIs exist in application dependencies (`I-PLATFORM-001`).
+- [x] GitHub Actions workflow publishes multi-stage OCI images to GHCR and triggers Portainer continuous deployment (`REQ-TOP-016`, `REQ-TOP-018`).
+- [x] GitHub Actions workflow packages and publishes Helm chart as an OCI artifact to GHCR (`REQ-TOP-017`).
+- [x] Total lines in this specification do not exceed 250 lines (`I-SDD-006`).

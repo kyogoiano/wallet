@@ -22,9 +22,13 @@
 | `REQ-TOP-009` (`I-EDGE-005`) | `[MUST]` | `SpoolWatermarkGateTest.verifyHysteresisThresholds()` | `TASK-TOP-3.3` |
 | `REQ-TOP-010` (`REQ-TOP-011`, `I-LIFECYCLE-001`) | `[MUST]` | `GracefulShutdownIT.shouldFlushBatchOnSigterm()` | `TASK-TOP-4.1`, `TASK-TOP-4.2` |
 | `REQ-TOP-011` (`I-LIFECYCLE-002`) | `[MUST]` | `CoreCommandConsumerAckTest.shouldAckOnlyAfterFinancialEffect()` | `TASK-TOP-4.1` |
-| `REQ-TOP-012` (Port/Security Boundary) | `[MUST]` | `ProcessBoundaryArchitectureTest.verifyPlatformPortability()` | `TASK-TOP-1.3`, `TASK-TOP-5.2` |
+| `REQ-TOP-012` (Port/Security & TLS Hooks) | `[MUST]` | `ProcessBoundaryArchitectureTest.verifyPlatformPortability()`, `HelmManifestValidationTest.verifyCorePortIsolation()` | `TASK-TOP-1.3`, `TASK-TOP-5.2` |
 | `REQ-TOP-013` (HPA Elasticity) | `[SHOULD]` | `HelmManifestValidationTest.verifyHpaSpecifications()` | `TASK-TOP-3.1` |
 | `REQ-TOP-015` (`I-PLATFORM-001`) | `[MUST]` | `ProcessBoundaryArchitectureTest.verifyNoKubernetesDependencies()` | `TASK-TOP-1.3` |
+| `REQ-TOP-016` (GHCR OCI Publishing) | `[MUST]` | `PlatformDeliveryWorkflowTest.verifyCiCdApplianceWorkflow()` | `TASK-TOP-6.1`, `TASK-TOP-6.3` |
+| `REQ-TOP-017` (Unified Helm OCI in GHCR) | `[MUST]` | `PlatformDeliveryWorkflowTest.verifyHelmOciWorkflow()` | `TASK-TOP-6.1`, `TASK-TOP-6.2`, `TASK-TOP-6.3` |
+| `REQ-TOP-018` (Portainer GitOps Continuous Deploy) | `[MUST]` | `PlatformDeliveryWorkflowTest.verifyPortainerGitOpsIntegration()` | `TASK-TOP-6.1`, `TASK-TOP-6.3` |
+| `I-MESSAGING-001` (Broker-Mediated IPC) | `[MUST]` | `ProcessBoundaryArchitectureTest.verifyPlatformPortability()`, `ScalingTopologyTest.verifyIndependentScaling()` | `TASK-TOP-1.3`, `TASK-TOP-5.1` |
 
 ---
 
@@ -50,16 +54,16 @@
 
 ### Phase 2: Plan A & Plan B Orchestration (Local & Low-Cost Appliance)
 - [x] `TASK-TOP-2.1` [MUST]: Orchestrate Plan A (Local Dev) & Plan B (Low-Cost Lean Appliance):
-  - Refine `docker-compose.yaml` (Plan A): ensure non-root container constraints, service healthcheck dependency chaining, and dedicated named volume `edge-spool`.
-  - Create `docker-compose.appliance.yaml` (Plan B Lean Appliance): multi-container topology running directly on host without Kubernetes control plane tax, using direct NVMe HostPath bind mounts (`./spool-data:/spool`), resource memory reservations and limits (total footprint < 8GB RAM), and production environment variables.
+  - Refine `docker-compose.yaml` (Plan A): ensure non-root container constraints, `spool-init` helper container auto-healing `10001:10001` permissions on `edge-spool` volume, service healthcheck dependency chaining, and dedicated named volume `edge-spool`.
+  - Create `docker-compose.appliance.yaml` (Plan B Lean Appliance): multi-container topology running directly on host without Kubernetes control plane tax, bundling Portainer CE (`portainer/portainer-ce:latest`) for visual GUI stack management on ports `9000`/`9443`, using `spool-init` for direct NVMe HostPath bind mounts (`./spool-data:/spool`), resource memory reservations and limits (total footprint < 8GB RAM), and production environment variables.
 - [x] `TASK-TOP-2.2` [MUST]: Implement `LowCostApplianceSmokeIT`:
-  - Validates Plan B appliance runtime configuration: verifies direct HostPath directory mounting, non-root permissions compatibility, and healthiness of discrete Edge and Core processes operating without Kubernetes.
+  - Validates Plan B appliance runtime configuration: verifies direct HostPath directory mounting, Portainer CE UI configuration, `spool-init` non-root volume permissions compatibility, and healthiness of discrete Edge and Core processes operating without Kubernetes.
 
 ### Phase 3: Plan C & Plan D Kubernetes & Storage Orchestration (Harvester HCI / vCluster / GKE)
 - [x] `TASK-TOP-3.1` [MUST]: Author Helm Charts under `deploy/helm/wallet-platform`:
   - Base Helm chart structure (`Chart.yaml`, `values.yaml`).
   - Deployments: `templates/edge-deployment.yaml` ($N$ replicas, `/spool` volume mount, non-root securityContext `runAsUser: 10001`, `runAsNonRoot: true`), `templates/core-deployment.yaml` ($M$ replicas, port 8081, non-root securityContext).
-  - Services: `templates/edge-service.yaml` (HTTP 8080, UDP 8443 QUIC), `templates/core-service.yaml` (ClusterIP headless internal only).
+  - Services: `templates/edge-service.yaml` (HTTP 8080, UDP 8443 QUIC), `templates/core-service.yaml` (ClusterIP management internal service port 8081).
   - Storage: `templates/edge-pvc.yaml` supporting Option A (HostPath) and Option B (`StorageClass: harv-lvm-local` / CSI RWO).
   - Governance: `templates/poddisruptionbudget.yaml`, `templates/networkpolicy.yaml` (isolating Core port 8081), `templates/hpa.yaml` (`EdgeHPA` on CPU/RPS, `CoreHPA` on NATS consumer lag).
   - Values profiles: `values-harvester.yaml` (Plan C Harvester HCI / vCluster with LVM local storage), `values-gke.yaml` (Plan D GKE with Cloud SSD).
@@ -81,8 +85,19 @@
 - [x] `TASK-TOP-5.2` [MUST]: Implement `HelmManifestValidationTest`:
   - Validates generated Helm manifests against Kubernetes schemas: asserts non-root execution (`runAsUser: 10001`), Core port isolation in `NetworkPolicy`, independent replica configurations, and proper StorageClass bindings.
 
-### Phase 6: Operational Verification & Convergence
-- [x] `TASK-TOP-6.1` [MUST]: Author `SUMMARY-000.9.2.md`:
+### Phase 6: Automated Delivery, Unified GHCR OCI Helm & Portainer GitOps (`REQ-TOP-016` to `REQ-TOP-019`)
+- [x] `TASK-TOP-6.1` [MUST]: Implement `.github/workflows/ci-cd-appliance.yml`:
+  - Multi-stage build and push of `wallet-edge` and `wallet-core` to `ghcr.io` on push to `main` or tags `v*`.
+  - Image tags: `latest`, branch, and git commit SHA.
+  - Optional Portainer Webhook invocation (`POST $PORTAINER_WEBHOOK_URL`) for automated appliance stack redeployment.
+- [x] `TASK-TOP-6.2` [MUST]: Implement Unified Helm OCI Artifact Distribution in `.github/workflows/ci-cd-appliance.yml`:
+  - Packages `deploy/helm/wallet-platform` and publishes `.tgz` packages directly to GHCR as an OCI artifact (`oci://ghcr.io/<owner>/charts/wallet-platform`).
+  - Eliminates legacy `helm-pages.yml`, `gh-pages` branch, and `index.yaml` static web hosting overhead.
+- [x] `TASK-TOP-6.3` [MUST]: Implement `PlatformDeliveryWorkflowTest`:
+  - Asserts existence and validity of GitHub Actions workflows, GHCR registry target configs, Chart.yaml version constraints, Helm OCI push steps, and Portainer webhook trigger semantics.
+
+### Phase 7: Operational Verification & Convergence
+- [x] `TASK-TOP-7.1` [MUST]: Author `SUMMARY-000.9.2.md`:
   - Bi-directional equivalence reconciliation (`I-SDD-003`).
   - Practical Verification Guide with reproducible CLI/cURL commands, Plan A/B compose commands, seed data fixtures, and expected responses (`I-SDD-002`).
 
@@ -95,8 +110,13 @@
 - [x] Both Edge and Core run under dedicated non-root UID 10001 (`I-CONTAINER-001`)
 - [x] Edge and Core scale independently ($N \ge 1, M \ge 1$) without affinity (`I-TOPOLOGY-001`)
 - [x] Edge journal exclusively locks `/spool` directory (`I-STORAGE-001`)
+- [x] Storage durability scopes explicitly differentiate HostPath (node-local) vs CSI RWO (pod-reschedule) (`I-STORAGE-002`)
+- [x] Cross-boundary command execution is 100% mediated via NATS JetStream (`I-MESSAGING-001`)
 - [x] Plan B runs without Kubernetes control plane on direct HostPath NVMe (<8GB RAM) (`REQ-TOP-005`)
 - [x] Helm chart templates LVM Local Storage for Harvester HCI (`REQ-TOP-006`)
 - [x] Edge SIGTERM forces pending journal batch to disk before container exit (`I-LIFECYCLE-001`)
 - [x] Core commits transaction to PostgreSQL before ACKing NATS message (`I-LIFECYCLE-002`)
 - [x] Zero Kubernetes client libraries present in application classpath (`I-PLATFORM-001`)
+- [x] GitHub Actions workflow builds and pushes OCI images to GHCR (`REQ-TOP-016`)
+- [x] GitHub Actions workflow packages and pushes Helm chart as OCI artifact to GHCR (`REQ-TOP-017`)
+- [x] Portainer stack integrates with CI/CD redeployment webhook (`REQ-TOP-018`)

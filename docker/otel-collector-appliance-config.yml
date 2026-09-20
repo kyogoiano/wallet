@@ -1,0 +1,40 @@
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+exporters:
+  debug:
+    verbosity: basic
+  otlphttp/victorialogs:
+    logs_endpoint: "http://victorialogs:9428/insert/opentelemetry/v1/logs"
+    tls:
+      insecure: true
+  otlphttp/victoriatraces:
+    traces_endpoint: "http://victoriatraces:10428/insert/opentelemetry/v1/traces"
+    tls:
+      insecure: true
+
+processors:
+  batch:
+    send_batch_size: 1024
+    timeout: 200ms
+    send_batch_max_size: 2048
+
+service:
+  pipelines:
+    logs:
+      receivers: [ otlp ]
+      processors: [ batch ]
+      exporters: [ debug, otlphttp/victorialogs ]
+    traces:
+      receivers: [ otlp ]
+      processors: [ batch ]
+      exporters: [ debug, otlphttp/victoriatraces ]
+    metrics:
+      receivers: [ otlp ]
+      processors: [ batch ]
+      exporters: [ debug ]

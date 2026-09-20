@@ -136,4 +136,28 @@ class SegmentedFileJournalTest {
         Path quarantined = spoolDir.resolve(segment.getFileName().toString() + ".corrupt");
         assertThat(Files.exists(quarantined)).isTrue();
     }
+
+    @Test
+    @DisplayName("Should fail with informative AccessDeniedException when spool lock cannot be written")
+    void shouldFailInformativelyWhenSpoolLockAccessDenied() throws IOException {
+        Path testDir = Files.createTempDirectory("edge-spool-ro-");
+        try {
+            boolean readOnlySet = testDir.toFile().setWritable(false);
+            if (readOnlySet) {
+                SegmentedFileJournal roJournal = new SegmentedFileJournal(testDir, 64 * 1024L, 10 * 1024 * 1024L, 10, 1);
+                assertThatThrownBy(roJournal::start)
+                        .isInstanceOf(IOException.class)
+                        .hasMessageContaining("Failed to acquire spool lock: access denied");
+            }
+        } finally {
+            testDir.toFile().setWritable(true);
+            try (var stream = Files.walk(testDir)) {
+                stream.sorted((a, b) -> b.compareTo(a)).forEach(p -> {
+                    try {
+                        Files.deleteIfExists(p);
+                    } catch (IOException ignored) {}
+                });
+            }
+        }
+    }
 }

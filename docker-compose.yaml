@@ -3,7 +3,7 @@ version: "3.9"
 services:
 
   nats:
-    image: nats:2.14.5-alpine
+    image: nats:2.15.0-alpine
     container_name: nats_main
     restart: always
     ports:
@@ -181,6 +181,16 @@ services:
     networks:
       - wallet-net
 
+  spool-init:
+    image: oraclelinux:9-slim
+    container_name: wallet-spool-init
+    user: "0:0"
+    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 700 /spool && chmod -R u+rwX /spool"]
+    volumes:
+      - edge-spool:/spool
+    networks:
+      - wallet-net
+
   edge:
     build:
       context: .
@@ -194,6 +204,8 @@ services:
         condition: service_started
       app:
         condition: service_healthy
+      spool-init:
+        condition: service_completed_successfully
     volumes:
       - edge-spool:/spool
     environment:

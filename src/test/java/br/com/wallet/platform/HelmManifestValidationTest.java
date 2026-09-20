@@ -99,4 +99,22 @@ class HelmManifestValidationTest {
         String content = Files.readString(pvc);
         assertThat(content).contains(".Values.edge.persistence.accessMode");
     }
+
+    @Test
+    @DisplayName("I-MESSAGING-001 & History 55: Core service must be internal ClusterIP management service on port 8081, not headless")
+    void verifyCoreServiceIsInternalClusterIPManagement() throws IOException {
+        Path coreService = helmRoot.resolve("templates/core-service.yaml");
+        assertThat(coreService).exists();
+
+        String serviceContent = Files.readString(coreService);
+        assertThat(serviceContent).contains("type: {{ .Values.core.service.type }}");
+        assertThat(serviceContent).contains("name: management");
+        assertThat(serviceContent).contains("targetPort: 8081");
+        assertThat(serviceContent).doesNotContain("clusterIP: None"); // Must NOT be headless
+
+        Path defaultValues = helmRoot.resolve("values.yaml");
+        String valuesContent = Files.readString(defaultValues);
+        assertThat(valuesContent).contains("type: ClusterIP");
+        assertThat(valuesContent).contains("port: 8081");
+    }
 }

@@ -7,6 +7,7 @@ import br.com.wallet.fraud.intelligence.domain.FraudRelationshipEvent;
 import br.com.wallet.fraud.intelligence.domain.FraudRelationshipStore;
 import br.com.wallet.fraud.intelligence.domain.GraphRiskSignals;
 import br.com.wallet.fraud.intelligence.internal.materializer.HotRiskMaterializer;
+import br.com.wallet.fraud.intelligence.projector.DefaultRelationalGraphProjector;
 import br.com.wallet.fraud.intelligence.projector.RelationalGraphProjector;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -40,7 +41,7 @@ class RelationalGraphProjectorTest {
         store = Mockito.mock(FraudRelationshipStore.class);
         featureProvider = Mockito.mock(FraudFeatureProvider.class);
         materializer = Mockito.mock(HotRiskMaterializer.class);
-        projector = new RelationalGraphProjector(store, featureProvider, materializer);
+        projector = new DefaultRelationalGraphProjector(store, featureProvider, materializer);
 
         when(materializer.materializeGraphRisk(any(UUID.class), anyDouble()))
             .thenReturn(CompletableFuture.completedFuture("OK"));

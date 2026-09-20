@@ -9,6 +9,7 @@ import br.com.wallet.fraud.fusion.internal.orchestration.InvestigationDispatcher
 import br.com.wallet.fraud.fusion.internal.policy.RiskDecisionPolicy;
 import br.com.wallet.fraud.investigation.api.InvestigationService;
 import br.com.wallet.fraud.investigation.api.model.FraudInvestigationDossier;
+import br.com.wallet.fraud.investigation.api.model.FraudRiskSnapshot;
 import br.com.wallet.fraud.investigation.api.model.InvestigationEvidence;
 import br.com.wallet.fraud.investigation.api.model.InvestigationGenerationStatus;
 import br.com.wallet.fraud.investigation.api.model.InvestigationNarrative;
@@ -61,14 +62,14 @@ class InvestigationDispatcherTest {
         RiskAttribution attribution = new RiskAttribution("GRAPH_INTELLIGENCE", List.of());
         RiskFusionResult result = new RiskFusionResult(0.65, FraudDecision.REVIEW, signals, attribution);
 
-        InvestigationEvidence mockEvidence = mock(InvestigationEvidence.class);
+        InvestigationEvidence evidence = new InvestigationEvidence(FraudRiskSnapshot.empty(), List.of());
         InvestigationNarrative narrative = new InvestigationNarrative(
             "High graph connection to flagged mule",
             List.of(),
             "Investigate transfer chain"
         );
         FraudInvestigationDossier mockDossier = new FraudInvestigationDossier(
-            mockEvidence,
+            evidence,
             Optional.of(narrative),
             RiskClassification.MEDIUM,
             RiskClassificationSource.EVIDENCE_POLICY,
@@ -109,14 +110,14 @@ class InvestigationDispatcherTest {
         RiskAttribution attribution = new RiskAttribution("GRAPH_INTELLIGENCE", List.of());
         RiskFusionResult result = new RiskFusionResult(0.88, FraudDecision.RESTRICT, signals, attribution);
 
-        InvestigationEvidence mockEvidence = mock(InvestigationEvidence.class);
+        InvestigationEvidence evidence = new InvestigationEvidence(FraudRiskSnapshot.empty(), List.of());
         InvestigationNarrative narrative = new InvestigationNarrative(
             "Critical mule network ring detected",
             List.of(),
             "Immediate outgoing restriction required"
         );
         FraudInvestigationDossier mockDossier = new FraudInvestigationDossier(
-            mockEvidence,
+            evidence,
             Optional.of(narrative),
             RiskClassification.HIGH,
             RiskClassificationSource.EVIDENCE_POLICY,

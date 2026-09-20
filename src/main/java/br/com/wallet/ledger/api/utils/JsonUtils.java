@@ -8,7 +8,7 @@ import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.ObjectWriter;
 
 @Component
-public final class JsonUtils {
+public class JsonUtils {
 
     private static final Logger log = LoggerFactory.getLogger(JsonUtils.class);
     private final ObjectMapper mapper;

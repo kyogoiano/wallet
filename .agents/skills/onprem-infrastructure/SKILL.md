@@ -23,7 +23,7 @@ This skill guides the design, deployment, storage binding, and operational orche
 | **VM Auto-Balance** *(Add-on)* | **Workload Scheduling & Optimization** | High availability and automated VM placement across physical bare-metal hosts. | Continuously monitors host CPU/memory pressure; triggers non-disruptive KubeVirt live migration when node thresholds are breached. | Runs as a Harvester operator; balances nodes hosting Core database VMs and NATS clusters without manual intervention. |
 | **VM DHCP Controller** *(Add-on)* | **Network Management** | Deterministic Layer-2 network IP allocation for virtual appliances and VMs. | Integrated DHCP server managing IP leases directly over Harvester VLAN networks; binds static MAC-to-IP leases defined in manifests. | Eliminates reliance on external legacy DHCP servers for static internal routing and multi-homed interfaces. |
 | **Kube-OVN Operator** *(Add-on)* | **Software-Defined Networking (SDN)** | Enterprise-grade advanced overlay/underlay networking and micro-segmentation. | Subnet isolation, VPC multi-tenancy, distributed firewall / security groups, QoS rate limiting, and BGP/OVS route injection. | Enforces zero-trust isolation around Core port 8081, restricting public traffic and permitting only authenticated Edge ingress and telemetry scrapers. |
-| **LVM Local Storage** *(Add-on)* | **High-Performance Node Storage** | Low-latency, direct-attached local disk performance for stateful database and journal workloads. | Dynamic local volume provisioning backed by host Logical Volume Manager (LVM), bypassing network storage replication overhead. | Essential for I/O-intensive state: PostgreSQL 17/19 ACID write path, Edge `/spool` binary journals, and NATS JetStream WAL where 3x network storage latency is prohibitive. |
+| **LVM Local Storage** *(Add-on)* | **High-Performance Node Storage** | Low-latency, direct-attached local disk performance for stateful database and journal workloads. | Dynamic local volume provisioning backed by host Logical Volume Manager (LVM), bypassing network storage replication overhead. | Essential for I/O-intensive state: PostgreSQL 18.x ACID write path, Edge `/spool` binary journals, and NATS JetStream WAL where 3x network storage latency is prohibitive. |
 
 ---
 
@@ -61,7 +61,7 @@ flowchart TD
     end
 
     subgraph SharedPersistence["High-IOPS Stateful Backing (LVM Local Storage)"]
-        PG[("PostgreSQL 17/19<br/>LVM Local Storage<br/>Raw NVMe IOPS")]
+        PG[("PostgreSQL 18.x (pgvector)<br/>LVM Local Storage<br/>Raw NVMe IOPS")]
         Spool[("Edge /spool PV<br/>LVM Local Storage<br/>Single-Writer RWO")]
         NATS[("NATS JetStream<br/>LVM Local Storage WAL")]
     end
@@ -89,7 +89,7 @@ flowchart TD
 
 ### 3.4 Network Segmentation & Firewalling via Kube-OVN
 - **Perimeter Edge**: Public ingress (HTTP/2 on 8080, HTTP/3 over QUIC on UDP 8443) terminates at the Edge Gateway.
-- **Headless Core**: Core management port `8081` is protected by a Kube-OVN `SecurityGroup` allowing traffic only from Edge pods and internal Prometheus monitors. Direct external access to Core is blocked at the Open vSwitch layer.
+- **Core Management Isolation**: Core management port `8081` is protected by a Kube-OVN `SecurityGroup` allowing traffic only from Edge pods and internal Prometheus monitors. Direct external access to Core is blocked at the Open vSwitch layer. Command flow is strictly NATS JetStream (`I-MESSAGING-001`).
 
 ---
 
@@ -100,10 +100,10 @@ The Wallet Service supports a progressive spectrum of infrastructure footprints,
 | Dimension | Plan A: Local Dev / CI | Plan B: Low-Cost Lean Appliance | Plan C: Medium-Cost Enterprise On-Prem | Plan D: Public Cloud Elastic Scale |
 | :--- | :--- | :--- | :--- | :--- |
 | **Primary Target** | Developer workstation, automated CI | Edge branches, retail kiosks, budget-conscious bare-metal | Regional enterprise DCs, regulated private cloud | Global SaaS, hyperscale cloud (GCP / AWS) |
-| **Orchestrator** | Docker Compose | Docker Compose / Free Rancher Node Agent (no heavy K8s) | Full Rancher Open Source/Prime + RKE2 | Managed Kubernetes (GKE Standard / EKS) |
+| **Orchestrator** | Docker Compose | Docker Compose + Portainer CE UI (Zero K8s) | Full Rancher Open Source/Prime + RKE2 | Managed Kubernetes (GKE Standard / EKS) |
 | **Virtualization** | None (Host OS) | None (Bare-metal Linux or simple hypervisor) | SUSE Virtualization (Harvester HCI / KubeVirt) | Cloud Provider Hypervisor (Borg / Nitro) |
-| **Control Plane Tax** | 0 MB / 0 Cores | Negligible (<500MB RAM, <0.2 CPU) | ~8–16 GB RAM, 4–8 Cores (etcd, k8s control plane) | Managed by Cloud Provider (Zero node compute tax) |
-| **Total Host Footprint**| 4 vCPU, 8 GB RAM | **4–8 vCPU, 8–16 GB RAM** | 3+ Bare-Metal Nodes (32+ Cores, 128+ GB RAM) | Elastic Auto-Scaling Node Pools |
+| **Control Plane Tax** | 0 MB / 0 Cores | Negligible (<100MB RAM, 0 CPU tax) | ~8–16 GB RAM, 4–8 Cores (etcd, k8s control plane) | Managed by Cloud Provider (Zero node compute tax) |
+| **Total Host Footprint**| 4 vCPU, 8 GB RAM | **4–8 vCPU, 8–16 GB RAM** (~6.38 GB capped) | 3+ Bare-Metal Nodes (32+ Cores, 128+ GB RAM) | Elastic Auto-Scaling Node Pools |
 | **Storage Binding** | Docker Named Volumes | Direct HostPath NVMe (`Option A`, `I-STORAGE-002`) | Harvester LVM Local Storage (`Option B`, `I-STORAGE-001`) | Cloud Persistent Disks (RWO Block SSD) |
 | **Network & Security**| Docker Bridge Network | Linux UFW / iptables + Host network binding | Kube-OVN SDN Operator + Distributed Firewalls | Cloud VPC, Security Groups, Cloud Armor |
 | **Multi-Tenancy** | Single workspace | Process / Container isolation | vCluster (Virtual K8s) + Dedicated Harvester VMs | K8s Namespaces + Cloud IAM / Workload Identity |
@@ -112,9 +112,12 @@ The Wallet Service supports a progressive spectrum of infrastructure footprints,
 ### 4.1 Plan B Architectural Philosophy: Slashing the Kubernetes Tax
 In single-server appliances or distributed retail/branch sites, spinning up a full multi-node Kubernetes cluster (etcd quorum, kube-apiserver, kube-scheduler, ingress controllers) incurs a prohibitive "Kubernetes Tax" consuming 8+ GB RAM and 4+ CPU cores before any application container starts.
 Plan B eliminates this overhead:
-- Containers run via standard container engines orchestrated by Docker Compose or lightweight, free Rancher node management.
+- Containers run via standard Docker Engine orchestrated by Docker Compose (`docker-compose.appliance.yaml`).
+- **Visual Management**: Integrates lightweight **Portainer CE** (~50–128MB RAM) listening on HTTP `9000` / HTTPS `9443` bound to `/var/run/docker.sock`, giving on-site operators visual health inspection, live container log streaming, and single-click stack redeployments without needing command-line access.
 - Direct NVMe HostPath bindings provide bare-metal IOPS for Edge `/spool` and PostgreSQL without storage virtualization overhead.
-- Total memory footprint remains under 8–16 GB, allowing high-performance transaction processing on low-cost commodity x86 servers.
+- **GitOps Continuous Deployment**: Portainer exposes stack redeployment webhooks (`http://<appliance>:9000/api/stacks/webhooks/...`) triggered automatically by GitHub Actions (`ci-cd-appliance.yml`) upon publishing new OCI images to GHCR, achieving zero-CLI remote appliance upgrades.
+- **Serverless Helm Distribution**: Enterprise Helm charts (`deploy/helm/wallet-platform`) are packaged and published to GitHub Pages (`gh-pages` branch) via `helm-pages.yml`, eliminating the need to host external artifact registries for Plan C (Harvester HCI) and Plan D (GKE) deployments.
+- Total memory footprint remains strictly under 8 GB RAM (~5.8 GB allocated with VictoriaLogs/Traces), allowing high-performance transaction processing on low-cost commodity x86 servers.
 
 ---
 
@@ -125,7 +128,7 @@ Plan B eliminates this overhead:
 | **`wallet-edge` `/spool`** | `harv-lvm-local` / `hostpath` | LVM Local Storage | **Sub-millisecond fsync barrier**. Single-writer RWO; avoids 3x network replication latency spikes (`I-STORAGE-001`). |
 | **PostgreSQL Data Directory** | `harv-lvm-local` | LVM Local Storage | **Maximum NVMe IOPS**. Eliminates network storage bottlenecks for ACID transaction commit logs. |
 | **NATS JetStream WAL** | `harv-lvm-local` | LVM Local Storage | Low-latency message disk queuing and server-side deduplication log. |
-| **OpenObserve Logs / Metrics** | `longhorn` | Replicated Block | Elastic, distributed storage where multi-node replication is preferred over raw IOPS. |
+| **VictoriaLogs / Traces / OpenObserve** | `longhorn` | Replicated Block | Elastic, distributed storage where multi-node replication is preferred over raw IOPS. |
 
 ---
 

@@ -10,6 +10,7 @@ import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileLock;
 import java.nio.channels.OverlappingFileLockException;
+import java.nio.file.AccessDeniedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -87,12 +88,21 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
 
     private void acquireSpoolLock() throws IOException {
         Path lockFilePath = spoolDirectory.resolve(".spool.lock");
-        this.lockChannel = FileChannel.open(
-                lockFilePath,
-                StandardOpenOption.CREATE,
-                StandardOpenOption.READ,
-                StandardOpenOption.WRITE
-        );
+        try {
+            this.lockChannel = FileChannel.open(
+                    lockFilePath,
+                    StandardOpenOption.CREATE,
+                    StandardOpenOption.READ,
+                    StandardOpenOption.WRITE
+            );
+        } catch (AccessDeniedException e) {
+            throw new IOException(
+                    "Failed to acquire spool lock: access denied to '" + lockFilePath
+                            + "'. Ensure that the spool volume or directory is owned and writable by process UID (e.g. non-root UID 10001: 'chown -R 10001:10001 "
+                            + spoolDirectory + "')",
+                    e
+            );
+        }
         try {
             this.lockFile = this.lockChannel.tryLock();
         } catch (OverlappingFileLockException e) {
@@ -117,7 +127,16 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
             long segId = parseSegmentId(name);
             currentSegmentId.set(segId);
             activeSegmentPath = lastSegment;
-            activeChannel = FileChannel.open(activeSegmentPath, StandardOpenOption.READ, StandardOpenOption.WRITE);
+            try {
+                activeChannel = FileChannel.open(activeSegmentPath, StandardOpenOption.READ, StandardOpenOption.WRITE);
+            } catch (AccessDeniedException e) {
+                throw new IOException(
+                        "Failed to open existing segment file: access denied to '" + activeSegmentPath
+                                + "'. Ensure spool directory is writable by process UID: 'chown -R 10001:10001 "
+                                + spoolDirectory + "'",
+                        e
+                );
+            }
             
             // Scan to find current offset and highest sequence number
             scanOffsetAndSequence(activeSegmentPath);
@@ -133,12 +152,21 @@ public class SegmentedFileJournal implements DurableSpilloverJournal {
         currentSegmentId.set(segId);
         activeSegmentPath = spoolDirectory.resolve(String.format("segment-%016d.wal", segId));
 
-        activeChannel = FileChannel.open(
-                activeSegmentPath,
-                StandardOpenOption.CREATE_NEW,
-                StandardOpenOption.READ,
-                StandardOpenOption.WRITE
-        );
+        try {
+            activeChannel = FileChannel.open(
+                    activeSegmentPath,
+                    StandardOpenOption.CREATE_NEW,
+                    StandardOpenOption.READ,
+                    StandardOpenOption.WRITE
+            );
+        } catch (AccessDeniedException e) {
+            throw new IOException(
+                    "Failed to create new segment file: access denied to '" + activeSegmentPath
+                            + "'. Ensure spool directory is writable by process UID: 'chown -R 10001:10001 "
+                            + spoolDirectory + "'",
+                    e
+            );
+        }
 
         // 1. Write 32B SegmentHeader
         SegmentHeader header = SegmentHeader.create(segId);

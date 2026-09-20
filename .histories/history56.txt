@@ -1,0 +1,55 @@
+Actually, all of them are compatible with the OpenTelemetry (OTel) Collector. Because OpenTelemetry has become the industry standard for telemetry data, modern lightweight backends have built-in support to accept data directly from an OTel pipeline.
+Depending on which one you choose, they ingest the data from the collector using different exporters:
+## 1. VictoriaLogs (Ultra-Light Logs)
+
+*
+* How it connects: It natively accepts OTLP data.
+* OTel Collector Configuration: You can route your logs directly to it using the standard otlphttp exporter by targeting VictoriaLogs' specialized endpoint:
+
+exporters:
+  otlphttp:
+    logs_endpoint: "http://<victorialogs-host>:9428/insert/opentelemetry/v1/logs"
+
+[1, 2]
+*
+
+## 2. Grafana Loki (Metadata-Indexed Logs)
+
+*
+* How it connects: Loki natively supports ingesting OpenTelemetry logs over HTTP.
+* OTel Collector Configuration: You can configure the collector's standard otlphttp exporter (or the specialized loki exporter plugin in the OpenTelemetry Collector Contrib distribution) to stream logs into Loki's endpoint. [3, 4]
+*
+
+## 3. Prometheus (Metrics Only)
+
+*
+* How it connects: Prometheus accepts metrics from the collector.
+* OTel Collector Configuration: You use the prometheusremotewrite exporter inside your OpenTelemetry Collector pipeline. This converts your OpenTelemetry metrics on the fly into Prometheus-compatible time-series data and pushes them to your Prometheus instance. [4]
+*
+
+## 4. Uptrace (Lightweight APM/Traces)
+
+*
+* How it connects: Uptrace is built from the ground up natively for OpenTelemetry. It acts as a direct destination for the OpenTelemetry Collector. [5, 6, 7]
+* OTel Collector Configuration: You simply use the standard otlp (gRPC) or otlphttp exporters. You just pass your unique Uptrace Project DSN (Data Source Name) token inside the collector's header configuration to securely authenticate the stream. [5, 6]
+*
+
+## Summary Recommendation
+If you are moving away from OpenObserve but want to keep using the OpenTelemetry Collector as your primary agent:
+
+*
+* Go with Uptrace if you want to keep logs, metrics, and traces unified in a single, resource-friendly APM dashboard.
+* Combine VictoriaMetrics + VictoriaLogs if you want the absolute absolute lowest RAM footprint on a single machine for raw metrics and log storage. [5, 8, 9]
+*
+
+Would you like assistance structuring the otel-config.yaml file for one of these specific backends? If so, please specify which backend you'd like to try first.
+
+[1] [https://docs.victoriametrics.com](https://docs.victoriametrics.com/victorialogs/data-ingestion/opentelemetry/)
+[2] [https://docs.victoriametrics.com](https://docs.victoriametrics.com/opentelemetry/)
+[3] [https://grafana.com](https://grafana.com/docs/loki/latest/send-data/otel/)
+[4] [https://grafana.com](https://grafana.com/docs/opentelemetry/collector/opentelemetry-collector/)
+[5] [https://dev.to](https://dev.to/uptrace/monitoring-cpuramdisk-metrics-with-opentelemetry-and-uptrace-fd7)
+[6] [https://monitoringframework.com](https://monitoringframework.com/pagina/uptrace-opentelemetry-implementation-partner)
+[7] [https://www.youtube.com](https://www.youtube.com/watch?v=mbxp0xItWQk)
+[8] [https://github.com](https://github.com/randax/Platform-Engineering-Workshop/issues/57)
+[9] [https://openobserve.ai](https://openobserve.ai/blog/prometheus-alternatives/)

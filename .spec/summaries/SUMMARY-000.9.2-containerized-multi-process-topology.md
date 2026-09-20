@@ -24,13 +24,13 @@ Phase 000.9.2 productionizes the multi-process architecture established in Phase
    - Verified across entire codebase via [`ProcessBoundaryArchitectureTest`](file:///src/test/java/br/com/wallet/ProcessBoundaryArchitectureTest.java).
 
 3. **Cost-Conscious Four-Tier Deployment Progression (`REQ-TOP-004` to `REQ-TOP-007`)**:
-   - **Plan A (Local Dev/CI)**: Single-host [`docker-compose.yaml`](file:///docker-compose.yaml) running Edge, Core, DragonflyDB, PostgreSQL, and NATS JetStream under non-root UID 10001.
-   - **Plan B (Low-Cost Lean Appliance)**: Non-Kubernetes bare-metal/VM topology via [`docker-compose.appliance.yaml`](file:///docker-compose.appliance.yaml), eliminating Kubernetes control plane resource tax. Uses direct HostPath NVMe bind mounts (`./spool-data:/spool`), resource reservations/limits strictly enforcing total system RAM $< 8\text{GB}$, headless Core binding port 8081, and production restart policies.
-   - **Plan C (Medium-Cost Enterprise On-Premises)**: Helm chart under [`deploy/helm/wallet-platform`](file:///deploy/helm/wallet-platform) with [`values-harvester.yaml`](file:///deploy/helm/wallet-platform/values-harvester.yaml) tailored for SUSE Virtualization (Harvester HCI) / Rancher / vCluster with `storageClass: harv-lvm-local` for sub-millisecond NVMe I/O and Kube-OVN network isolation.
-   - **Plan D (Public Cloud Elastic Scale)**: Helm configuration [`values-gke.yaml`](file:///deploy/helm/wallet-platform/values-gke.yaml) targeting GKE Standard with Regional SSD PersistentDisk and Horizontal Pod Autoscalers (Edge HPA on CPU/RPS, Core HPA on consumer lag).
+    - **Plan A (Local Dev/CI)**: Single-host [`docker-compose.yaml`](file:///docker-compose.yaml) running Edge, Core, DragonflyDB, PostgreSQL 18.x, and NATS JetStream under non-root UID 10001.
+    - **Plan B (Low-Cost Lean Appliance)**: Pure non-Kubernetes bare-metal/VM topology via [`docker-compose.appliance.yaml`](file:///docker-compose.appliance.yaml), eliminating Kubernetes control plane resource tax. Bundles **Portainer CE** (`portainer/portainer-ce:latest`) on HTTP `9000` / HTTPS `9443` for visual stack management, and ultra-light telemetry with **VictoriaLogs** (`victoriametrics/victoria-logs:latest`, ~30–50MB RAM) and **VictoriaTraces** (`victoriametrics/victoria-traces:latest`, ~40–60MB RAM) connected via OpenTelemetry Collector (`docker/otel-collector-appliance-config.yml`). Uses direct HostPath NVMe bind mounts (`./spool-data:/spool`), resource reservations/limits strictly enforcing total system RAM $< 8\text{GB}$ (~5.8 GB capped), internal Core port 8081 management endpoint, and production restart policies.
+    - **Plan C (Medium-Cost Enterprise On-Premises)**: Helm chart under [`deploy/helm/wallet-platform`](file:///deploy/helm/wallet-platform) with [`values-harvester.yaml`](file:///deploy/helm/wallet-platform/values-harvester.yaml) tailored for SUSE Virtualization (Harvester HCI) / Rancher / vCluster with `storageClass: harv-lvm-local` for sub-millisecond NVMe I/O and Kube-OVN network isolation.
+    - **Plan D (Public Cloud Elastic Scale)**: Helm configuration [`values-gke.yaml`](file:///deploy/helm/wallet-platform/values-gke.yaml) targeting GKE Standard with Regional SSD PersistentDisk and Horizontal Pod Autoscalers (Edge HPA on CPU/RPS, Core HPA on consumer lag).
 
-4. **Independent Horizontal Scaling (`REQ-TOP-003`, `I-TOPOLOGY-001`)**:
-   - Edge gateway ($N$ instances) and Core transactional consumers ($M$ instances) scale independently ($N \ne M$) without session affinity or instance-to-instance coupling.
+4. **Independent Horizontal Scaling (`REQ-TOP-003`, `I-TOPOLOGY-001`, `I-MESSAGING-001`)**:
+   - Edge gateway ($N$ instances) and Core transactional consumers ($M$ instances) scale independently ($N \ge 1, M \ge 1$) without session affinity or instance-to-instance coupling. Cross-process command execution is 100% mediated via NATS JetStream (`I-MESSAGING-001`).
    - Verified via [`ScalingTopologyTest`](file:///src/test/java/br/com/wallet/platform/ScalingTopologyTest.java) with $N=2$ Edge publishers and $M=3$ Core consumers competing on shared NATS stream `commands.wallet.*` with zero dropped or duplicate transactions.
 
 5. **Storage Durability & Spool Isolation (`REQ-TOP-008`, `REQ-TOP-009`, `I-STORAGE-001`, `I-STORAGE-002`, `I-EDGE-005`)**:
@@ -41,6 +41,11 @@ Phase 000.9.2 productionizes the multi-process architecture established in Phase
 6. **Coordinated Shutdown Lifecycle & Financial ACK Ordering (`REQ-TOP-010`, `REQ-TOP-011`, `I-LIFECYCLE-001`, `I-LIFECYCLE-002`)**:
    - On SIGTERM, Edge immediately marks `EdgeReadinessHealthIndicator` as `OUT_OF_SERVICE`, sheds new ingress traffic with HTTP 503, flushes pending in-flight group commit batches to disk via `force(false)`, and drains background workers before process termination. Verified via [`GracefulShutdownIT`](file:///edge/src/test/java/br/com/wallet/integration/edge/GracefulShutdownIT.java).
    - Core command consumers acknowledge NATS messages (`msg.ack()`) if and only if the underlying PostgreSQL transaction has successfully committed. Verified via [`CoreCommandConsumerAckTest`](file:///src/test/java/br/com/wallet/unit/infrastructure/messaging/CoreCommandConsumerAckTest.java).
+
+7. **Automated OCI Delivery, Unified GHCR Helm & Portainer GitOps (`REQ-TOP-016` to `REQ-TOP-019`)**:
+   - Implemented `.github/workflows/ci-cd-appliance.yml` to compile and publish multi-stage OCI images (`wallet-edge` and `wallet-core`) to GitHub Container Registry (`ghcr.io`), with automatic webhook trigger for Plan B Portainer appliance redeployment.
+   - Leveraged native Helm 3.8+ OCI registry support in `ci-cd-appliance.yml` to package and push Helm charts as OCI artifacts directly to GHCR (`oci://ghcr.io/<owner>/charts/wallet-platform`), eliminating legacy GitHub Pages, `gh-pages` branch, and `index.yaml` static web hosting overhead.
+   - Verified end-to-end workflow configurations, OCI push steps, and metadata via [`PlatformDeliveryWorkflowTest`](file:///src/test/java/br/com/wallet/platform/PlatformDeliveryWorkflowTest.java).
 
 ---
 
@@ -59,9 +64,13 @@ Phase 000.9.2 productionizes the multi-process architecture established in Phase
 | `REQ-TOP-009` (`I-EDGE-005`) | `[MUST]` | [`SpoolWatermarkGateTest.verifyHysteresisThresholds`](file:///edge/src/test/java/br/com/wallet/internal/journal/segmented/SpoolWatermarkGateTest.java) | 🟢 PASS |
 | `REQ-TOP-010` (`I-LIFECYCLE-001`) | `[MUST]` | [`GracefulShutdownIT.shouldFlushBatchOnSigterm`](file:///edge/src/test/java/br/com/wallet/integration/edge/GracefulShutdownIT.java) | 🟢 PASS |
 | `REQ-TOP-011` (`I-LIFECYCLE-002`) | `[MUST]` | [`CoreCommandConsumerAckTest.shouldAckOnlyAfterFinancialEffect`](file:///src/test/java/br/com/wallet/unit/infrastructure/messaging/CoreCommandConsumerAckTest.java) | 🟢 PASS |
-| `REQ-TOP-012` (Port/Security Boundary) | `[MUST]` | [`HelmManifestValidationTest.verifyCorePortIsolation`](file:///src/test/java/br/com/wallet/platform/HelmManifestValidationTest.java) | 🟢 PASS |
+| `REQ-TOP-012` (Port/Security & TLS Hooks) | `[MUST]` | [`HelmManifestValidationTest.verifyCorePortIsolation`](file:///src/test/java/br/com/wallet/platform/HelmManifestValidationTest.java) | 🟢 PASS |
 | `REQ-TOP-013` (HPA Elasticity) | `[SHOULD]` | [`HelmManifestValidationTest.verifyHpaSpecifications`](file:///src/test/java/br/com/wallet/platform/HelmManifestValidationTest.java) | 🟢 PASS |
 | `REQ-TOP-015` (`I-PLATFORM-001`) | `[MUST]` | [`ProcessBoundaryArchitectureTest.verifyNoKubernetesDependencies`](file:///src/test/java/br/com/wallet/ProcessBoundaryArchitectureTest.java) | 🟢 PASS |
+| `REQ-TOP-016` (GHCR OCI Publishing) | `[MUST]` | [`PlatformDeliveryWorkflowTest.verifyCiCdApplianceWorkflow`](file:///src/test/java/br/com/wallet/platform/PlatformDeliveryWorkflowTest.java) | 🟢 PASS |
+| `REQ-TOP-017` (Unified Helm OCI in GHCR) | `[MUST]` | [`PlatformDeliveryWorkflowTest.verifyHelmOciWorkflow`](file:///src/test/java/br/com/wallet/platform/PlatformDeliveryWorkflowTest.java) | 🟢 PASS |
+| `REQ-TOP-018` (Portainer GitOps Auto-Deploy) | `[MUST]` | [`PlatformDeliveryWorkflowTest.verifyPortainerGitOpsIntegration`](file:///src/test/java/br/com/wallet/platform/PlatformDeliveryWorkflowTest.java) | 🟢 PASS |
+| `I-MESSAGING-001` (Broker-Mediated IPC) | `[MUST]` | [`ScalingTopologyTest.verifyIndependentScaling`](file:///src/test/java/br/com/wallet/platform/ScalingTopologyTest.java) | 🟢 PASS |
 
 ---
 
@@ -78,8 +87,11 @@ docker build --target core -t wallet-core:latest .
 
 ### 3.2 Plan A: Local Development & CI
 ```bash
-# Launch multi-container stack with non-root containers
+# Launch multi-container stack with non-root containers (spool-init automatically enforces UID 10001:10001 permissions)
 docker compose up -d
+
+# If recovering an existing volume with legacy root ownership:
+# docker compose down && docker compose up -d (spool-init auto-heals ownership)
 
 # Verify container health and non-root execution
 docker compose ps
@@ -89,15 +101,30 @@ docker exec wallet-edge id
 
 ### 3.3 Plan B: Low-Cost Lean Appliance (Non-Kubernetes, < 8GB RAM)
 ```bash
-# Prepare local NVMe spool directory with UID 10001 ownership
-mkdir -p ./spool-data
-sudo chown -R 10001:10001 ./spool-data
+# Option A (Automated Turnkey Script — starts Appliance + Portainer CE + VictoriaLogs/VictoriaTraces):
+./scripts/appliance.sh start
 
-# Launch Lean Appliance (Edge + Headless Core + PostgreSQL + Dragonfly + NATS)
+# Execute a live deposit transaction through Edge Ingress:
+./scripts/appliance.sh test-tx
+
+# Check container health and endpoint probes:
+./scripts/appliance.sh status
+
+# Option B (Direct Compose CLI):
+# Launch with Portainer CE & Victoria telemetry:
+docker compose -f docker-compose.appliance.yaml --profile telemetry up -d
+
+# Or launch in ultra-lean mode (<8GB RAM, without local Victoria telemetry):
 docker compose -f docker-compose.appliance.yaml up -d
 
-# Verify total memory usage is within budget (< 8GB RAM)
-docker stats --no-stream --format "table {{.Name}}\t{{.MemUsage}}\t{{.MemPerc}}"
+# Access Portainer CE Web Management UI:
+# URL: https://localhost:9443 (or http://localhost:9000)
+
+# Access VictoriaLogs Telemetry Web UI:
+# URL: http://localhost:9428/select/vmui/
+
+# Access VictoriaTraces Telemetry Web UI:
+# URL: http://localhost:10428/select/vmui/
 ```
 
 ### 3.4 Plan C: Enterprise On-Premises via Harvester HCI & Rancher
@@ -126,7 +153,7 @@ kubectl get hpa -n wallet-prod
 ```bash
 # 1. Post a Transfer Command to Edge Gateway (Port 8080)
 OPERATION_ID=$(uuidgen)
-curl -i -X POST http://localhost:8080/transfers \
+curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "X-Tenant-Id: tenant-corp" \
   -H "Idempotency-Key: ${OPERATION_ID}" \
@@ -144,6 +171,30 @@ curl -i http://localhost:8080/actuator/health/readiness
 # 3. Assert Core Headless Port 8081 Rejects Ingress
 curl -i http://localhost:8081/transfers
 # Expected: HTTP/1.1 404 Not Found
+```
+
+### 3.7 Automated Delivery, Unified GHCR OCI Helm & Portainer GitOps Setup
+```bash
+# 1. Unified GHCR OCI Helm Artifact Distribution (Plan C / D)
+# After .github/workflows/ci-cd-appliance.yml packages and pushes the chart to GHCR:
+# (Zero external branch overhead; no 'helm repo add' or static HTTP index needed!)
+helm registry login ghcr.io -u <github-username>
+
+# Install or upgrade directly from GHCR OCI on Harvester HCI / Rancher / GKE:
+helm upgrade --install wallet-platform oci://ghcr.io/<owner>/charts/wallet-platform \
+  --version 0.1.0 \
+  --namespace wallet-prod --create-namespace \
+  -f deploy/helm/wallet-platform/values-harvester.yaml
+
+# 2. Portainer Appliance Continuous Deployment Webhook (Plan B)
+# In Portainer CE UI:
+#   Navigate to Stacks -> wallet-appliance -> Stack details
+#   Toggle "Webhook" to enabled and copy the generated Webhook URL:
+#   e.g.: http://<appliance-ip>:9000/api/stacks/webhooks/<token>
+# In GitHub Repository Settings:
+#   Add Repository Secret: PORTAINER_WEBHOOK_URL
+# On every push to main, .github/workflows/ci-cd-appliance.yml builds GHCR images
+# and invokes the webhook, automatically redeploying the Plan B appliance zero-CLI!
 ```
 
 ---

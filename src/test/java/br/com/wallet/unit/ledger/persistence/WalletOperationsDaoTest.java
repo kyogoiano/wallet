@@ -27,8 +27,7 @@ class WalletOperationsDaoTest {
 
     @Test
     void shouldReturnTrueWhenInsertSucceeds() {
-
-        when(jdbc.update(anyString(), Optional.ofNullable(any())))
+        when(jdbc.update(anyString(), any(UUID.class), any()))
                 .thenReturn(1);
 
         var result = dao.startOperation(UUID.randomUUID());
@@ -39,20 +38,20 @@ class WalletOperationsDaoTest {
     @Test
     void shouldFailOperationSuccessfully() {
         UUID opId = UUID.randomUUID();
-        when(jdbc.update(anyString(), any(), any(), any())).thenReturn(1);
+        when(jdbc.update(anyString(), any(), any(), any(), any())).thenReturn(1);
 
         dao.failOperation(opId, "Insufficient funds", "BUSINESS");
 
-        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("Insufficient funds"), org.mockito.ArgumentMatchers.eq("BUSINESS"));
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("Insufficient funds"), org.mockito.ArgumentMatchers.eq("BUSINESS"), org.mockito.ArgumentMatchers.eq("default"));
     }
 
     @Test
     void shouldCompleteOperationSuccessfully() {
         UUID opId = UUID.randomUUID();
-        when(jdbc.update(anyString(), any(UUID.class))).thenReturn(1);
+        when(jdbc.update(anyString(), any(UUID.class), any())).thenReturn(1);
 
         dao.completeOperation(opId);
 
-        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId));
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("default"));
     }
 }

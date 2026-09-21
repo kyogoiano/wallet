@@ -73,8 +73,16 @@ public class RedisVelocityStore implements VelocityStore {
     @Bulkhead(name ="redisVelocity", fallbackMethod = "fallbackVelocity")
     @CircuitBreaker(name = "redisVelocity", fallbackMethod = "fallbackVelocity")
     public VelocityResult checkVelocity(@NonNull final UUID userId, @NonNull final UUID operationId, @NonNull final Instant timestamp) {
-        return checkVelocityAsync(userId, operationId, timestamp)
-                .thenApply( velocityResult -> cacheSnapshot(userId, velocityResult))
+        return checkVelocity(userId, operationId, timestamp, "default");
+    }
+
+    @Override
+    @Bulkhead(name ="redisVelocity", fallbackMethod = "fallbackVelocityTenant")
+    @CircuitBreaker(name = "redisVelocity", fallbackMethod = "fallbackVelocityTenant")
+    public VelocityResult checkVelocity(@NonNull final UUID userId, @NonNull final UUID operationId, @NonNull final Instant timestamp, final String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        return checkVelocityAsync(userId, operationId, timestamp, effectiveTenant)
+                .thenApply(velocityResult -> cacheSnapshot(userId, velocityResult))
                 .toCompletableFuture()
                 .join();
     }
@@ -97,13 +105,16 @@ public class RedisVelocityStore implements VelocityStore {
     private CompletionStage<VelocityResult> checkVelocityAsync(
             @NonNull final UUID userId,
             @NonNull final UUID operationId,
-            @NonNull final Instant timestamp
+            @NonNull final Instant timestamp,
+            @NonNull final String tenantId
     ) {
+
+        String key = "fraud:" + tenantId + ":user:" + userId + ":tx_window";
 
         return commands.<List<Long>>eval(
                 VELOCITY_SCRIPT,
                 ScriptOutputType.MULTI,
-                new String[]{"user:" + userId + ":tx_window"},
+                new String[]{key},
                 String.valueOf(timestamp.toEpochMilli()),
                 WINDOW,
                 operationId.toString(),
@@ -125,5 +136,9 @@ public class RedisVelocityStore implements VelocityStore {
         return fallbackCache.get(userId)
                 .toCompletableFuture()
                 .join();
+    }
+
+    public VelocityResult fallbackVelocityTenant(UUID userId, UUID operationId, Instant timestamp, String tenantId, Throwable ex) {
+        return fallbackVelocity(userId, operationId, timestamp, ex);
     }
 }

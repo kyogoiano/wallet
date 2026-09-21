@@ -62,15 +62,15 @@ class WithdrawFundsServiceTest {
 
         final Withdraw withdraw = new Withdraw(walletId, userId, amount, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId))
                 .thenReturn(Optional.of(new AccountBalance(userId, BigDecimal.valueOf(100.00))));
 
         service.handle(withdraw);
 
-        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(userId), eq(clock.instant()));
+        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(userId), eq(clock.instant()), eq("default"));
         verify(outboxDao).save(any(WithdrawCompletedEvent.class));
-        verify(operationsDao).completeOperation(opId);
+        verify(operationsDao).completeOperation(eq(opId), any());
     }
 
     @Test
@@ -83,7 +83,7 @@ class WithdrawFundsServiceTest {
 
         final Withdraw withdraw = new Withdraw(walletId, userId, amount, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId))
                 .thenReturn(Optional.of(new AccountBalance(userId, BigDecimal.valueOf(50.00))));
 
@@ -103,7 +103,7 @@ class WithdrawFundsServiceTest {
 
         final Withdraw withdraw = new Withdraw(walletId, otherUserId, BigDecimal.TEN, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId))
                 .thenReturn(Optional.of(new AccountBalance(ownerUserId, BigDecimal.valueOf(100.00))));
 
@@ -118,10 +118,34 @@ class WithdrawFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final Withdraw withdraw = new Withdraw(walletId, UUID.randomUUID(), BigDecimal.TEN, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.handle(withdraw))
                 .isInstanceOf(AccountNotFoundException.class);
+    }
+
+    @Test
+    @DisplayName("TASK-SEC-5.2: Should reject cross-tenant withdrawal with TenantMismatchException")
+    void shouldRejectCrossTenantWithdrawal() {
+        final UUID walletId = UUID.randomUUID();
+        final UUID userId = UUID.randomUUID();
+        final UUID opId = UUID.randomUUID();
+        final BigDecimal amount = BigDecimal.valueOf(50.00);
+
+        // Command belongs to tenant-Alpha
+        final Withdraw withdraw = new Withdraw(walletId, userId, amount, opId, br.com.wallet.core.context.OperationOrigin.USER, "tenant-Alpha");
+
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
+        // Account balance belongs to tenant-Beta
+        when(accountDao.findWalletBalanceForUpdate(walletId))
+                .thenReturn(Optional.of(new AccountBalance(userId, BigDecimal.valueOf(100.00), br.com.wallet.ledger.api.domain.AccountStatus.ACTIVE, "tenant-Beta")));
+
+        assertThatThrownBy(() -> service.handle(withdraw))
+                .isInstanceOf(br.com.wallet.core.exceptions.TenantMismatchException.class)
+                .hasMessageContaining("Cross-tenant withdrawal is forbidden");
+
+        verify(operationsDao).failOperation(eq(opId), contains("Cross-tenant"), eq("FORBIDDEN_TENANT_ACCESS"), eq("tenant-Alpha"));
+        verifyNoInteractions(core);
     }
 }

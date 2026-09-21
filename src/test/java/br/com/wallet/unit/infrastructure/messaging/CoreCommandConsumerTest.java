@@ -94,6 +94,17 @@ class CoreCommandConsumerTest {
         );
     }
 
+    private Headers createHeaders(UUID opId, String type) {
+        Headers headers = new Headers();
+        headers.add("operation_id", opId.toString());
+        headers.add("type", type);
+        headers.add("tenant_id", "default");
+        headers.add("principal_id", "test-principal");
+        headers.add("key_id", "key-1");
+        headers.add("publisher_id", "edge-gateway");
+        return headers;
+    }
+
     @Test
     @DisplayName("Should process Transfer command, invoke use case, publish COMPLETED, and ACK message")
     void shouldHandleTransferSuccessfully() {
@@ -104,9 +115,7 @@ class CoreCommandConsumerTest {
                 {"from":"%s","to":"%s","amount":100.00,"operationId":"%s"}
                 """.formatted(from, to, opId);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", opId.toString());
-        headers.add("type", "TRANSFER");
+        Headers headers = createHeaders(opId, "TRANSFER");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn(json.getBytes(StandardCharsets.UTF_8));
@@ -118,7 +127,7 @@ class CoreCommandConsumerTest {
         verify(fraudCheckHelper).performFraudCheck(any(Transfer.class));
         verify(transferFundsUseCase).handle(any(Transfer.class));
         verify(statusBroadcaster).publishStatus(eq(opId), eq("COMPLETED"), anyString());
-        verify(operationStateUseCase).markOperationCompleted(opId);
+        verify(operationStateUseCase).markOperationCompleted(eq(opId), any());
         verify(message).ack();
         verify(message, never()).nakWithDelay(any());
     }
@@ -132,9 +141,7 @@ class CoreCommandConsumerTest {
                 {"walletId":"%s","amount":50.00,"operationId":"%s"}
                 """.formatted(walletId, opId);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", opId.toString());
-        headers.add("type", "DEPOSIT");
+        Headers headers = createHeaders(opId, "DEPOSIT");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn(json.getBytes(StandardCharsets.UTF_8));
@@ -146,7 +153,7 @@ class CoreCommandConsumerTest {
         verify(fraudCheckHelper).performFraudCheck(any(Deposit.class));
         verify(depositFundsUseCase).handle(any(Deposit.class));
         verify(statusBroadcaster).publishStatus(eq(opId), eq("COMPLETED"), anyString());
-        verify(operationStateUseCase).markOperationCompleted(opId);
+        verify(operationStateUseCase).markOperationCompleted(eq(opId), any());
         verify(message).ack();
     }
 
@@ -159,9 +166,7 @@ class CoreCommandConsumerTest {
                 {"walletId":"%s","amount":30.00,"operationId":"%s"}
                 """.formatted(walletId, opId);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", opId.toString());
-        headers.add("type", "WITHDRAW");
+        Headers headers = createHeaders(opId, "WITHDRAW");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn(json.getBytes(StandardCharsets.UTF_8));
@@ -173,7 +178,7 @@ class CoreCommandConsumerTest {
         verify(fraudCheckHelper).performFraudCheck(any(Withdraw.class));
         verify(withdrawFundsUseCase).handle(any(Withdraw.class));
         verify(statusBroadcaster).publishStatus(eq(opId), eq("COMPLETED"), anyString());
-        verify(operationStateUseCase).markOperationCompleted(opId);
+        verify(operationStateUseCase).markOperationCompleted(eq(opId), any());
         verify(message).ack();
     }
 
@@ -187,9 +192,7 @@ class CoreCommandConsumerTest {
                 {"from":"%s","to":"%s","amount":1000.00,"operationId":"%s"}
                 """.formatted(from, to, opId);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", opId.toString());
-        headers.add("type", "TRANSFER");
+        Headers headers = createHeaders(opId, "TRANSFER");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn(json.getBytes(StandardCharsets.UTF_8));
@@ -202,7 +205,7 @@ class CoreCommandConsumerTest {
         consumer.processMessage(message);
 
         verify(statusBroadcaster).publishStatus(eq(opId), eq("FAILED"), contains("Insufficient balance"));
-        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Insufficient balance"), any());
+        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Insufficient balance"), any(), any());
         verify(message).ack();
         verify(message, never()).nakWithDelay(any());
     }
@@ -215,9 +218,7 @@ class CoreCommandConsumerTest {
                 {"from":"%s","to":"%s","amount":50.00,"operationId":"%s"}
                 """.formatted(UUID.randomUUID(), UUID.randomUUID(), opId);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", opId.toString());
-        headers.add("type", "TRANSFER");
+        Headers headers = createHeaders(opId, "TRANSFER");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn(json.getBytes(StandardCharsets.UTF_8));
@@ -242,9 +243,7 @@ class CoreCommandConsumerTest {
                 {"from":"%s","to":"%s","amount":20.00,"operationId":"%s"}
                 """.formatted(UUID.randomUUID(), UUID.randomUUID(), opId);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", opId.toString());
-        headers.add("type", "TRANSFER");
+        Headers headers = createHeaders(opId, "TRANSFER");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn(json.getBytes(StandardCharsets.UTF_8));
@@ -268,8 +267,7 @@ class CoreCommandConsumerTest {
     void shouldRoutePoisonMessageToDlq() throws Exception {
         byte[] unparseableBytes = "{ corrupt json payload".getBytes(StandardCharsets.UTF_8);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", UUID.randomUUID().toString());
+        Headers headers = createHeaders(UUID.randomUUID(), "TRANSFER");
 
         when(message.getSubject()).thenReturn("commands.wallet.transfer");
         when(message.getHeaders()).thenReturn(headers);
@@ -292,9 +290,7 @@ class CoreCommandConsumerTest {
                 {"from":"%s","to":"%s","amount":10.00,"operationId":"%s"}
                 """.formatted(UUID.randomUUID(), UUID.randomUUID(), opId);
 
-        Headers headers = new Headers();
-        headers.add("operation_id", opId.toString());
-        headers.add("type", "TRANSFER");
+        Headers headers = createHeaders(opId, "TRANSFER");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn(json.getBytes(StandardCharsets.UTF_8));
@@ -309,6 +305,100 @@ class CoreCommandConsumerTest {
 
         verify(dlqPublisher).publishDlqConfirmed(eq("commands.dlq.transfer"), eq(natsConnection), eq(message), any());
         verify(statusBroadcaster).publishStatus(eq(opId), eq("FAILED"), contains("DLQ"));
+        verify(message).ack();
+    }
+
+    @Test
+    @DisplayName("TASK-SEC-5.1: Should reject message without tenant_id header and ACK immediately")
+    void shouldRejectMessageWithoutTenantIdHeader() {
+        UUID opId = UUID.randomUUID();
+        Headers headers = new Headers();
+        headers.add("operation_id", opId.toString());
+        headers.add("type", "TRANSFER");
+        // No tenant_id, principal_id, key_id
+
+        when(message.getHeaders()).thenReturn(headers);
+
+        consumer.processMessage(message);
+
+        verify(statusBroadcaster).publishStatus(eq(opId), eq("FAILED"), contains("tenant_id"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("tenant_id"), eq("FORBIDDEN_TENANT_ACCESS"), anyString());
+        verify(message).ack();
+        verify(transferFundsUseCase, never()).handle(any());
+    }
+
+    @Test
+    @DisplayName("TASK-SEC-5.1: Should reject message from unauthorized publisher identity")
+    void shouldRejectMessageFromUnauthorizedPublisher() {
+        UUID opId = UUID.randomUUID();
+        Headers headers = new Headers();
+        headers.add("operation_id", opId.toString());
+        headers.add("type", "TRANSFER");
+        headers.add("tenant_id", "default");
+        headers.add("principal_id", "test-principal");
+        headers.add("key_id", "key-1");
+        headers.add("publisher_id", "unauthorized-external-actor");
+
+        when(message.getHeaders()).thenReturn(headers);
+
+        consumer.processMessage(message);
+
+        verify(statusBroadcaster).publishStatus(eq(opId), eq("FAILED"), contains("Unauthorized publisher"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Unauthorized publisher"), eq("FORBIDDEN_TENANT_ACCESS"), eq("default"));
+        verify(message).ack();
+        verify(transferFundsUseCase, never()).handle(any());
+    }
+
+    @Test
+    @DisplayName("TASK-SEC-5.1: Should reject message without publisher_id header")
+    void shouldRejectMessageWithoutPublisherIdHeader() {
+        UUID opId = UUID.randomUUID();
+        Headers headers = new Headers();
+        headers.add("operation_id", opId.toString());
+        headers.add("type", "TRANSFER");
+        headers.add("tenant_id", "default");
+        headers.add("principal_id", "test-principal");
+        headers.add("key_id", "key-1");
+        // missing publisher_id
+
+        when(message.getHeaders()).thenReturn(headers);
+
+        consumer.processMessage(message);
+
+        verify(statusBroadcaster).publishStatus(eq(opId), eq("FAILED"), contains("Unauthorized publisher"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Unauthorized publisher"), eq("FORBIDDEN_TENANT_ACCESS"), eq("default"));
+        verify(message).ack();
+        verify(transferFundsUseCase, never()).handle(any());
+    }
+
+    @Test
+    @DisplayName("TASK-SEC-5.1: Transport tenant header MUST override any forged tenant in JSON payload")
+    void shouldOverrideForgedPayloadTenantWithTransportTenant() {
+        UUID opId = UUID.randomUUID();
+        UUID from = UUID.randomUUID();
+        UUID to = UUID.randomUUID();
+        String jsonWithForgedTenant = """
+                {"from":"%s","to":"%s","amount":100.00,"operationId":"%s","tenantId":"attacker-spoofed-tenant"}
+                """.formatted(from, to, opId);
+
+        Headers headers = new Headers();
+        headers.add("operation_id", opId.toString());
+        headers.add("type", "TRANSFER");
+        headers.add("tenant_id", "legit-tenant-from-transport");
+        headers.add("principal_id", "principal-1");
+        headers.add("key_id", "key-1");
+        headers.add("publisher_id", "edge-gateway");
+
+        when(message.getHeaders()).thenReturn(headers);
+        when(message.getData()).thenReturn(jsonWithForgedTenant.getBytes(StandardCharsets.UTF_8));
+        when(message.metaData()).thenReturn(metaData);
+        when(metaData.deliveredCount()).thenReturn(1L);
+
+        consumer.processMessage(message);
+
+        ArgumentCaptor<Transfer> transferCaptor = ArgumentCaptor.forClass(Transfer.class);
+        verify(transferFundsUseCase).handle(transferCaptor.capture());
+        assertThat(transferCaptor.getValue().tenantId()).isEqualTo("legit-tenant-from-transport");
         verify(message).ack();
     }
 }

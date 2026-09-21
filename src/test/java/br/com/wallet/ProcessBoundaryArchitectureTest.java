@@ -33,11 +33,12 @@ class ProcessBoundaryArchitectureTest {
     }
 
     @Test
-    @DisplayName("REQ-PRC-003 & I-STATE-001: Edge must not depend on relational persistence or SQL packages")
+    @DisplayName("REQ-PRC-003, I-STATE-001 & I-SEC-003: Edge must not depend on relational persistence or SQL packages")
     void edgeMustNotDependOnSqlOrPersistence() {
         ArchRule rule = noClasses()
                 .that().resideInAPackage("br.com.wallet.edge..")
                 .should().dependOnClassesThat().resideInAnyPackage(
+                        "java.sql..",
                         "javax.sql..",
                         "jakarta.persistence..",
                         "org.springframework.jdbc..",
@@ -91,6 +92,24 @@ class ProcessBoundaryArchitectureTest {
                         "io.kubernetes..",
                         "com.github.dockerjava..",
                         "org.mandas.docker.."
+                );
+
+        rule.check(allProductionClasses);
+    }
+
+    @Test
+    @DisplayName("REQ-SEC-014, REQ-SEC-015 & I-PLATFORM-001: Zero third-party crypto/auth/JWT/Keycloak dependencies (Pure JDK 27 standard libraries)")
+    void assertZeroThirdPartyCryptoOrAuthSdkDependencies() {
+        ArchRule rule = noClasses()
+                .that().resideInAnyPackage("br.com.wallet..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "org.bouncycastle..",
+                        "org.apache.shiro..",
+                        "com.nimbusds..",
+                        "io.jsonwebtoken..",
+                        "com.auth0..",
+                        "org.keycloak..",
+                        "org.springframework.security.."
                 );
 
         rule.check(allProductionClasses);

@@ -1,5 +1,5 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-CREATE TABLE accounts (
+CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY,
     balance NUMERIC(19,2) NOT NULL CHECK (balance >= 0),
     version BIGINT NOT NULL DEFAULT 0,
@@ -9,14 +9,18 @@ CREATE TABLE accounts (
     blocked_reason TEXT NULL,
     last_sequence BIGINT DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
     CONSTRAINT chk_account_status CHECK (status IN ('ACTIVE', 'BLOCKED', 'SUSPENDED', 'FROZEN'))
 );
 
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default';
+
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status) WHERE status != 'ACTIVE';
 CREATE INDEX IF NOT EXISTS idx_accounts_user_status ON accounts(user_id, status);
+CREATE INDEX IF NOT EXISTS idx_accounts_tenant_id ON accounts(tenant_id, id);
 
 -- Ledger: source of truth
-CREATE TABLE ledger (
+CREATE TABLE IF NOT EXISTS ledger (
     id UUID PRIMARY KEY,
     wallet_id UUID NOT NULL,
     amount NUMERIC(19,2) NOT NULL,
@@ -25,6 +29,7 @@ CREATE TABLE ledger (
     operation_id UUID NOT NULL,
     user_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
 
     -- tamper-proof fields
     sequence BIGINT NOT NULL,
@@ -53,21 +58,26 @@ CREATE TABLE ledger (
             )
 );
 
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default';
+
 -- Indexes for performance
-CREATE INDEX idx_ledger_wallet_time
+CREATE INDEX IF NOT EXISTS idx_ledger_wallet_time
     ON ledger (wallet_id, created_at);
 
-CREATE INDEX idx_ledger_reference
+CREATE INDEX IF NOT EXISTS idx_ledger_reference
     ON ledger (reference_id);
 
-CREATE INDEX idx_ledger_prev_hash
+CREATE INDEX IF NOT EXISTS idx_ledger_prev_hash
     ON ledger (previous_hash);
 
-CREATE INDEX idx_ledger_wallet_sequence_desc
+CREATE INDEX IF NOT EXISTS idx_ledger_wallet_sequence_desc
     ON ledger (wallet_id, sequence DESC);
 
+CREATE INDEX IF NOT EXISTS idx_ledger_tenant_id
+    ON ledger (tenant_id, wallet_id);
+
 -- Outbox for event publishing
-CREATE TABLE outbox (
+CREATE TABLE IF NOT EXISTS outbox (
     id UUID PRIMARY KEY,
     aggregate_type VARCHAR(50) NOT NULL, -- wallet operation
     aggregate_id UUID NOT NULL, -- operation id
@@ -85,26 +95,33 @@ CREATE TABLE outbox (
         CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED', 'FRAUD', 'RISK_PROPAGATION_DETECTED'))
 );
 
-CREATE INDEX idx_outbox_unprocessed
+CREATE INDEX IF NOT EXISTS idx_outbox_unprocessed
     ON outbox (processed_at)
     WHERE processed_at IS NULL;
 
-CREATE INDEX idx_outbox_ready
+CREATE INDEX IF NOT EXISTS idx_outbox_ready
     ON outbox (status, next_retry_at)
     WHERE status IN ('PENDING', 'FAILED');
 
-CREATE TABLE wallet_operations (
+CREATE TABLE IF NOT EXISTS wallet_operations (
     operation_id UUID PRIMARY KEY,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING',
     error_message TEXT NULL,
     failure_type VARCHAR(32) NULL,
+    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
     CONSTRAINT wallet_operations_status_chk
         CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
     -- TODO: include payload for debugging
     -- For high-write event workloads, increase max_wal_size and wal_buffers to reduce checkpoint frequency and improve throughput.
 );
+
+ALTER TABLE wallet_operations ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default';
+ALTER TABLE wallet_operations ADD COLUMN IF NOT EXISTS failure_type VARCHAR(32) NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_operations_tenant_id
+    ON wallet_operations (tenant_id, operation_id);
 
 CREATE TABLE IF NOT EXISTS dlq_operations (
   id UUID,

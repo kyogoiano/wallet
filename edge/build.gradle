@@ -38,5 +38,6 @@ dependencies {
 
 test {
     useJUnitPlatform()
+    jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
 }
 

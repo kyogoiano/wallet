@@ -8,4 +8,8 @@ public interface FraudCheckable {
     BigDecimal amount();
     UUID sourceUserIdForFraudCheck(); // e.g., walletId for Deposit/Withdraw, 'from' for Transfer
     UUID targetUserIdForFraudCheck(); // e.g., 'to' for Transfer, null for Deposit/Withdraw
+
+    default String tenantId() {
+        return "default";
+    }
 }

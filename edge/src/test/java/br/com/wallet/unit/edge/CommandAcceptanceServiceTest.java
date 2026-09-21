@@ -21,6 +21,7 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -45,7 +46,7 @@ class CommandAcceptanceServiceTest {
         validator = new EdgeRequestValidator(64 * 1024); // 64KB limit
 
         // Defaults: pass rate limiter and bulkhead
-        when(rateLimiter.tryAcquire(any())).thenReturn(true);
+        when(rateLimiter.tryAcquire(anyString())).thenReturn(true);
         when(bulkhead.tryAcquire()).thenReturn(true);
         when(circuitBreaker.isCallPermitted()).thenReturn(true);
 
@@ -156,7 +157,7 @@ class CommandAcceptanceServiceTest {
         UUID opId = UUID.randomUUID();
         CommandEnvelope envelope = sampleEnvelope(opId, "{\"amount\": 50.00}");
 
-        when(rateLimiter.tryAcquire(any())).thenReturn(false);
+        when(rateLimiter.tryAcquire(anyString())).thenReturn(false);
         when(rateLimiter.getRetryAfterSeconds()).thenReturn(1);
 
         EdgeCommandResult result = service.acceptCommand(envelope).get(1, TimeUnit.SECONDS);

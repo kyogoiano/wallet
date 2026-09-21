@@ -55,6 +55,9 @@ public class NatsEdgeCommandPublisher implements EdgeCommandPublisher {
             headers.add("timestamp", String.valueOf(command.timestamp()));
             headers.add("client_ip", command.clientIp());
             headers.add("tenant_id", command.tenantId());
+            headers.add("principal_id", command.principalId());
+            headers.add("key_id", command.keyId());
+            headers.add("publisher_id", "edge-gateway");
 
             NatsMessage message = NatsMessage.builder()
                     .subject(subject)

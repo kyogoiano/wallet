@@ -28,7 +28,8 @@ public class AccountDao {
             AccountStatus.valueOf(rs.getString("status")),
             rs.getTimestamp("blocked_at") != null ? rs.getTimestamp("blocked_at").toInstant() : null,
             rs.getString("blocked_reason"),
-            rs.getTimestamp("created_at").toInstant()
+            rs.getTimestamp("created_at").toInstant(),
+            rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
     );
 
     public AccountDao(final JdbcTemplate jdbc, NamedParameterJdbcTemplate namedParameterJdbcTemplate) {
@@ -43,15 +44,19 @@ public class AccountDao {
      * @param userId user id
      */
     public void insertAccount(final UUID walletId, final UUID userId) {
+        insertAccount(walletId, userId, "default");
+    }
+
+    public void insertAccount(final UUID walletId, final UUID userId, final String tenantId) {
         jdbc.update("""
-            INSERT INTO accounts (id, balance, user_id, status, version)
-            VALUES (?, ?, ?, 'ACTIVE', 0)
-        """, walletId, BigDecimal.ZERO, userId);
+            INSERT INTO accounts (id, balance, user_id, status, version, tenant_id)
+            VALUES (?, ?, ?, 'ACTIVE', 0, ?)
+        """, walletId, BigDecimal.ZERO, userId, tenantId != null ? tenantId : "default");
     }
 
     public Optional<Account> findAccount(@NonNull final UUID walletId) {
         return jdbc.query("""
-                SELECT id, balance, version, user_id, status, blocked_at, blocked_reason, created_at
+                SELECT id, balance, version, user_id, status, blocked_at, blocked_reason, created_at, tenant_id
                 FROM accounts WHERE id = ?
                 """, rs -> {
             if (rs.next()) {
@@ -72,7 +77,7 @@ public class AccountDao {
                 .addValue("limit", limit)
                 .addValue("offset", offset);
         return namedParameterJdbcTemplate.query("""
-                 SELECT id, balance, version, user_id, status, blocked_at, blocked_reason, created_at
+                 SELECT id, balance, version, user_id, status, blocked_at, blocked_reason, created_at, tenant_id
                  FROM accounts
                  ORDER BY created_at ASC
                  LIMIT :limit OFFSET :offset
@@ -92,14 +97,19 @@ public class AccountDao {
 
     public Optional<AccountBalance> findWalletBalanceForUpdate(@NonNull final UUID walletId) {
         return jdbc.query("""
-                SELECT id, user_id, balance, status, blocked_reason FROM accounts WHERE id = ? FOR UPDATE
+                SELECT id, user_id, balance, status, blocked_reason, tenant_id FROM accounts WHERE id = ? FOR UPDATE
                 """, rs -> {
             if (rs.next()) {
                 AccountStatus status = AccountStatus.valueOf(rs.getString("status"));
                 if (status != AccountStatus.ACTIVE) {
                     throw new AccountBlockedException(walletId, rs.getString("blocked_reason"));
                 }
-                return Optional.of(new AccountBalance(rs.getObject("user_id", UUID.class), rs.getBigDecimal("balance"), status));
+                return Optional.of(new AccountBalance(
+                        rs.getObject("user_id", UUID.class),
+                        rs.getBigDecimal("balance"),
+                        status,
+                        rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+                ));
             }
             return Optional.empty();
         }, walletId);
@@ -121,7 +131,7 @@ public class AccountDao {
      */
     public Map<UUID, AccountBalance> getBalancesFromWallets(final List<@NonNull UUID> ordered) {
         return jdbc.query("""
-            SELECT id, user_id, balance, status, blocked_reason
+            SELECT id, user_id, balance, status, blocked_reason, tenant_id
             FROM accounts
             WHERE id IN (?, ?)
             FOR UPDATE
@@ -135,7 +145,12 @@ public class AccountDao {
                 }
                 map.put(
                         id,
-                        new AccountBalance(rs.getObject("user_id", UUID.class), rs.getBigDecimal("balance"), status)
+                        new AccountBalance(
+                                rs.getObject("user_id", UUID.class),
+                                rs.getBigDecimal("balance"),
+                                status,
+                                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+                        )
                 );
             }
             return map;

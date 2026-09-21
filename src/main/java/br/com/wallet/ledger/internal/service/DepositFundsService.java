@@ -1,6 +1,7 @@
 package br.com.wallet.ledger.internal.service;
 
 import br.com.wallet.core.exceptions.AccountBlockedException;
+import br.com.wallet.core.exceptions.TenantMismatchException;
 import br.com.wallet.ledger.api.domain.Account;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.ledger.api.context.Deposit;
@@ -50,11 +51,11 @@ public class DepositFundsService implements DepositFundsUseCase {
     }
 
     @Traceable("wallet.deposit")
-    @Transactional
+    @Transactional(noRollbackFor = TenantMismatchException.class)
     @Override
     public void handle(@NonNull final Deposit deposit) {
 
-        if (!operationsDao.startOperation(deposit.operationId())) {
+        if (!operationsDao.startOperation(deposit.operationId(), deposit.tenantId())) {
             log.info("Idempotent operation ignored. operationId={}", deposit.operationId());
             throw new IdempotencyException("Operation already processed: " + deposit.operationId());
         }
@@ -65,6 +66,16 @@ public class DepositFundsService implements DepositFundsUseCase {
             log.warn("Deposit rejected: account is not active. walletId={}, status={}", deposit.walletId(), account.status());
             throw new AccountBlockedException(deposit.walletId(), account.blockedReason());
         }
+
+        // In-transaction tenant verification (I-SEC-005)
+        final String expectedTenant = deposit.tenantId() != null ? deposit.tenantId() : "default";
+        final String accountTenant = account.tenantId();
+        if (!accountTenant.equals(expectedTenant)) {
+            log.warn("Tenant mismatch in deposit: expected={}, accountTenant={}", expectedTenant, accountTenant);
+            operationsDao.failOperation(deposit.operationId(), "Cross-tenant deposit is forbidden", "FORBIDDEN_TENANT_ACCESS", expectedTenant);
+            throw new TenantMismatchException("Cross-tenant deposit is forbidden. expected=" + expectedTenant + ", accountTenant=" + accountTenant);
+        }
+
         final var userId = deposit.userId() != null ? deposit.userId() : account.userId();
 
         // validations
@@ -82,12 +93,12 @@ public class DepositFundsService implements DepositFundsUseCase {
 
         // external transport events handled by nats
         outboxDao.save(event);
-        operationsDao.completeOperation(deposit.operationId());
+        operationsDao.completeOperation(deposit.operationId(), deposit.tenantId());
     }
 
     protected void execute(@NonNull final Deposit deposit, @NonNull final UUID userId) {
 
         final var now = clock.instant(); // Use Clock directly or inject if needed for tests
-        core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), userId, now);
+        core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), userId, now, deposit.tenantId());
     }
 }

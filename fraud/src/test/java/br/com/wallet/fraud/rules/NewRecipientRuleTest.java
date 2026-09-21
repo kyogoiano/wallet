@@ -17,6 +17,8 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -48,7 +50,7 @@ class NewRecipientRuleTest {
         final Instant now = Instant.now();
         final FraudContext context = new FraudContext(userId, targetId, UUID.randomUUID(), 1000, now);
 
-        when(newRecipientStore.checkNewRecipient(userId, targetId, now))
+        when(newRecipientStore.checkNewRecipient(eq(userId), eq(targetId), eq(now), any()))
                 .thenReturn(CompletableFuture.completedFuture(new RecipientRisk.Ring(5, 4)));
 
         final RuleResult result = rule.evaluate(context);
@@ -66,7 +68,7 @@ class NewRecipientRuleTest {
         final Instant now = Instant.now();
         final FraudContext context = new FraudContext(userId, targetId, UUID.randomUUID(), 1000, now);
 
-        when(newRecipientStore.checkNewRecipient(userId, targetId, now))
+        when(newRecipientStore.checkNewRecipient(eq(userId), eq(targetId), eq(now), any()))
                 .thenReturn(CompletableFuture.completedFuture(new RecipientRisk.Mule(6)));
 
         final RuleResult result = rule.evaluate(context);

@@ -1,6 +1,8 @@
 package br.com.wallet.edge.internal.ingress;
 
+import br.com.wallet.edge.api.AuthenticatedPrincipal;
 import br.com.wallet.edge.api.OperationAuthorizationProvider;
+import br.com.wallet.edge.internal.security.HmacAuthenticationFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,8 +18,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Filter enforcing tenant authorization before establishing SSE push streams (TASK-5.11, REQ-EDG-019).
- * Rejects requests with HTTP 401 Unauthorized if missing tenant credentials,
+ * Filter enforcing tenant authorization before establishing SSE push streams (TASK-5.11, REQ-EDG-019, REQ-SEC-007).
+ * Rejects requests with HTTP 401 Unauthorized if missing credentials,
  * and HTTP 403 Forbidden if the tenant does not own the requested operation.
  */
 public class OperationStatusAuthorizationFilter extends OncePerRequestFilter {
@@ -63,12 +65,16 @@ public class OperationStatusAuthorizationFilter extends OncePerRequestFilter {
                 return;
             }
 
-            String tenantId = request.getHeader(TENANT_HEADER);
+            // Derive tenant strictly from AuthenticatedPrincipal, fallback to header for tests/legacy (I-SEC-001)
+            AuthenticatedPrincipal principal =
+                    (AuthenticatedPrincipal) request.getAttribute(HmacAuthenticationFilter.AUTHENTICATED_PRINCIPAL_ATTR);
+            String tenantId = principal != null ? principal.tenantId() : request.getHeader(TENANT_HEADER);
+
             if (tenantId == null || tenantId.isBlank()) {
-                log.warn("Unauthorized SSE stream attempt for opId {}: missing '{}' header", operationId, TENANT_HEADER);
+                log.warn("Unauthorized SSE stream attempt for opId {}: unauthenticated", operationId);
                 response.setStatus(HttpServletResponse.SC_UNAUTHORIZED);
                 response.setContentType("application/json");
-                response.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Missing required authentication header 'X-Tenant-Id'\"}");
+                response.getWriter().write("{\"code\":\"UNAUTHORIZED\",\"message\":\"Missing required authentication\"}");
                 return;
             }
 
@@ -76,7 +82,7 @@ public class OperationStatusAuthorizationFilter extends OncePerRequestFilter {
                 log.warn("Forbidden SSE stream attempt for opId {} by tenant {}", operationId, tenantId);
                 response.setStatus(HttpServletResponse.SC_FORBIDDEN);
                 response.setContentType("application/json");
-                response.getWriter().write("{\"code\":\"FORBIDDEN\",\"message\":\"Access denied: operation does not belong to the authorized tenant\"}");
+                response.getWriter().write("{\"code\":\"FORBIDDEN_TENANT_ACCESS\",\"message\":\"Access denied: operation does not belong to the authorized tenant\"}");
                 return;
             }
         }

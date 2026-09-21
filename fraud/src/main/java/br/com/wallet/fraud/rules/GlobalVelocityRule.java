@@ -24,7 +24,8 @@ public class GlobalVelocityRule implements FraudRule {
         var result = redisVelocityStore.checkVelocity(
                 context.userId(),
                 context.operationId(),
-                context.timestamp()
+                context.timestamp(),
+                context.tenantId()
         );
 
         return switch (result) {

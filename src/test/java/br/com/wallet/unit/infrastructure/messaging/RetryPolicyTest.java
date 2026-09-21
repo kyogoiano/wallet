@@ -35,6 +35,18 @@ class RetryPolicyTest {
     }
 
     @Test
+    @DisplayName("Should ACK TenantMismatchException and SecurityException immediately")
+    void shouldAckTenantMismatchAndSecurityException() {
+        br.com.wallet.core.exceptions.TenantMismatchException tenantEx = new br.com.wallet.core.exceptions.TenantMismatchException("Cross-tenant access forbidden");
+        SecurityException secEx = new SecurityException("Missing mandatory authentication headers");
+
+        assertThat(RetryPolicy.decide(1, tenantEx)).isEqualTo(RetryDecision.ACK);
+        assertThat(RetryPolicy.decide(5, tenantEx)).isEqualTo(RetryDecision.ACK);
+        assertThat(RetryPolicy.decide(1, secEx)).isEqualTo(RetryDecision.ACK);
+        assertThat(RetryPolicy.decide(5, secEx)).isEqualTo(RetryDecision.ACK);
+    }
+
+    @Test
     @DisplayName("Should ACK FraudBlockedException and ReplayAttackException")
     void shouldAckFraudAndReplayExceptions() {
         FraudBlockedException fraudEx = new FraudBlockedException(UUID.randomUUID(), UUID.randomUUID());

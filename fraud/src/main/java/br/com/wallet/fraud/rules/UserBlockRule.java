@@ -21,7 +21,7 @@ public class UserBlockRule implements FraudRule {
 
     @Override
     public RuleResult evaluate(@NonNull final FraudContext context) {
-        final var triggered = redisUserStore.isBlocked(context.userId());
+        final var triggered = redisUserStore.isBlocked(context.userId(), context.tenantId());
         log.debug("UserBlockRule.evaluate on operationId={}, userId={}: triggered={}", context.operationId(), context.userId(), triggered);
         return triggered ? new RuleResult(RuleType.USER_BLOCK, 30, true) :
                 new RuleResult(RuleType.USER_BLOCK, 0, false);

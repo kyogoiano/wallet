@@ -81,10 +81,30 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
     public void processMessage(@NonNull final Message message) {
         CommandType type;
         UUID operationId = null;
+        String tenantId;
 
         try {
             operationId = extractOperationId(message);
             type = resolveCommandType(message);
+            validateTransportSecurity(message);
+            tenantId = extractHeader(message, "tenant_id");
+        } catch (SecurityException se) {
+            log.error("Rejected command due to security/tenant violation: opId={}, subject={}, error={}",
+                    operationId, message.getSubject(), se.getMessage());
+            if (operationId != null) {
+                statusBroadcaster.publishStatus(operationId, "FAILED", se.getMessage());
+                if (operationStateUseCase != null) {
+                    String opTenant = extractHeader(message, "tenant_id");
+                    operationStateUseCase.markOperationFailed(
+                            operationId,
+                            se.getMessage(),
+                            "FORBIDDEN_TENANT_ACCESS",
+                            opTenant != null ? opTenant : "default"
+                    );
+                }
+            }
+            message.ack();
+            return;
         } catch (Exception e) {
             log.error("Failed to parse command envelope / type from message: subject={}", message.getSubject(), e);
             handlePoisonMessage(message, null, operationId, e);
@@ -93,7 +113,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
 
         final Object command;
         try {
-            JsonNode node = parseJsonNode(message.getData(), operationId);
+            JsonNode node = parseJsonNode(message.getData(), operationId, tenantId);
             command = deserializeCommand(node, type);
         } catch (Exception e) {
             log.error("Poison message detected while deserializing command: opId={}, type={}, subject={}",
@@ -113,7 +133,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
             if (operationId != null) {
                 statusBroadcaster.publishStatus(operationId, "COMPLETED", "Command executed successfully");
                 if (operationStateUseCase != null) {
-                    operationStateUseCase.markOperationCompleted(operationId);
+                    operationStateUseCase.markOperationCompleted(operationId, tenantId);
                 }
             }
             message.ack();
@@ -130,10 +150,14 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
                     if (operationId != null) {
                         statusBroadcaster.publishStatus(operationId, "FAILED", e.getMessage());
                         if (operationStateUseCase != null) {
+                            String failureCategory = (e instanceof br.com.wallet.core.exceptions.TenantMismatchException)
+                                    ? "FORBIDDEN_TENANT_ACCESS"
+                                    : ExceptionType.parseException(e).name();
                             operationStateUseCase.markOperationFailed(
                                     operationId,
                                     e.getMessage(),
-                                    ExceptionType.parseException(e).name()
+                                    failureCategory,
+                                    tenantId
                             );
                         }
                     }
@@ -240,7 +264,35 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
         };
     }
 
-    private JsonNode parseJsonNode(byte[] data, UUID fallbackOpId) {
+    private static final java.util.Set<String> AUTHORIZED_PUBLISHERS = java.util.Set.of("edge-gateway");
+
+    private void validateTransportSecurity(Message message) {
+        String tenantId = extractHeader(message, "tenant_id");
+        if (tenantId == null) {
+            throw new SecurityException("Missing mandatory tenant_id header from NATS publisher");
+        }
+        String principalId = extractHeader(message, "principal_id");
+        String keyId = extractHeader(message, "key_id");
+        if (principalId == null || keyId == null) {
+            throw new SecurityException("Missing mandatory authentication headers (principal_id/key_id)");
+        }
+        String publisherId = extractHeader(message, "publisher_id");
+        if (publisherId == null || !AUTHORIZED_PUBLISHERS.contains(publisherId)) {
+            throw new SecurityException("Unauthorized publisher identity: " + publisherId);
+        }
+    }
+
+    private String extractHeader(Message message, String name) {
+        if (message.getHeaders() != null) {
+            String value = message.getHeaders().getFirst(name);
+            if (value != null && !value.isBlank()) {
+                return value.trim();
+            }
+        }
+        return null;
+    }
+
+    private JsonNode parseJsonNode(byte[] data, UUID fallbackOpId, String tenantId) {
         JsonNode node = objectMapper.readTree(data);
         while (node != null && node.isString()) {
             try {
@@ -252,6 +304,9 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
         if (node instanceof ObjectNode objNode) {
             if (fallbackOpId != null && !objNode.has("operationId")) {
                 objNode.put("operationId", fallbackOpId.toString());
+            }
+            if (tenantId != null) {
+                objNode.put("tenantId", tenantId);
             }
             if (objNode.has("sourceAccountId") && !objNode.has("from")) {
                 objNode.set("from", objNode.get("sourceAccountId"));

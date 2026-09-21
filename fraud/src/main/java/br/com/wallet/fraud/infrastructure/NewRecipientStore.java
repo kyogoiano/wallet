@@ -119,15 +119,23 @@ public class NewRecipientStore {
      * @return recipient risk future result
      */
     public CompletionStage<RecipientRisk> checkNewRecipient(@NonNull final UUID senderId,
-                                                                 @Nullable final UUID recipientId,
-                                                                 @NonNull Instant timestamp) {
+                                                            @Nullable final UUID recipientId,
+                                                            @NonNull Instant timestamp) {
+        return checkNewRecipient(senderId, recipientId, timestamp, "default");
+    }
+
+    public CompletionStage<RecipientRisk> checkNewRecipient(@NonNull final UUID senderId,
+                                                            @Nullable final UUID recipientId,
+                                                            @NonNull Instant timestamp,
+                                                            final String tenantId) {
 
         if (recipientId == null) {
             return CompletableFuture.completedFuture(new RecipientRisk.Normal());
         }
 
-        String key1 = "user:" + senderId + ":recipients";
-        String key2 = "recipient:" + recipientId + ":senders";
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        String key1 = "fraud:" + effectiveTenant + ":user:" + senderId + ":recipients";
+        String key2 = "fraud:" + effectiveTenant + ":recipient:" + recipientId + ":senders";
 
         return commands.<List<Long>>eval(
                 NEW_RECIPIENT_SCRIPT,

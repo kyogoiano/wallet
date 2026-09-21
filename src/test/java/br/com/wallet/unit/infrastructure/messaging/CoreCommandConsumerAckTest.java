@@ -65,6 +65,10 @@ class CoreCommandConsumerAckTest {
         Headers headers = new Headers();
         headers.add("operation_id", opId.toString());
         headers.add("type", "TRANSFER");
+        headers.add("tenant_id", "default");
+        headers.add("principal_id", "test-principal");
+        headers.add("key_id", "key-1");
+        headers.add("publisher_id", "edge-gateway");
 
         String payload = """
                 {"operationId":"%s","from":"%s","to":"%s","amount":100.00}
@@ -88,6 +92,10 @@ class CoreCommandConsumerAckTest {
         Headers headers = new Headers();
         headers.add("operation_id", opId.toString());
         headers.add("type", "TRANSFER");
+        headers.add("tenant_id", "default");
+        headers.add("principal_id", "test-principal");
+        headers.add("key_id", "key-1");
+        headers.add("publisher_id", "edge-gateway");
 
         String payload = """
                 {"operationId":"%s","from":"%s","to":"%s","amount":100.00}

@@ -1,9 +1,7 @@
 package br.com.wallet.edge.internal.ingress;
 
-import br.com.wallet.edge.api.EdgeCommandIngress;
-import br.com.wallet.edge.api.EdgeCommandResult;
-import br.com.wallet.edge.api.CommandEnvelope;
-import br.com.wallet.edge.api.CommandType;
+import br.com.wallet.edge.api.*;
+import br.com.wallet.edge.internal.security.HmacAuthenticationFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -66,7 +64,17 @@ public class EdgeOperationsController {
         UUID opId = idempotencyKey != null ? idempotencyKey : UUID.randomUUID();
         String clientIp = request != null ? request.getRemoteAddr() : "127.0.0.1";
 
-        CommandEnvelope envelope = CommandEnvelope.create(opId, type, requestJson, clientIp);
+        AuthenticatedPrincipal principal = request != null
+                ? (AuthenticatedPrincipal) request.getAttribute(HmacAuthenticationFilter.AUTHENTICATED_PRINCIPAL_ATTR)
+                : null;
+
+        String tenantId = principal != null ? principal.tenantId() : "default";
+        String principalId = principal != null ? principal.principalId() : "unknown";
+        String keyId = principal != null ? principal.keyId() : "unknown";
+
+        CommandEnvelope envelope = CommandEnvelope.create(
+                opId, type, requestJson, clientIp, tenantId, principalId, keyId
+        );
 
         EdgeCommandResult result = ingress.acceptCommand(envelope).join();
         return mapResultToResponse(result, opId);

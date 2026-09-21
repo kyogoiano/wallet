@@ -59,6 +59,25 @@ services:
     networks:
       - appliance-net
 
+  schema-migration:
+    image: pgvector/pgvector:pg18
+    container_name: wallet-appliance-schema-migration
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        echo "▶ Synchronizing PostgreSQL schema..."
+        PGPASSWORD=wallet psql -h postgres -U wallet -d wallet -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/schema.sql
+        echo "✅ PostgreSQL schema synchronized successfully."
+    networks:
+      - appliance-net
+
   dragonfly:
     image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1
     container_name: wallet-appliance-dragonfly
@@ -114,6 +133,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      schema-migration:
+        condition: service_completed_successfully
       nats:
         condition: service_started
       dragonfly:

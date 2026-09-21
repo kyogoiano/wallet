@@ -34,6 +34,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -88,7 +89,7 @@ class TransferOriginPropagationTest {
     void shouldPropagateUserOriginOnTransfer() {
         UUID opId = UUID.randomUUID();
         Transfer transfer = new Transfer(fromWallet, toWallet, new BigDecimal("100.00"), opId, OperationOrigin.USER);
-        when(operationsDao.startOperation(opId)).thenReturn(false);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(false);
         when(operationsDao.getStatus(opId)).thenReturn(OperationStatus.PROCESSING);
         when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
                 fromWallet, new AccountBalance(userId, new BigDecimal("500.00"), AccountStatus.ACTIVE),
@@ -135,7 +136,7 @@ class TransferOriginPropagationTest {
         Deposit deposit = new Deposit(fromWallet, userId, new BigDecimal("1000.00"), opId, OperationOrigin.USER);
         Account account = new Account(fromWallet, BigDecimal.ZERO, 1L, userId, Instant.now());
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(deposit.walletId())).thenReturn(Optional.of(account));
         depositFundsService.handle(deposit);
 
@@ -155,7 +156,7 @@ class TransferOriginPropagationTest {
         Deposit deposit = new Deposit(fromWallet, userId, new BigDecimal("50.00"), opId, OperationOrigin.SYSTEM);
         Account account = new Account(fromWallet, BigDecimal.ZERO, 1L, userId, Instant.now());
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(deposit.walletId())).thenReturn(Optional.of(account));
 
         depositFundsService.handle(deposit);

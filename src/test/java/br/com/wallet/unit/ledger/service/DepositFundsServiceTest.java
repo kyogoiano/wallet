@@ -67,14 +67,14 @@ class DepositFundsServiceTest {
         final Deposit deposit = new Deposit(walletId, userId, amount, opId);
         Account account = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.ACTIVE, null, null, Instant.now());
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.of(account));
 
         service.handle(deposit);
 
-        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()));
+        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()), eq("default"));
         verify(outboxDao).save(any(DepositCompletedEvent.class));
-        verify(operationsDao).completeOperation(opId);
+        verify(operationsDao).completeOperation(eq(opId), any());
     }
 
     @Test
@@ -88,12 +88,12 @@ class DepositFundsServiceTest {
         final Deposit deposit = new Deposit(walletId, null, amount, opId);
         Account account = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.ACTIVE, null, null, Instant.now());
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.of(account));
 
         service.handle(deposit);
 
-        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()));
+        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()), eq("default"));
     }
 
     @Test
@@ -105,7 +105,7 @@ class DepositFundsServiceTest {
         final Deposit deposit = new Deposit(walletId, userId, BigDecimal.TEN, opId);
         Account blockedAccount = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.BLOCKED, Instant.now(), "Suspected fraud", Instant.now());
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.of(blockedAccount));
 
         assertThatThrownBy(() -> service.handle(deposit))
@@ -121,7 +121,7 @@ class DepositFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final Deposit deposit = new Deposit(walletId, null, BigDecimal.TEN, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> service.handle(deposit))
@@ -134,11 +134,35 @@ class DepositFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final Deposit deposit = new Deposit(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(false);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(false);
 
         assertThatThrownBy(() -> service.handle(deposit))
                 .isInstanceOf(IdempotencyException.class);
 
+        verifyNoInteractions(core);
+    }
+
+    @Test
+    @DisplayName("TASK-SEC-5.2: Should reject cross-tenant deposit with TenantMismatchException")
+    void shouldRejectCrossTenantDeposit() {
+        final UUID walletId = UUID.randomUUID();
+        final UUID userId = UUID.randomUUID();
+        final UUID opId = UUID.randomUUID();
+        final BigDecimal amount = BigDecimal.valueOf(100.00);
+
+        // Command belongs to tenant-X
+        final Deposit deposit = new Deposit(walletId, userId, amount, opId, br.com.wallet.core.context.OperationOrigin.USER, "tenant-X");
+        // Account belongs to tenant-Y
+        Account account = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-Y");
+
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
+        when(accountDao.findAccount(walletId)).thenReturn(Optional.of(account));
+
+        assertThatThrownBy(() -> service.handle(deposit))
+                .isInstanceOf(br.com.wallet.core.exceptions.TenantMismatchException.class)
+                .hasMessageContaining("Cross-tenant deposit is forbidden");
+
+        verify(operationsDao).failOperation(eq(opId), contains("Cross-tenant"), eq("FORBIDDEN_TENANT_ACCESS"), eq("tenant-X"));
         verifyNoInteractions(core);
     }
 }

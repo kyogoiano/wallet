@@ -59,7 +59,9 @@ class NatsEdgeCommandPublisherTest {
         String payload = """
                 {"from":"%s","to":"%s","amount":150.00}
                 """.formatted(UUID.randomUUID(), UUID.randomUUID());
-        CommandEnvelope envelope = CommandEnvelope.create(opId, CommandType.TRANSFER, payload, "192.168.1.50", "tenant-1");
+        CommandEnvelope envelope = CommandEnvelope.create(
+                opId, CommandType.TRANSFER, payload, "192.168.1.50", "tenant-1", "principal-42", "key-xyz"
+        );
 
         CompletableFuture<PublishAck> ackFuture = CompletableFuture.completedFuture(publishAck);
         when(jetStream.publishAsync(any(Message.class), any(PublishOptions.class))).thenReturn(ackFuture);
@@ -78,6 +80,9 @@ class NatsEdgeCommandPublisherTest {
         assertThat(publishedMessage.getHeaders().getFirst("type")).isEqualTo("TRANSFER");
         assertThat(publishedMessage.getHeaders().getFirst("client_ip")).isEqualTo("192.168.1.50");
         assertThat(publishedMessage.getHeaders().getFirst("tenant_id")).isEqualTo("tenant-1");
+        assertThat(publishedMessage.getHeaders().getFirst("principal_id")).isEqualTo("principal-42");
+        assertThat(publishedMessage.getHeaders().getFirst("key_id")).isEqualTo("key-xyz");
+        assertThat(publishedMessage.getHeaders().getFirst("publisher_id")).isEqualTo("edge-gateway");
 
         // Verify enriched payload contains operationId
         String publishedBody = new String(publishedMessage.getData(), StandardCharsets.UTF_8);

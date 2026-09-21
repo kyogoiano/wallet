@@ -23,42 +23,53 @@ public class WalletOperationsDao {
      * @return true if operation already exists, false otherwise
      */
     public boolean startOperation(@NonNull final UUID operationId) {
+        return startOperation(operationId, "default");
+    }
 
+    public boolean startOperation(@NonNull final UUID operationId, final String tenantId) {
         final var rowsAffected = jdbc.update("""
-            INSERT INTO wallet_operations (operation_id, status)
-            VALUES (?, 'PROCESSING')
+            INSERT INTO wallet_operations (operation_id, status, tenant_id)
+            VALUES (?, 'PROCESSING', ?)
             ON CONFLICT (operation_id) DO NOTHING;
-        """, operationId);
+        """, operationId, tenantId != null ? tenantId : "default");
 
         return rowsAffected == 1;
     }
 
     public void completeOperation(@NonNull final UUID operationId) {
+        completeOperation(operationId, "default");
+    }
+
+    public void completeOperation(@NonNull final UUID operationId, final String tenantId) {
         jdbc.update("""
-            INSERT INTO wallet_operations (operation_id, status, created_at, updated_at)
-            VALUES (?, 'COMPLETED', NOW(), NOW())
+            INSERT INTO wallet_operations (operation_id, status, created_at, updated_at, tenant_id)
+            VALUES (?, 'COMPLETED', NOW(), NOW(), ?)
             ON CONFLICT (operation_id) DO UPDATE
             SET status = 'COMPLETED',
                 updated_at = NOW();
-        """, operationId);
+        """, operationId, tenantId != null ? tenantId : "default");
     }
 
     public void failOperation(@NonNull final UUID operationId, final String errorMessage, final String failureType) {
+        failOperation(operationId, errorMessage, failureType, "default");
+    }
+
+    public void failOperation(@NonNull final UUID operationId, final String errorMessage, final String failureType, final String tenantId) {
         jdbc.update("""
-            INSERT INTO wallet_operations (operation_id, status, error_message, failure_type, created_at, updated_at)
-            VALUES (?, 'FAILED', ?, ?, NOW(), NOW())
+            INSERT INTO wallet_operations (operation_id, status, error_message, failure_type, created_at, updated_at, tenant_id)
+            VALUES (?, 'FAILED', ?, ?, NOW(), NOW(), ?)
             ON CONFLICT (operation_id) DO UPDATE
             SET status = 'FAILED',
                 error_message = EXCLUDED.error_message,
                 failure_type = EXCLUDED.failure_type,
                 updated_at = NOW()
             WHERE wallet_operations.status != 'COMPLETED';
-        """, operationId, errorMessage, failureType);
+        """, operationId, errorMessage, failureType, tenantId != null ? tenantId : "default");
     }
 
     public java.util.Optional<br.com.wallet.ledger.internal.operation.Operation> findOperation(@NonNull final UUID operationId) {
         String sql = """
-            SELECT operation_id, status, error_message, failure_type, created_at, updated_at
+            SELECT operation_id, status, error_message, failure_type, created_at, updated_at, tenant_id
             FROM wallet_operations
             WHERE operation_id = ?
         """;
@@ -68,7 +79,8 @@ public class WalletOperationsDao {
                 rs.getString("error_message"),
                 rs.getString("failure_type"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getTimestamp("updated_at").toInstant()
+                rs.getTimestamp("updated_at").toInstant(),
+                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
         ), operationId).stream().findFirst();
     }
 

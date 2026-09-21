@@ -1,6 +1,7 @@
 package br.com.wallet.fraud.fusion.api.model;
 
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.util.Objects;
 
@@ -9,15 +10,23 @@ import java.util.Objects;
  */
 public record RiskSubject(
     @NonNull RiskSubjectType type,
-    @NonNull String id
+    @NonNull String id,
+    @Nullable String tenantId
 ) {
     public RiskSubject {
         Objects.requireNonNull(type, "type cannot be null");
         Objects.requireNonNull(id, "id cannot be null");
+        if (tenantId == null) {
+            tenantId = "default";
+        }
+    }
+
+    public RiskSubject(@NonNull RiskSubjectType type, @NonNull String id) {
+        this(type, id, "default");
     }
 
     @NonNull
     public String toKey() {
-        return "risk_profile:" + type.name() + ":" + id;
+        return "risk_profile:" + (tenantId != null ? tenantId : "default") + ":" + type.name() + ":" + id;
     }
 }

@@ -26,7 +26,8 @@ public class NewRecipientRule implements FraudRule {
                 .checkNewRecipient(
                         ctx.userId(),
                         ctx.targetUserId(),
-                        ctx.timestamp()
+                        ctx.timestamp(),
+                        ctx.tenantId()
                 )
                 .thenApply(result ->
                          switch (result) {

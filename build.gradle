@@ -151,6 +151,10 @@ tasks.named('test') {
 		excludeTags 'integration-slm'
 	}
 	jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
+	def snapTmp = new File("${System.getProperty('user.home')}/snap/antigravity-cli/common/tmp")
+	if (snapTmp.isDirectory()) {
+		jvmArgs "-Djava.io.tmpdir=${snapTmp.absolutePath}", "-Djna.tmpdir=${snapTmp.absolutePath}"
+	}
 	finalizedBy jacocoTestReport
 }
 

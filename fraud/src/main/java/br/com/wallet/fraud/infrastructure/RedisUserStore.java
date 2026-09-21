@@ -47,15 +47,23 @@ public class RedisUserStore extends AsyncUserCache<Boolean> {
                 : Duration.ofSeconds(30).toNanos();
     }
 
-    private String userKey(UUID userId, String suffix) {
-        return "user:" + userId + ":" + suffix;
+    private String userKey(UUID userId, String suffix, String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        return "fraud:" + effectiveTenant + ":user:" + userId + ":" + suffix;
     }
 
+    private String userKey(UUID userId, String suffix) {
+        return userKey(userId, suffix, "default");
+    }
 
     @Override
     CompletionStage<Boolean> isBlockedAsync(@NonNull final UUID userId) {
-        log.debug("Checking if user {} is blocked (from Redis)", userId);
-        return commands.exists(userKey(userId, "blocked")).thenApply(count -> count == 1);
+        return isBlockedAsync(userId, "default");
+    }
+
+    CompletionStage<Boolean> isBlockedAsync(@NonNull final UUID userId, final String tenantId) {
+        log.debug("Checking if user {} is blocked in tenant {} (from Redis)", userId, tenantId);
+        return commands.exists(userKey(userId, "blocked", tenantId)).thenApply(count -> count == 1);
     }
 
     /**
@@ -64,16 +72,31 @@ public class RedisUserStore extends AsyncUserCache<Boolean> {
      * @return completion stage boolean, true if the user is blocked, false otherwise
      */
     public boolean isBlocked(@NonNull final UUID userId) {
-        return this.getCache().get(userId).join();
+        return isBlocked(userId, "default");
+    }
+
+    public boolean isBlocked(@NonNull final UUID userId, final String tenantId) {
+        if (tenantId == null || "default".equals(tenantId)) {
+            return this.getCache().get(userId).join();
+        }
+        return isBlockedAsync(userId, tenantId).toCompletableFuture().join();
     }
 
     public void setBlocked(@NonNull final UUID userId, final boolean blocked) {
-        log.info("Setting user blocked status in Redis: userId={}, blocked={}", userId, blocked);
+        setBlocked(userId, blocked, "default");
+    }
+
+    public void setBlocked(@NonNull final UUID userId, final boolean blocked, final String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        log.info("Setting user blocked status in Redis: userId={}, tenantId={}, blocked={}", userId, effectiveTenant, blocked);
+        String key = userKey(userId, "blocked", effectiveTenant);
         if (blocked) {
-            commands.set(userKey(userId, "blocked"), "1", SetArgs.Builder.ex(600));
+            commands.set(key, "1", SetArgs.Builder.ex(600));
         } else {
-            commands.del(userKey(userId, "blocked"));
+            commands.del(key);
         }
-        getCache().put(userId, java.util.concurrent.CompletableFuture.completedFuture(blocked));
+        if ("default".equals(effectiveTenant)) {
+            getCache().put(userId, java.util.concurrent.CompletableFuture.completedFuture(blocked));
+        }
     }
 }

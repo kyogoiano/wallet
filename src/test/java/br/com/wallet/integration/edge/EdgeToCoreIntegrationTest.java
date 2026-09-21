@@ -1,6 +1,10 @@
 package br.com.wallet.integration.edge;
 
-import br.com.wallet.edge.internal.ingress.OperationStatusAuthorizationFilter;
+import br.com.wallet.core.security.SecurityHeaders;
+import br.com.wallet.edge.api.CredentialMaterial;
+import br.com.wallet.edge.internal.security.HmacCanonicalizer;
+import br.com.wallet.edge.internal.security.HmacSignatureVerifier;
+import br.com.wallet.edge.internal.security.InMemoryCredentialResolver;
 import br.com.wallet.ledger.api.BalanceUseCase;
 import br.com.wallet.ledger.api.CreateWalletUseCase;
 import br.com.wallet.ledger.api.DepositFundsUseCase;
@@ -12,6 +16,7 @@ import br.com.wallet.ledger.api.dto.OperationStatusResponse;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.IntegrationTestBase;
+import org.jspecify.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,10 +26,12 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -32,7 +39,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
-import org.springframework.test.context.TestPropertySource;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -82,6 +88,23 @@ public class EdgeToCoreIntegrationTest extends DockerProperties {
         depositFundsUseCase.handle(new Deposit(walletA, null, new BigDecimal("200.00"), UUID.randomUUID()));
     }
 
+    private final HmacSignatureVerifier signatureVerifier = new HmacSignatureVerifier();
+    private final CredentialMaterial credentialMaterial =
+            new CredentialMaterial(InMemoryCredentialResolver.DEFAULT_DEV_SECRET.getBytes(StandardCharsets.UTF_8));
+
+    private String signRequest(String method, String path, String timestamp, @Nullable String opId, byte @Nullable [] body) {
+        String canonical = HmacCanonicalizer.buildCanonicalRequest(
+                method,
+                path,
+                null,
+                InMemoryCredentialResolver.DEFAULT_DEV_KEY_ID,
+                timestamp,
+                opId,
+                body
+        );
+        return signatureVerifier.computeSignatureHex(canonical, credentialMaterial);
+    }
+
     @Test
     @DisplayName("POST /operations/transfers accepts command with 202, NATS dispatches to Core, updates balances, and resolves terminal status")
     void shouldAcceptTransferAndExecuteEndToEnd() throws Exception {
@@ -94,10 +117,16 @@ public class EdgeToCoreIntegrationTest extends DockerProperties {
                 }
                 """.formatted(walletA, walletB);
 
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        byte[] bodyBytes = requestJson.getBytes(StandardCharsets.UTF_8);
+        String signature = signRequest("POST", "/operations/transfers", timestamp, opId.toString(), bodyBytes);
+
         // 1. Ingress accepts command and returns 202 ACCEPTED
         MvcResult mvcResult = mockMvc.perform(post("/operations/transfers")
-                        .header("Idempotency-Key", opId.toString())
-                        .header(OperationStatusAuthorizationFilter.TENANT_HEADER, "tenant-authorized")
+                        .header(SecurityHeaders.IDEMPOTENCY_KEY, opId.toString())
+                        .header(SecurityHeaders.X_KEY_ID, InMemoryCredentialResolver.DEFAULT_DEV_KEY_ID)
+                        .header(SecurityHeaders.X_TIMESTAMP, timestamp)
+                        .header(SecurityHeaders.X_SIGNATURE, signature)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andReturn();
@@ -129,8 +158,14 @@ public class EdgeToCoreIntegrationTest extends DockerProperties {
         assertThat(balanceUseCase.getBalance(walletB)).isEqualByComparingTo(new BigDecimal("76.00"));
 
         // 4. Verify SSE stream bootstrap receives COMPLETED immediately without hanging (I-EDGE-007)
-        MvcResult sseResult = mockMvc.perform(get("/operations/{operationId}/stream", opId)
-                        .header(OperationStatusAuthorizationFilter.TENANT_HEADER, "tenant-authorized")
+        String streamTimestamp = String.valueOf(System.currentTimeMillis());
+        String streamPath = "/operations/" + opId + "/stream";
+        String streamSignature = signRequest("GET", streamPath, streamTimestamp, null, null);
+
+        MvcResult sseResult = mockMvc.perform(get(streamPath)
+                        .header(SecurityHeaders.X_KEY_ID, InMemoryCredentialResolver.DEFAULT_DEV_KEY_ID)
+                        .header(SecurityHeaders.X_TIMESTAMP, streamTimestamp)
+                        .header(SecurityHeaders.X_SIGNATURE, streamSignature)
                         .accept(MediaType.TEXT_EVENT_STREAM))
                 .andExpect(status().isOk())
                 .andReturn();

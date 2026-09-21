@@ -14,8 +14,19 @@ public record FraudContext(
     @Nullable UUID targetUserId,
     @NonNull UUID operationId,
     long amountInCents,
-    @NonNull Instant timestamp
+    @NonNull Instant timestamp,
+    @Nullable String tenantId
 ) implements TraceContext {
+
+    public FraudContext {
+        if (tenantId == null) {
+            tenantId = "default";
+        }
+    }
+
+    public FraudContext(@NonNull UUID userId, @Nullable UUID targetUserId, @NonNull UUID operationId, long amountInCents, @NonNull Instant timestamp) {
+        this(userId, targetUserId, operationId, amountInCents, timestamp, "default");
+    }
     @Override
     public UUID operationId() {
         return this.operationId;

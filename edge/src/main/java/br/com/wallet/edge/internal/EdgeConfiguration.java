@@ -16,6 +16,10 @@ import br.com.wallet.edge.internal.ingress.ConditionalOnEdgeIngress;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
+import br.com.wallet.edge.api.CredentialResolver;
+import br.com.wallet.edge.internal.security.HmacAuthenticationFilter;
+import br.com.wallet.edge.internal.security.HmacSignatureVerifier;
+import br.com.wallet.edge.internal.security.InMemoryCredentialResolver;
 import org.springframework.context.annotation.Configuration;
 
 import java.io.IOException;
@@ -156,5 +160,26 @@ public class EdgeConfiguration {
             br.com.wallet.edge.api.OperationAuthorizationProvider authorizationProvider
     ) {
         return new br.com.wallet.edge.internal.ingress.OperationStatusAuthorizationFilter(authorizationProvider);
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public CredentialResolver credentialResolver() {
+        return new InMemoryCredentialResolver();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public HmacSignatureVerifier hmacSignatureVerifier() {
+        return new HmacSignatureVerifier();
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
+    public HmacAuthenticationFilter hmacAuthenticationFilter(
+            CredentialResolver credentialResolver,
+            HmacSignatureVerifier signatureVerifier
+    ) {
+        return new HmacAuthenticationFilter(credentialResolver, signatureVerifier);
     }
 }

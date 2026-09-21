@@ -1,5 +1,6 @@
 package br.com.wallet.ledger.internal.service;
 
+import br.com.wallet.core.exceptions.TenantMismatchException;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.ledger.api.context.Withdraw;
 import br.com.wallet.core.exceptions.IdempotencyException;
@@ -47,14 +48,14 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
     }
 
     @Traceable("wallet.withdraw")
-    @Transactional
+    @Transactional(noRollbackFor = TenantMismatchException.class)
     @Override
     public void handle(@NonNull final Withdraw withdraw) {
 
         // validations
         Validations.validatePositiveAmount(withdraw.amount());
 
-        if (!operationsDao.startOperation(withdraw.operationId())) {
+        if (!operationsDao.startOperation(withdraw.operationId(), withdraw.tenantId())) {
             log.info("Idempotent operation ignored. operationId={}", withdraw.operationId());
             throw new IdempotencyException("Operation already processed: " + withdraw.operationId());
         }
@@ -65,13 +66,22 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
                 new WithdrawCompletedEvent(withdraw.walletId(), withdraw.amount(), withdraw.operationId())
         );
 
-        operationsDao.completeOperation(withdraw.operationId());
+        operationsDao.completeOperation(withdraw.operationId(), withdraw.tenantId());
     }
 
     protected void execute(@NonNull final Withdraw withdraw) {
 
         final var userBalance = accountDao.findWalletBalanceForUpdate(withdraw.walletId())
                 .orElseThrow(AccountNotFoundException::new);
+
+        // In-transaction tenant verification (I-SEC-005)
+        final String expectedTenant = withdraw.tenantId() != null ? withdraw.tenantId() : "default";
+        final String accountTenant = userBalance.tenantId();
+        if (!accountTenant.equals(expectedTenant)) {
+            log.warn("Tenant mismatch in withdraw: expected={}, accountTenant={}", expectedTenant, accountTenant);
+            operationsDao.failOperation(withdraw.operationId(), "Cross-tenant withdrawal is forbidden", "FORBIDDEN_TENANT_ACCESS", expectedTenant);
+            throw new TenantMismatchException("Cross-tenant withdrawal is forbidden. expected=" + expectedTenant + ", accountTenant=" + accountTenant);
+        }
 
         final UUID effectiveUserId = withdraw.userId() != null ? withdraw.userId() : userBalance.userId();
         if (!effectiveUserId.equals(userBalance.userId())) {
@@ -86,7 +96,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
 
         final var now = clock.instant();
 
-        core.applyTransaction(withdraw.walletId(), withdraw.amount(), LedgerType.DEBIT, withdraw.operationId(), effectiveUserId, now);
+        core.applyTransaction(withdraw.walletId(), withdraw.amount(), LedgerType.DEBIT, withdraw.operationId(), effectiveUserId, now, withdraw.tenantId());
 
     }
 }

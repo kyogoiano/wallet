@@ -16,7 +16,8 @@ public record Deposit(
         @Nullable UUID userId,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
-        OperationOrigin origin
+        OperationOrigin origin,
+        @Nullable String tenantId
 ) implements TraceContext, FraudCheckable {
 
     public Deposit {
@@ -26,10 +27,17 @@ public record Deposit(
         if (origin == null) {
             origin = OperationOrigin.USER;
         }
+        if (tenantId == null) {
+            tenantId = "default";
+        }
+    }
+
+    public Deposit(@NonNull UUID walletId, @Nullable UUID userId, @NonNull BigDecimal amount, @NonNull UUID operationId, OperationOrigin origin) {
+        this(walletId, userId, amount, operationId, origin, "default");
     }
 
     public Deposit(@NonNull UUID walletId, @Nullable UUID userId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
-        this(walletId, userId, amount, operationId, OperationOrigin.USER);
+        this(walletId, userId, amount, operationId, OperationOrigin.USER, "default");
     }
 
     @Override
@@ -46,7 +54,8 @@ public record Deposit(
     public Map<String, String> traceTags() {
         return Map.of(
                 "wallet.id", walletId.toString(),
-                "operation.origin", origin.name()
+                "operation.origin", origin.name(),
+                "tenant.id", tenantId != null ? tenantId : "default"
         );
     }
 

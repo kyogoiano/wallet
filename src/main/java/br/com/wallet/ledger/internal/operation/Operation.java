@@ -10,9 +10,20 @@ public record Operation(
         String errorMessage,
         String failureType,
         Instant createdAt,
-        Instant updatedAt
+        Instant updatedAt,
+        String tenantId
 ) {
+    public Operation {
+        if (tenantId == null) {
+            tenantId = "default";
+        }
+    }
+
     public Operation(UUID id, OperationStatus status) {
-        this(id, status, null, null, Instant.now(), Instant.now());
+        this(id, status, null, null, Instant.now(), Instant.now(), "default");
+    }
+
+    public Operation(UUID id, OperationStatus status, String errorMessage, String failureType, Instant createdAt, Instant updatedAt) {
+        this(id, status, errorMessage, failureType, createdAt, updatedAt, "default");
     }
 }

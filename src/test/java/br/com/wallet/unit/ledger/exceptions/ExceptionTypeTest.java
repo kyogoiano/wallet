@@ -2,6 +2,7 @@ package br.com.wallet.unit.ledger.exceptions;
 
 import br.com.wallet.core.exceptions.AccountBlockedException;
 import br.com.wallet.core.exceptions.IdempotencyException;
+import br.com.wallet.core.exceptions.TenantMismatchException;
 import br.com.wallet.ledger.api.exceptions.*;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -18,6 +19,8 @@ class ExceptionTypeTest {
     void shouldClassifyBusinessExceptions() {
         assertThat(ExceptionType.parseException(new InsufficientFundsException())).isEqualTo(ExceptionType.BUSINESS);
         assertThat(ExceptionType.parseException(new AccountBlockedException(UUID.randomUUID(), "SUSPENDED"))).isEqualTo(ExceptionType.BUSINESS);
+        assertThat(ExceptionType.parseException(new TenantMismatchException("Mismatch"))).isEqualTo(ExceptionType.BUSINESS);
+        assertThat(ExceptionType.parseException(new SecurityException("Unauthorized"))).isEqualTo(ExceptionType.BUSINESS);
         assertThat(ExceptionType.parseException(new IdempotencyException("Already processed"))).isEqualTo(ExceptionType.BUSINESS);
         assertThat(ExceptionType.parseException(new FraudBlockedException(UUID.randomUUID(), UUID.randomUUID()))).isEqualTo(ExceptionType.BUSINESS);
         assertThat(ExceptionType.parseException(new IllegalArgumentException("Invalid param"))).isEqualTo(ExceptionType.BUSINESS);

@@ -46,9 +46,11 @@ public class FraudCheckHelper {
     }
 
     public void performFraudCheck(@NonNull final FraudCheckable operation) {
+        final String tenantId = operation.tenantId() != null ? operation.tenantId() : "default";
+
         // 1. Evaluate Fraud Gate V4 (P99 < 2ms fused risk profile from DragonflyDB hot cache)
         if (operation.sourceUserIdForFraudCheck() != null) {
-            final RiskSubject subject = new RiskSubject(RiskSubjectType.USER, operation.sourceUserIdForFraudCheck().toString());
+            final RiskSubject subject = new RiskSubject(RiskSubjectType.USER, operation.sourceUserIdForFraudCheck().toString(), tenantId);
             final GateAuthorizationResult gateResult = fraudGate.authorize(subject, operation.amount());
 
             if (!gateResult.authorized()) {
@@ -73,7 +75,8 @@ public class FraudCheckHelper {
                 operation.targetUserIdForFraudCheck(),
                 operation.operationId(),
                 FraudContext.toCents(operation.amount()),
-                now
+                now,
+                tenantId
         );
 
         final var fraudResponse = fraudService.check(fraudContext);

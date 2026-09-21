@@ -63,12 +63,12 @@ flowchart TD
     end
 
     subgraph PersistenceTier["Core Persistence Stores"]
-        PG[("PostgreSQL 17/19<br/>accounts (tenant_id)<br/>ledger (tenant_id)<br/>wallet_operations (tenant_id)")]
-        DF[("DragonflyDB Cluster<br/>user:{tenantId}:{userId}:risk")]
+        PG[("PostgreSQL 18.x<br/>accounts (tenant_id)<br/>ledger (tenant_id)<br/>wallet_operations (tenant_id)")]
+        DF[("DragonflyDB Cluster<br/>fraud:{tenantId}:* / risk:{tenantId}:*")]
     end
 
     Client -->|HTTP/3 or HTTP/2 + HMAC Headers| Filter
-    Publisher -->|PubAck (commands.wallet.*)| NATS
+    Publisher -->|PubAck commands.wallet.*| NATS
     NATS -->|Competing Consumer| Consumer
     FraudGate -.->|Hot Cache| DF
     LedgerAppend -->|Atomic Single Transaction| PG
@@ -311,3 +311,4 @@ If an invariant fails:
 | **`I-SEC-007`** | Tenant Fair-Share Limiting | $\text{Key} = (\text{tenantId}, \text{principalId}), \quad \text{Tokens}(\text{Tenant A}) \perp \text{Tokens}(\text{Tenant B})$ |
 | **`I-SEC-008`** | Fail-Closed Security Gate | $\text{Invalid}(\text{Signature} \lor \text{Key} \lor \text{Time} \lor \text{Tenant}) \implies \text{Reject Closed} (\text{HTTP } 401/403)$ |
 | **`I-SEC-009`** | Trusted Edge Origin | $\text{CoreTrust}(\text{CommandHeaders}) \iff \text{Authenticated}(\text{EdgePublisherTransport})$ |
+| **`I-SEC-010`** | Tenant-Scoped Risk State | $\text{Namespace}(\text{Key}) = \text{"fraud:velocity:"} + \text{tenantId} + \text{":"} + \text{userId}$ in DragonflyDB |

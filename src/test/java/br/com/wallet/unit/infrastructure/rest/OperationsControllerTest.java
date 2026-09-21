@@ -131,7 +131,7 @@ class OperationsControllerTest {
 
         verify(natsCommandPublisher).publishAsync(eq("commands.deposit"), argThat(cmd ->
                 cmd instanceof Deposit(
-                        UUID id, UUID userId, BigDecimal amount, UUID operationId, OperationOrigin origin
+                        UUID id, UUID userId, BigDecimal amount, UUID operationId, OperationOrigin origin, String tenantId
                 ) && id.equals(walletId) && Objects.requireNonNull(userId).equals(user) && amount.equals(new BigDecimal("100"))
                         && operationId.equals(opId) && origin.equals(OperationOrigin.USER)
         ));

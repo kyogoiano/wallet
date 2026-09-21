@@ -1,0 +1,609 @@
+Yes — **this is now a solid PLAN-000.9.3**, and it incorporates almost all of the architectural corrections we discussed. The structure is much closer to something I would actually hand to the implementation phase.
+
+I would rate the current plan **~9.5/10**, with a handful of issues to fix before we generate `TASKS-000.9.3`.
+
+## 1. The architecture is now coherent
+
+The main security flow is exactly what we wanted:
+
+```text
+External Client
+      │
+      │ HMAC
+      ▼
+┌──────────────────────────────┐
+│ Edge                        │
+│                              │
+│ CredentialSnapshot            │
+│ HMAC verification            │
+│ tenant derivation            │
+│ rate limiting                │
+│ SSE authorization            │
+└──────────────┬───────────────┘
+               │
+               │ authenticated NATS
+               ▼
+┌──────────────────────────────┐
+│ Core                         │
+│                              │
+│ trusted Edge origin          │
+│ tenant propagation           │
+│ fraud tenant isolation       │
+│ SELECT FOR UPDATE             │
+│ tenant ownership             │
+└──────────────┬───────────────┘
+               │
+               ▼
+          PostgreSQL
+```
+
+That separation is particularly good because **authentication happens at the perimeter while authorization of financial resources happens inside the transaction**. The plan explicitly implements that through `HmacAuthenticationFilter`, `CredentialResolver`, the NATS publisher, and the Core tenant checks.
+
+---
+
+# 2. One important inconsistency: PostgreSQL 17/19
+
+The architecture diagram still says:
+
+> `PostgreSQL 17/19`
+
+That's inconsistent with the current Wallet persistence baseline we've been using around PostgreSQL 18.x.
+
+I would change it to simply:
+
+```text
+PostgreSQL 18.x
+```
+
+or, even better for an architecture plan:
+
+```text
+PostgreSQL
+(accounts, ledger, wallet_operations)
+```
+
+and let the platform/version baseline live elsewhere.
+
+I don't see a reason for `17/19` here.
+
+---
+
+# 3. Requirement IDs have drifted from the SPEC
+
+This is the biggest thing I would fix **before TASKS**.
+
+The plan references:
+
+```text
+REQ-SEC-017
+REQ-SEC-018
+```
+
+for:
+
+* restricted Edge publisher credentials
+* tenant-scoped fraud state
+
+For example:
+
+> `NatsEdgeCommandPublisher` ... restricted to `commands.wallet.>` (`REQ-SEC-017`, `I-SEC-009`).
+
+and:
+
+> `REQ-SEC-018` for tenant-scoped fraud state.
+
+But the SPEC we just reviewed stopped at `REQ-SEC-016`.
+
+That means we currently have:
+
+```text
+SPEC
+  REQ-SEC-001 ... 016
+
+PLAN
+  REQ-SEC-001 ... 018
+```
+
+This is exactly the sort of drift that later produces a bad TASKS document.
+
+### I would amend the SPEC with:
+
+```text
+REQ-SEC-017 [MUST]
+NATS credentials used by Edge MUST be restricted to the
+minimum required command/status subjects. Core MUST reject
+financial commands from unauthorized NATS identities.
+
+REQ-SEC-018 [MUST]
+Tenant-scoped fraud, velocity, risk and hot-cache state MUST
+include tenantId in its logical namespace.
+```
+
+Then the plan is properly traceable.
+
+---
+
+# 4. The HMAC implementation is now much better
+
+This section is particularly good:
+
+```text
+WALLET-HMAC-V1
+METHOD
+CanonicalPath
+CanonicalQuery
+KEY_ID
+TIMESTAMP
+OP_ID
+HEX_BODY_SHA256
+```
+
+and you explicitly defined:
+
+* RFC 3986 path normalization
+* deterministic query sorting
+* exact transmitted body
+* UTF-8
+* lowercase hexadecimal
+* empty-body hash
+* `MessageDigest.isEqual()`
+
+That's exactly the level of detail we needed.
+
+One tiny addition I'd make:
+
+### Explicitly say there is no trailing newline
+
+For example:
+
+```text
+The canonical request MUST NOT contain a trailing newline.
+```
+
+That avoids an annoying cross-language interoperability bug.
+
+---
+
+# 5. SSE decision is correctly resolved
+
+This is now excellent:
+
+> SSE clients supply HMAC headers via streaming `fetch()`; native browser `EventSource` without custom headers is not supported.
+
+That resolves the architectural contradiction from the previous version.
+
+I would preserve this exactly.
+
+One additional implementation requirement I'd add:
+
+```text
+The HMAC timestamp is validated only when the SSE connection
+is admitted. The connection does not expire merely because
+the original timestamp becomes older.
+```
+
+You already say this conceptually, so it can remain in the plan as-is.
+
+---
+
+# 6. Rate limiting is now properly honest
+
+This was another important correction.
+
+You explicitly state:
+
+> Local limits are per-Edge instance; multi-replica global quotas are not guaranteed until distributed rate limiting is enabled.
+
+That's exactly right.
+
+And:
+
+```text
+max 10,000 active keys
+overflow → 429
+```
+
+is a concrete bounded-memory policy rather than the vague "use an LRU".
+
+Very good.
+
+### One thing I'd change
+
+The plan says:
+
+> `Token buckets partition memory per tenant in Caffeine/in-memory map`
+
+but the actual key is:
+
+```text
+RateLimitKey(tenantId, principalId)
+```
+
+So I'd say:
+
+```text
+Token buckets partition memory by RateLimitKey(tenantId, principalId)
+```
+
+rather than "per tenant".
+
+Small wording issue, but security specs benefit from exact terminology.
+
+---
+
+# 7. NATS security is now substantially stronger
+
+This is one of the best changes:
+
+```text
+Dedicated Edge publisher credentials
+restricted to commands.wallet.>
+```
+
+and Core validates publisher identity.
+
+That turns:
+
+```text
+NATS header says tenant=A
+```
+
+from something implicitly trusted into:
+
+```text
+Authenticated NATS identity
+        ↓
+known Edge publisher
+        ↓
+trusted security headers
+        ↓
+Core
+```
+
+The plan explicitly describes this origin gate.
+
+### I'd add one more restriction
+
+Don't give the Edge credential broad wildcard permissions.
+
+Ideally define explicitly:
+
+```text
+Publish:
+  commands.wallet.>
+
+Request:
+  operations.query.>
+
+Subscribe:
+  only status subjects required by Edge
+```
+
+The exact subject permissions can be finalized in the NATS deployment configuration.
+
+The important point is **least privilege**.
+
+---
+
+# 8. Tenant-scoped fraud state is exactly the right addition
+
+This:
+
+```text
+fraud:velocity:{tenantId}:{userId}
+```
+
+is excellent.
+
+It closes the gap between 000.9.3 and your earlier fraud specifications.
+
+I'd broaden the requirement slightly from just velocity:
+
+```text
+fraud:{tenantId}:...
+risk:{tenantId}:...
+```
+
+or whatever namespace convention we establish.
+
+Because eventually you have:
+
+* velocity
+* user block
+* recipient fan-in
+* mule detection
+* behavioral features
+* graph-derived hot features
+
+We don't want someone to remember tenant isolation for velocity but forget it for another Dragonfly key.
+
+---
+
+# 9. The database migration is good, but one index deserves attention
+
+This:
+
+```sql
+CREATE UNIQUE INDEX IF NOT EXISTS
+idx_wallet_operations_tenant_id
+ON wallet_operations(tenant_id, operation_id);
+```
+
+is correct **if operation IDs are intended to be tenant-scoped**.
+
+But check the existing schema first.
+
+If `operation_id` is already globally unique, changing the uniqueness semantics could be unnecessary.
+
+I'd therefore phrase the architecture requirement as:
+
+```text
+The idempotency uniqueness constraint MUST remain compatible
+with the existing operationId semantics while preventing
+cross-tenant collisions.
+```
+
+Then let the implementation inspect the current schema.
+
+This is one place where I wouldn't hard-code the SQL in the SPEC itself.
+
+---
+
+# 10. The transaction logic needs one correction for deposits/withdrawals
+
+The plan says:
+
+```text
+TransferFundsUseCase
+DepositFundsUseCase
+WithdrawFundsUseCase
+
+if (!sourceAccount.tenantId().equals(command.tenantId()))
+```
+
+and then:
+
+```text
+if (!targetAccount...)
+```
+
+But deposit and withdrawal don't necessarily have both source and target accounts.
+
+So the architectural rule should be:
+
+```text
+Transfer:
+    source tenant == command tenant
+    target tenant == command tenant
+
+Deposit:
+    target/account tenant == command tenant
+
+Withdrawal:
+    source/account tenant == command tenant
+```
+
+The underlying principle is already correct; the pseudo-code just needs operation-specific wording.
+
+---
+
+# 11. Performance target: P99 < 50 μs
+
+I'd soften this.
+
+The plan says:
+
+> HMAC authentication and credential resolution ... `P99 < 50μs`.
+
+That's a useful benchmark target, but it isn't an architectural invariant.
+
+HMAC involves:
+
+* request-body hashing
+* canonicalization
+* HMAC
+* header parsing
+* potentially body buffering
+
+and the actual result depends heavily on payload size and runtime conditions.
+
+I'd change:
+
+```text
+P99 < 50μs
+```
+
+to:
+
+```text
+Target: P99 < 50 μs for authentication overhead
+excluding network I/O and payload acquisition, measured with
+representative payload sizes.
+```
+
+or make it a benchmark acceptance target rather than a hard functional requirement.
+
+This is consistent with how we treated the group-commit SLO in 000.9.2.
+
+---
+
+# 12. Deterministic row locking is good
+
+This is a nice implementation detail:
+
+> deterministic UUID sorting before `SELECT FOR UPDATE` prevents deadlocks.
+
+Keep it.
+
+It connects nicely with the financial correctness work already done in the wallet ledger.
+
+---
+
+# 13. Test strategy is strong
+
+The test matrix is good and, importantly, it's testing **security boundaries rather than just happy-path crypto**.
+
+Especially:
+
+```text
+HmacAuthenticationFilterTest
+HmacCanonicalizerTest
+HmacTimestampFreshnessTest
+InMemoryCredentialResolverTest
+PerimeterRateLimiterTest
+EdgeToCoreTenantIsolationIT
+OperationStatusAuthorizationFilterTest
+TransferFundsUseCaseTenantTest
+CredentialRotationTest
+TenantScopedFraudStateTest
+```
+
+That's the right shape.
+
+I'd add exactly one test:
+
+### `NatsPublisherAuthorizationIT`
+
+Test:
+
+```text
+valid Edge NATS identity → accepted
+
+Core/unknown NATS identity publishing
+commands.wallet.transfer → rejected
+
+forged tenant_id header from unauthorized publisher
+→ rejected
+```
+
+This specifically proves `I-SEC-009`.
+
+---
+
+# 14. One missing test: `X-Tenant-Id`
+
+Interestingly, the plan's implementation has the logic, but the test matrix doesn't explicitly have the strongest possible attack:
+
+```text
+Authenticated credential:
+    tenant-A
+
+Request:
+    X-Tenant-Id: tenant-B
+
+Expected:
+    tenant-A
+```
+
+I'd add:
+
+```text
+HmacAuthenticationFilterTest
+.shouldIgnoreUntrustedTenantHeader()
+```
+
+That becomes one of the canonical security regression tests.
+
+---
+
+# 15. One naming issue
+
+`CredentialResolver` returning:
+
+```java
+Optional<Pair<CredentialMetadata, CredentialMaterial>>
+```
+
+works conceptually, but I'd avoid a generic `Pair`.
+
+Something like:
+
+```java
+record ResolvedCredential(
+    CredentialMetadata metadata,
+    CredentialMaterial material
+) {}
+```
+
+would be much clearer and prevents accidental positional confusion.
+
+Not a SPEC issue, but I would put this into TASKS.
+
+---
+
+# 16. The plan is now ready for TASKS after these corrections
+
+I would make the following **before generating TASKS**:
+
+### MUST fix
+
+1. **PostgreSQL 17/19 → current baseline / PostgreSQL 18.x**
+2. Add `REQ-SEC-017`
+3. Add `REQ-SEC-018`
+4. Add explicit `NatsPublisherAuthorizationIT`
+5. Add explicit `X-Tenant-Id` spoofing regression test
+6. Correct deposit/withdrawal tenant-check pseudocode
+7. Define NATS least-privilege permissions more explicitly
+
+### SHOULD fix
+
+8. Remove "per tenant" wording from rate limiter → `RateLimitKey`
+9. Add "no trailing newline" to canonicalization
+10. Make `<50 μs` a benchmark target rather than an absolute architectural invariant
+11. Use a typed `ResolvedCredential` rather than `Pair`
+12. Generalize fraud/risk Dragonfly namespace isolation beyond velocity.
+
+---
+
+## Final architecture after 000.9.3
+
+At this point the Wallet architecture is becoming quite clean:
+
+```text
+                         INTERNET
+                            │
+                            ▼
+                 ┌─────────────────────┐
+                 │       EDGE × N       │
+                 │                     │
+                 │ TLS 1.3             │
+                 │ HMAC-SHA256         │
+                 │ CredentialSnapshot   │
+                 │ Tenant derivation    │
+                 │ Rate limiting        │
+                 │ SSE authorization    │
+                 │ Local durable spool  │
+                 └──────────┬──────────┘
+                            │
+                      NATS TLS/Auth
+                            │
+                            ▼
+                 ┌─────────────────────┐
+                 │       NATS JS       │
+                 │                     │
+                 │ authenticated Edge   │
+                 │ publisher identity   │
+                 └──────────┬──────────┘
+                            │
+                     competing consumers
+                            │
+                            ▼
+                 ┌─────────────────────┐
+                 │       CORE × M      │
+                 │                     │
+                 │ trusted Edge origin  │
+                 │ tenant validation    │
+                 │ fraud gate           │
+                 │ SELECT FOR UPDATE    │
+                 └───────┬───────┬─────┘
+                         │       │
+                ┌────────┘       └─────────┐
+                ▼                          ▼
+          PostgreSQL 18                 Dragonfly
+          Ledger/source                 fraud:{tenant}:...
+          of truth                      velocity/risk
+```
+
+That's a very strong boundary model.
+
+**I would now make those small corrections to SPEC + PLAN, then generate `TASKS-000.9.3`.** The current plan is otherwise mature enough that I would not redesign it further.

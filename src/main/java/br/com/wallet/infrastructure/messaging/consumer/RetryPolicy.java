@@ -2,6 +2,7 @@ package br.com.wallet.infrastructure.messaging.consumer;
 
 import br.com.wallet.core.exceptions.AccountBlockedException;
 import br.com.wallet.core.exceptions.IdempotencyException;
+import br.com.wallet.core.exceptions.TenantMismatchException;
 import br.com.wallet.ledger.api.exceptions.BusinessException;
 import br.com.wallet.ledger.api.exceptions.FraudBlockedException;
 import br.com.wallet.ledger.api.exceptions.PermanentException;
@@ -13,6 +14,8 @@ public class RetryPolicy {
         return switch (exception) {
             case IdempotencyException idempotencyException -> RetryDecision.ACK;
             case AccountBlockedException accountBlockedException -> RetryDecision.ACK;
+            case TenantMismatchException tenantMismatchException -> RetryDecision.ACK;
+            case SecurityException securityException -> RetryDecision.ACK;
             case FraudBlockedException fraudBlockedException -> RetryDecision.ACK;
             case ReplayAttackException replayAttackException -> RetryDecision.ACK;
             case PermanentException permanentException -> RetryDecision.ACK;

@@ -25,25 +25,66 @@ usage() {
     echo "  restart         Restart all appliance services"
     echo "  status, ps      Display container health, resource utilization, and endpoints"
     echo "  logs [service]  Tail logs for a specific service (or all services)"
+    echo "  update-schema   Apply latest PostgreSQL schema (docker/init/schema.sql)"
     echo "  test-tx         Execute an end-to-end deposit transaction through Edge"
     echo "  test-webhook [url] Trigger a Portainer Stack Redeploy Webhook"
     echo "  clean           Stop and remove all volumes, containers, and local data"
     echo ""
     echo "Options:"
     echo "  --lean          Launch in ultra-lean mode (<8GB RAM) without telemetry (VictoriaLogs/VictoriaTraces)"
+    echo "  --update-schema Apply schema migrations automatically during start/restart"
     echo ""
     exit 1
 }
 
 MODE="telemetry"
+UPDATE_SCHEMA="false"
 ACTION="${1:-}"
 
-# Parse optional --lean flag
+# Parse optional flags
 for arg in "$@"; do
     if [ "$arg" == "--lean" ]; then
         MODE="lean"
     fi
+    if [ "$arg" == "--update-schema" ] || [ "$arg" == "--migrate" ]; then
+        UPDATE_SCHEMA="true"
+    fi
 done
+
+apply_postgres_schema() {
+    echo "▶ Applying PostgreSQL schema migrations from docker/init/schema.sql..."
+
+    # Check if postgres container is running
+    local pg_cid
+    pg_cid=$(docker compose -f "$COMPOSE_FILE" ps -q postgres 2>/dev/null || true)
+    if [ -z "$pg_cid" ] || [ "$(docker inspect -f '{{.State.Running}}' "$pg_cid" 2>/dev/null || echo "false")" != "true" ]; then
+        echo "   PostgreSQL container is not running. Starting postgres service..."
+        docker compose -f "$COMPOSE_FILE" up -d postgres
+    fi
+
+    echo "▶ Waiting for PostgreSQL to be healthy and ready..."
+    local ready=false
+    for i in {1..30}; do
+        if docker compose -f "$COMPOSE_FILE" exec -T postgres pg_isready -U wallet -d wallet > /dev/null 2>&1; then
+            ready=true
+            break
+        fi
+        sleep 1
+    done
+
+    if [ "$ready" != "true" ]; then
+        echo "❌ PostgreSQL is not ready after 30 seconds."
+        exit 1
+    fi
+
+    echo "▶ Executing docker/init/schema.sql against database 'wallet'..."
+    if docker compose -f "$COMPOSE_FILE" exec -T -e PGPASSWORD=wallet postgres psql -U wallet -d wallet -v ON_ERROR_STOP=1 < docker/init/schema.sql; then
+        echo "✅ PostgreSQL schema updated successfully!"
+    else
+        echo "❌ PostgreSQL schema update failed. Review errors above."
+        exit 1
+    fi
+}
 
 case "$ACTION" in
     start|up)
@@ -57,6 +98,10 @@ case "$ACTION" in
             echo "   Cleaning stale data to allow PostgreSQL 18 major-version cluster init..."
             rm -rf ./postgres-data
         fi
+
+        # Synchronize PostgreSQL schema before Core starts to prevent out-of-sync schema errors
+        echo "▶ Synchronizing PostgreSQL schema before starting application services..."
+        apply_postgres_schema
 
         if [ "$MODE" == "telemetry" ]; then
             echo "▶ Launching complete stack (Edge + Core + NATS + DB + Portainer CE + VictoriaLogs + VictoriaTraces)..."
@@ -131,26 +176,38 @@ case "$ACTION" in
         fi
         ;;
 
+    update-schema|update-db|migrate)
+        print_banner
+        apply_postgres_schema
+        ;;
+
     test-tx)
         print_banner
         OP_ID="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
         WALLET_ID="a0000000-0000-0000-0000-000000000001"
         USER_ID="b0000000-0000-0000-0000-000000000001"
+        KEY_ID="wallet-key-dev-1"
+        SECRET="wallet-secret-dev-key-32-bytes!!"
 
         echo "▶ Sending live Deposit Transaction through Edge Ingress (Port 8080)..."
         echo "  Operation ID : $OP_ID"
         echo "  Amount       : 150.00 USD"
+        echo "  Key ID       : $KEY_ID"
         echo ""
+
+        TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+        PAYLOAD="{\"walletId\":\"$WALLET_ID\",\"userId\":\"$USER_ID\",\"amount\":\"150.00\",\"operationOrigin\":\"USER\"}"
+        BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
+        CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/deposits\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+        SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
 
         RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST http://localhost:8080/operations/deposits \
             -H "Content-Type: application/json" \
             -H "Idempotency-Key: $OP_ID" \
-            -d "{
-                \"walletId\": \"$WALLET_ID\",
-                \"userId\": \"$USER_ID\",
-                \"amount\": \"150.00\",
-                \"operationOrigin\": \"USER\"
-            }")
+            -H "X-Key-Id: $KEY_ID" \
+            -H "X-Timestamp: $TIMESTAMP" \
+            -H "X-Signature: $SIGNATURE" \
+            -d "$PAYLOAD")
 
         BODY=$(echo "$RESPONSE" | sed -e '$d')
         STATUS=$(echo "$RESPONSE" | tail -n1 | cut -d: -f2)

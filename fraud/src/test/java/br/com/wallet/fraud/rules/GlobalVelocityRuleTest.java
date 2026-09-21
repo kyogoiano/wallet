@@ -16,6 +16,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -36,7 +38,7 @@ class GlobalVelocityRuleTest {
         final Instant now = Instant.now();
         final FraudContext context = new FraudContext(userId, null, opId, 5000, now);
 
-        when(redisVelocityStore.checkVelocity(userId, opId, now))
+        when(redisVelocityStore.checkVelocity(eq(userId), eq(opId), eq(now), any()))
                 .thenReturn(new VelocityResult.Exceeded(10));
 
         final RuleResult result = rule.evaluate(context);
@@ -54,7 +56,7 @@ class GlobalVelocityRuleTest {
         final Instant now = Instant.now();
         final FraudContext context = new FraudContext(userId, null, opId, 5000, now);
 
-        when(redisVelocityStore.checkVelocity(userId, opId, now))
+        when(redisVelocityStore.checkVelocity(eq(userId), eq(opId), eq(now), any()))
                 .thenReturn(new VelocityResult.Ok(3));
 
         final RuleResult result = rule.evaluate(context);
@@ -71,7 +73,7 @@ class GlobalVelocityRuleTest {
         final Instant now = Instant.now();
         final FraudContext context = new FraudContext(userId, null, opId, 5000, now);
 
-        when(redisVelocityStore.checkVelocity(userId, opId, now))
+        when(redisVelocityStore.checkVelocity(eq(userId), eq(opId), eq(now), any()))
                 .thenReturn(new VelocityResult.Replay(3));
 
         final RuleResult result = rule.evaluate(context);

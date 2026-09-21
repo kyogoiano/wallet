@@ -26,6 +26,7 @@ This skill guides the design, implementation, and verification of **cryptographi
 | **`I-SEC-007`** | **Tenant Fair-Share Limiting** | $\text{RateLimitKey} = (\text{tenantId}, \text{principalId})$. Tenant-specific exhaustion MUST NOT consume another tenant's bucket capacity. |
 | **`I-SEC-008`** | **Fail-Closed Security Gate** | Any signature mismatch, invalid key, or clock skew $\to \text{HTTP } 401 \text{ UNAUTHORIZED}$. No unauthenticated fallback. |
 | **`I-SEC-009`** | **Trusted Edge Origin** | Core accepts commands only from authenticated Edge transport. NATS headers are trusted only after publisher identity is verified. |
+| **`I-SEC-010`** | **Tenant-Scoped Risk State** | All fraud velocity counters, risk profiles, and graph hot-cache keys MUST include `tenantId` in their logical namespace (`fraud:velocity:{tenantId}:{userId}`) in DragonflyDB. |
 
 ---
 

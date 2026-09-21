@@ -12,6 +12,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
+import org.jspecify.annotations.Nullable;
+
 @Service
 public class WalletOperationService {
     private static final Logger log = LoggerFactory.getLogger(WalletOperationService.class);
@@ -45,6 +47,17 @@ public class WalletOperationService {
             @NonNull UUID operationId,
             @NonNull UUID userId,
             @NonNull Instant now) {
+        applyTransaction(walletId, amount, ledgerType, operationId, userId, now, null);
+    }
+
+    public void applyTransaction(
+            @NonNull UUID walletId,
+            @NonNull BigDecimal amount,
+            @NonNull LedgerType ledgerType,
+            @NonNull UUID operationId,
+            @NonNull UUID userId,
+            @NonNull Instant now,
+            @Nullable String tenantId) {
 
         final BigDecimal signedAmount = (ledgerType == LedgerType.DEBIT)
                 ? amount.negate()
@@ -54,9 +67,8 @@ public class WalletOperationService {
         log.info("Applying transaction sequence {} to wallet {}, with amount {}", sequence, walletId, amount);
 
         // ledger insert with hash calculation should be matched with previous sequence ( so even on race conditions it will follow the right sequence )
-        ledgerDao.insertLedger(walletId, amount, ledgerType, operationId, userId, sequence, now);
-        log.info("Transaction applied!, ledger entry created with wallet id: {}, sequence: {}, operationId: {}, userId: {}",
-                walletId, sequence, operationId, userId);
+        ledgerDao.insertLedger(walletId, amount, ledgerType, operationId, userId, sequence, now, tenantId);
+        log.info("Transaction applied!, ledger entry created with wallet id: {}, sequence: {}, operationId: {}, userId: {}, tenantId: {}",
+                walletId, sequence, operationId, userId, tenantId);
     }
-
 }

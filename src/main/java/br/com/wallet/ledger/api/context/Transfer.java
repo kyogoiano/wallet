@@ -4,6 +4,7 @@ import br.com.wallet.core.context.OperationOrigin;
 import br.com.wallet.core.tracing.TraceContext;
 import br.com.wallet.ledger.api.domain.FraudCheckable;
 import org.jspecify.annotations.NonNull;
+import org.jspecify.annotations.Nullable;
 
 import java.math.BigDecimal;
 import java.util.Map;
@@ -15,7 +16,8 @@ public record Transfer(
         @NonNull UUID to,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
-        OperationOrigin origin
+        OperationOrigin origin,
+        @Nullable String tenantId
 ) implements TraceContext, FraudCheckable {
 
     public Transfer {
@@ -26,10 +28,17 @@ public record Transfer(
         if (origin == null) {
             origin = OperationOrigin.USER;
         }
+        if (tenantId == null) {
+            tenantId = "default";
+        }
+    }
+
+    public Transfer(@NonNull UUID from, @NonNull UUID to, @NonNull BigDecimal amount, @NonNull UUID operationId, OperationOrigin origin) {
+        this(from, to, amount, operationId, origin, "default");
     }
 
     public Transfer(@NonNull UUID from, @NonNull UUID to, @NonNull BigDecimal amount, @NonNull UUID operationId) {
-        this(from, to, amount, operationId, OperationOrigin.USER);
+        this(from, to, amount, operationId, OperationOrigin.USER, "default");
     }
 
     @Override
@@ -47,7 +56,8 @@ public record Transfer(
         return Map.of(
                 "wallet.from", from.toString(),
                 "wallet.to", to.toString(),
-                "operation.origin", origin.name()
+                "operation.origin", origin.name(),
+                "tenant.id", tenantId != null ? tenantId : "default"
         );
     }
 

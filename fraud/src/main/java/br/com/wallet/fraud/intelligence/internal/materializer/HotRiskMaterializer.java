@@ -26,8 +26,14 @@ public class HotRiskMaterializer {
 
     @NonNull
     public CompletionStage<String> materializeGraphRisk(@NonNull final UUID entityId, final double graphRisk) {
+        return materializeGraphRisk(entityId, graphRisk, "default");
+    }
+
+    @NonNull
+    public CompletionStage<String> materializeGraphRisk(@NonNull final UUID entityId, final double graphRisk, final String tenantId) {
         Objects.requireNonNull(entityId, "entityId cannot be null");
-        String key = "user:" + entityId + ":graph_risk";
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        String key = "risk:" + effectiveTenant + ":user:" + entityId + ":graph_risk";
         String value = String.valueOf(graphRisk);
 
         log.debug("Materializing graph risk for {} into DragonflyDB: key={}, score={}", entityId, key, value);
@@ -36,8 +42,14 @@ public class HotRiskMaterializer {
 
     @NonNull
     public CompletionStage<Double> getHotGraphRisk(@NonNull final UUID entityId) {
+        return getHotGraphRisk(entityId, "default");
+    }
+
+    @NonNull
+    public CompletionStage<Double> getHotGraphRisk(@NonNull final UUID entityId, final String tenantId) {
         Objects.requireNonNull(entityId, "entityId cannot be null");
-        String key = "user:" + entityId + ":graph_risk";
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        String key = "risk:" + effectiveTenant + ":user:" + entityId + ":graph_risk";
 
         return redisCommands.get(key).thenApply(val -> {
             if (val == null || val.isBlank()) {

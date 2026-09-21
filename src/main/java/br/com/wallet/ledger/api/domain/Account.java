@@ -16,7 +16,8 @@ public record Account(
         @NonNull AccountStatus status,
         @Nullable Instant blockedAt,
         @Nullable String blockedReason,
-        @NonNull Instant createdAt
+        @NonNull Instant createdAt,
+        @NonNull String tenantId
 ) {
     public Account {
         Objects.requireNonNull(id, "id cannot be null");
@@ -25,10 +26,26 @@ public record Account(
         Objects.requireNonNull(userId, "userId cannot be null");
         Objects.requireNonNull(status, "status cannot be null");
         Objects.requireNonNull(createdAt, "createdAt cannot be null");
+        if (tenantId == null) {
+            tenantId = "default";
+        }
+    }
+
+    public Account(
+            UUID id,
+            BigDecimal balance,
+            Long version,
+            UUID userId,
+            AccountStatus status,
+            Instant blockedAt,
+            String blockedReason,
+            Instant createdAt
+    ) {
+        this(id, balance, version, userId, status, blockedAt, blockedReason, createdAt, "default");
     }
 
     public Account(UUID id, BigDecimal balance, Long version, UUID userId, Instant createdAt) {
-        this(id, balance, version, userId, AccountStatus.ACTIVE, null, null, createdAt);
+        this(id, balance, version, userId, AccountStatus.ACTIVE, null, null, createdAt, "default");
     }
 
     public boolean isActive() {

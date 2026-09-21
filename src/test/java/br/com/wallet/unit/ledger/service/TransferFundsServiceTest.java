@@ -69,7 +69,7 @@ class TransferFundsServiceTest {
 
         final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
                 fromWallet, new AccountBalance(fromUser, BigDecimal.valueOf(500.00)),
                 toWallet, new AccountBalance(toUser, BigDecimal.valueOf(200.00))
@@ -77,10 +77,10 @@ class TransferFundsServiceTest {
 
         service.handle(transfer);
 
-        verify(core).applyTransaction(eq(fromWallet), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(fromUser), eq(clock.instant()));
-        verify(core).applyTransaction(eq(toWallet), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(toUser), eq(clock.instant()));
+        verify(core).applyTransaction(eq(fromWallet), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(fromUser), eq(clock.instant()), eq("default"));
+        verify(core).applyTransaction(eq(toWallet), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(toUser), eq(clock.instant()), eq("default"));
         verify(outboxDao).save(any(TransferCompletedEvent.class));
-        verify(operationsDao).completeOperation(opId);
+        verify(operationsDao).completeOperation(eq(opId), any());
     }
 
     @Test
@@ -100,7 +100,7 @@ class TransferFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(false);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(false);
         when(operationsDao.getStatus(opId)).thenReturn(OperationStatus.COMPLETED);
 
         assertThatThrownBy(() -> service.handle(transfer))
@@ -116,7 +116,7 @@ class TransferFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final Transfer transfer = new Transfer(walletId, walletId, BigDecimal.TEN, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
 
         assertThatThrownBy(() -> service.handle(transfer))
                 .isInstanceOf(IllegalArgumentException.class)
@@ -135,7 +135,7 @@ class TransferFundsServiceTest {
 
         final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
                 fromWallet, new AccountBalance(fromUser, BigDecimal.valueOf(50.00)),
                 toWallet, new AccountBalance(toUser, BigDecimal.valueOf(200.00))
@@ -157,7 +157,7 @@ class TransferFundsServiceTest {
 
         final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId);
 
-        when(operationsDao.startOperation(opId)).thenReturn(true);
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.getBalancesFromWallets(any()))
                 .thenThrow(new br.com.wallet.core.exceptions.AccountBlockedException(fromWallet, "Fraud suspicion"));
 
@@ -165,5 +165,34 @@ class TransferFundsServiceTest {
                 .isInstanceOf(br.com.wallet.core.exceptions.AccountBlockedException.class);
 
         verifyNoInteractions(core);
+    }
+
+    @Test
+    @DisplayName("TASK-SEC-5.2: Should reject cross-tenant transfer with TenantMismatchException without altering balances")
+    void shouldRejectCrossTenantTransfer() {
+        final UUID fromWallet = UUID.randomUUID();
+        final UUID toWallet = UUID.randomUUID();
+        final UUID fromUser = UUID.randomUUID();
+        final UUID toUser = UUID.randomUUID();
+        final UUID opId = UUID.randomUUID();
+        final BigDecimal amount = BigDecimal.valueOf(50.00);
+
+        // Command belongs to tenant-A
+        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId, br.com.wallet.core.context.OperationOrigin.USER, "tenant-A");
+
+        when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
+        // Source wallet belongs to tenant-A, but target wallet belongs to tenant-B!
+        when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
+                fromWallet, new AccountBalance(fromUser, BigDecimal.valueOf(500.00), br.com.wallet.ledger.api.domain.AccountStatus.ACTIVE, "tenant-A"),
+                toWallet, new AccountBalance(toUser, BigDecimal.valueOf(200.00), br.com.wallet.ledger.api.domain.AccountStatus.ACTIVE, "tenant-B")
+        ));
+
+        assertThatThrownBy(() -> service.handle(transfer))
+                .isInstanceOf(br.com.wallet.core.exceptions.TenantMismatchException.class)
+                .hasMessageContaining("Cross-tenant transfer is forbidden");
+
+        verify(operationsDao).failOperation(eq(opId), contains("Cross-tenant"), eq("FORBIDDEN_TENANT_ACCESS"), eq("tenant-A"));
+        verifyNoInteractions(core);
+        verifyNoInteractions(outboxDao);
     }
 }

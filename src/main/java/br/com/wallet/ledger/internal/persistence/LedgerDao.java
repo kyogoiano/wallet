@@ -85,6 +85,17 @@ public class LedgerDao {
                              @NonNull final UUID userId,
                              @NonNull final Long nextSequence,
                              @NonNull final Instant now) {
+        insertLedger(walletId, amount, ledgerType, operationId, userId, nextSequence, now, "default");
+    }
+
+    public void insertLedger(@NonNull final UUID walletId,
+                             @NonNull final BigDecimal amount,
+                             @NonNull final LedgerType ledgerType,
+                             @NonNull final UUID operationId,
+                             @NonNull final UUID userId,
+                             @NonNull final Long nextSequence,
+                             @NonNull final Instant now,
+                             @Nullable final String tenantId) {
         final var params = new MapSqlParameterSource()
                 .addValue("id", UUID.randomUUID())
                 .addValue("walletId", walletId)
@@ -93,10 +104,11 @@ public class LedgerDao {
                 .addValue("operationId", operationId)
                 .addValue("userId", userId)
                 .addValue("now", now.atOffset(ZoneOffset.UTC))
-                .addValue("sequence", nextSequence);
+                .addValue("sequence", nextSequence)
+                .addValue("tenantId", tenantId != null ? tenantId : "default");
         namedParameterJdbcTemplate.update("""
                             INSERT INTO ledger (
-                                id, wallet_id, amount, type, operation_id, user_id, created_at, sequence, previous_hash, hash
+                                id, wallet_id, amount, type, operation_id, user_id, created_at, sequence, previous_hash, hash, tenant_id
                             )
                             WITH prev_data AS (
                                 SELECT hash FROM ledger
@@ -124,7 +136,8 @@ public class LedgerDao {
                                                 (extract(epoch from :now) * 1000)::bigint::text
                                     ),
                                     'sha512'
-                                ), 'hex')
+                                ), 'hex'),
+                                :tenantId
                         """,params
         );
     }
@@ -142,7 +155,7 @@ public class LedgerDao {
     public @NonNull List<LedgerEntry> getLedgerEntries(@NonNull UUID walletId, @NonNull Integer limit) {
         return jdbc.query("""
             SELECT wallet_id, amount, type, operation_id, user_id,
-                   sequence, hash, previous_hash, created_at
+                   sequence, hash, previous_hash, created_at, tenant_id
             FROM ledger
             WHERE wallet_id = ?
             ORDER BY sequence ASC
@@ -156,18 +169,22 @@ public class LedgerDao {
                 rs.getLong("sequence"),
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
-                rs.getTimestamp("created_at").toInstant()
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
         ), walletId, limit);
     }
 
     /**
      * Get all ledger entries from a wallet
      * This is required only for full replays (O(n))
+     *
+     * @param walletId wallet id
+     * @return ledger entries
      */
     public @NonNull List<LedgerEntry> getLedgerEntries(@NonNull UUID walletId) {
         return jdbc.query("""
             SELECT wallet_id, amount, type, operation_id, user_id,
-                   sequence, hash, previous_hash, created_at
+                   sequence, hash, previous_hash, created_at, tenant_id
             FROM ledger
             WHERE wallet_id = ?
             ORDER BY sequence ASC
@@ -180,7 +197,8 @@ public class LedgerDao {
                 rs.getLong("sequence"),
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
-                rs.getTimestamp("created_at").toInstant()
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
         ), walletId);
     }
 

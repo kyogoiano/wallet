@@ -1,5 +1,6 @@
 package br.com.wallet.ledger.internal.service;
 
+import br.com.wallet.core.exceptions.TenantMismatchException;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.ledger.api.context.Transfer;
 import br.com.wallet.core.exceptions.IdempotencyException;
@@ -73,14 +74,14 @@ public class TransferFundsService implements TransferFundsUseCase {
      * @param transfer transfer object
      */
     @Traceable("wallet.transfer")
-    @Transactional
+    @Transactional(noRollbackFor = TenantMismatchException.class)
     @Override
     public void handle(@NonNull final Transfer transfer) {
 
         // validations
         Validations.validatePositiveAmount(transfer.amount());
 
-        final boolean started = operationsDao.startOperation(transfer.operationId());
+        final boolean started = operationsDao.startOperation(transfer.operationId(), transfer.tenantId());
 
         if (!started) {
             final var status = operationsDao.getStatus(transfer.operationId());
@@ -107,7 +108,7 @@ public class TransferFundsService implements TransferFundsUseCase {
         publisher.publishEvent(event);
 
         outboxDao.save(event);
-        operationsDao.completeOperation(transfer.operationId());
+        operationsDao.completeOperation(transfer.operationId(), transfer.tenantId());
     }
 
     protected void execute(@NonNull final Transfer transfer) {
@@ -126,6 +127,20 @@ public class TransferFundsService implements TransferFundsUseCase {
         }
 
         final var fromBalance = accountBalances.get(transfer.from());
+        final var toBalance = accountBalances.get(transfer.to());
+
+        // In-transaction tenant verification (I-SEC-005)
+        final String expectedTenant = transfer.tenantId() != null ? transfer.tenantId() : "default";
+        final String fromTenant = fromBalance.tenantId();
+        final String toTenant = toBalance.tenantId();
+
+        if (!fromTenant.equals(expectedTenant) || !toTenant.equals(expectedTenant)) {
+            log.warn("Tenant mismatch in transfer: expected={}, fromWalletTenant={}, toWalletTenant={}",
+                    expectedTenant, fromTenant, toTenant);
+            operationsDao.failOperation(transfer.operationId(), "Cross-tenant transfer is forbidden", "FORBIDDEN_TENANT_ACCESS", expectedTenant);
+            throw new TenantMismatchException("Cross-tenant transfer is forbidden. expected=" + expectedTenant
+                    + ", from=" + fromTenant + ", to=" + toTenant);
+        }
 
         if (fromBalance.balance().compareTo(transfer.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",
@@ -134,14 +149,13 @@ public class TransferFundsService implements TransferFundsUseCase {
         }
 
         // check for frauds
-        final var toBalance = accountBalances.get(transfer.to());
 
         final var now = clock.instant();
 
         // each child transaction unlock one wallet , first from wallet and then to wallet
-        operationService.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), fromBalance.userId(), now);
+        operationService.applyTransaction(transfer.from(), transfer.amount(), LedgerType.DEBIT, transfer.operationId(), fromBalance.userId(), now, transfer.tenantId());
 
-        operationService.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), toBalance.userId(), now);
+        operationService.applyTransaction(transfer.to(), transfer.amount(), LedgerType.CREDIT, transfer.operationId(), toBalance.userId(), now, transfer.tenantId());
 
         // 🧾 ledger entries
         log.info("Transfer completed. from={}, to={}, amount={}, operationId={}",

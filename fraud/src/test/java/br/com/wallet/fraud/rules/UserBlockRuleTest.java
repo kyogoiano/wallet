@@ -15,6 +15,8 @@ import java.time.Instant;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -33,7 +35,7 @@ class UserBlockRuleTest {
         final UUID userId = UUID.randomUUID();
         final FraudContext context = new FraudContext(userId, null, UUID.randomUUID(), 10000, Instant.now());
 
-        when(redisUserStore.isBlocked(userId)).thenReturn(true);
+        when(redisUserStore.isBlocked(eq(userId), any())).thenReturn(true);
 
         final RuleResult result = rule.evaluate(context);
 
@@ -48,7 +50,7 @@ class UserBlockRuleTest {
         final UUID userId = UUID.randomUUID();
         final FraudContext context = new FraudContext(userId, null, UUID.randomUUID(), 10000, Instant.now());
 
-        when(redisUserStore.isBlocked(userId)).thenReturn(false);
+        when(redisUserStore.isBlocked(eq(userId), any())).thenReturn(false);
 
         final RuleResult result = rule.evaluate(context);
 

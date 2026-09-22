@@ -1,6 +1,7 @@
 package br.com.wallet.fraud.investigation.api;
 
 import br.com.wallet.fraud.investigation.api.model.FraudInvestigationDossier;
+import br.com.wallet.fraud.investigation.api.model.TypedEvaluationResponse;
 import br.com.wallet.fraud.investigation.spi.InferenceCapability;
 import org.jspecify.annotations.NonNull;
 
@@ -16,4 +17,10 @@ public interface InvestigationService {
 
     @NonNull
     FraudInvestigationDossier generateDossier(@NonNull UUID entityId, @NonNull InferenceCapability capability);
+
+    @NonNull
+    TypedEvaluationResponse evaluateDecisions(@NonNull UUID entityId);
+
+    @NonNull
+    TypedEvaluationResponse getDecisions(@NonNull UUID entityId);
 }

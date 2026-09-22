@@ -25,7 +25,7 @@ Recent industry attempts to introduce type-safety into LLM/SLM workflows (such a
 
 ---
 
-## 2. Macro Topology & System Isolation
+## 2. Macro Topology, Attachment Points & Invariant Separation
 
 ```mermaid
 flowchart TD
@@ -36,53 +36,70 @@ flowchart TD
         FraudGate["FraudGate.evaluateAuthorization()<br/>P99 < 2ms Hot Path Gate"]
         DragonflyHot[("DragonflyDB Cluster<br/>user:{id}:graph_risk<br/>Atomic Lua Sliding Windows")]
         CaffeineCache["Caffeine Local In-Process Cache"]
-        OnnxModel["Micro-ML ONNX Runtime<br/>Deterministic Local Vector Scoring"]
 
         Ingress --> TransferUC
         TransferUC --> FraudGate
         FraudGate --> DragonflyHot
         FraudGate --> CaffeineCache
-        FraudGate --> OnnxModel
     end
 
-    subgraph ModulithAirgap["Architectural Airgap (Enforced by Modulith Architecture Tests)"]
-        direction LR
-        HotPath -.->|"Strictly Forbidden Dependency (I-TYPED-001)"| NearlinePath
-    end
-
-    subgraph NearlinePath["Tier 2: Nearline / Async Semantic Evaluation (Provider-Neutral SPI)"]
+    subgraph DeterministicFusion["Tier 2A: Deterministic Background Fusion (000.8 - Zero Generative SLM)"]
         direction TB
-        NearlineTrigger["Nearline Trigger<br/>(Async Investigation / Shadow Evaluation / Offline Audit)"]
-        EvidenceCollector["Evidence Snapshot Collector<br/>Fetches DB Facts & Computes SHA-256 Hashes"]
-        DecisionEvaluatorSPI["DecisionEvaluator (SPI Interface)<br/>evaluate(subjectId, questions, evidence)"]
+        FusionWorker["FusionJobWorker (Durable Job Queue)"]
+        Rules["Direct Velocity / Blocklist Rules"]
+        Graph["Graph Topology + Propagation (000.5 / 000.6)"]
+        OnnxML["Embedded ONNX Micro-ML (Tabular Vector Scoring)"]
+        FusionEngine["ProbabilisticRiskFusionEngine<br/>Rule Primacy Override + LOO Marginal Attribution"]
+        Policy["RiskDecisionPolicy<br/>ALLOW | REVIEW | RESTRICT | HARD_BLOCK"]
+
+        FusionWorker --> Rules & Graph & OnnxML --> FusionEngine --> Policy
+    end
+
+    subgraph SemanticTier["Tier 2B: Asynchronous Semantic Evaluation (000.8.1 + 000.7 smollm2)"]
+        direction TB
+        Policy -->|"R_final >= 0.85: RESTRICT<br/>0.50 <= R_final < 0.85: REVIEW"| Dispatcher["InvestigationDispatcher (000.8)"]
         
-        subgraph EvaluatorImpl["Provider-Neutral Implementations"]
-            OllamaImpl["OllamaDecisionEvaluator<br/>Local SLM via LocalInferenceClient"]
-            ShadowEvaluator["ShadowBenchmarkEvaluator<br/>Dual-Evaluation Harness"]
+        subgraph Attachment1["Attachment Point 1: Nearline Checkpoint Enrichment"]
+            Dispatcher -->|"1. Snapshot Facts"| Evidence["DecisionEvidence.of(...)<br/>(Canonical SHA-256 Hashing)"]
+            Evidence -->|"2. Evaluate Questions"| Evaluator["DecisionEvaluator SPI<br/>(Ollama via smollm2:360m)"]
+            Evaluator -->|"3. Strongly Typed Outcomes"| Result["EvaluationResult<br/>(BEHAVIOR_ANOMALY, MULE_RING...)"]
+            Result -->|"4. Anti-Coercion Gate"| Composer["DecisionComposer<br/>(CompoundRiskAssessment)"]
+            Composer -->|"5. Save Structured Checkpoint"| Checkpoints[("PostgreSQL<br/>fraud_investigation_checkpoints")]
         end
 
-        DecisionComposer["DecisionComposer<br/>Anti-Coercion Aggregation Policy"]
-        FiveGateHarness["Five-Gate Semantic Benchmark Harness<br/>Contract | Grounding | Correctness | Calibration | Determinism"]
-
-        NearlineTrigger --> EvidenceCollector
-        EvidenceCollector --> DecisionEvaluatorSPI
-        DecisionEvaluatorSPI --> OllamaImpl
-        DecisionEvaluatorSPI --> ShadowEvaluator
-        DecisionEvaluatorSPI --> DecisionComposer
-        ShadowEvaluator --> FiveGateHarness
+        subgraph Attachment2["Attachment Point 2: Human-in-the-Loop Analyst Review"]
+            Analyst["Compliance Analyst"] -->|"GET /fraud/investigations/{id}/decisions<br/>POST /fraud/investigations/{id}/evaluate"| Controller["FraudInvestigationController"]
+            Controller --> Evaluator
+            Controller --> Checkpoints
+            Analyst -->|"Submit Final Verdict<br/>(AnalystReviewRequest)"| AnalystReview["Analyst Review Service"]
+        end
     end
 
-    subgraph StorageTier["Persistence Tier"]
-        Postgres[("PostgreSQL 18.x<br/>accounts / ledger / outbox<br/>fraud_investigations")]
+    subgraph PersistenceTier["Persistence Stores"]
+        Postgres[("PostgreSQL 18.x<br/>accounts / ledger / outbox")]
     end
 
     TransferUC --> Postgres
-    DecisionComposer -.->|"Async Persist Decision Result"| Postgres
+    TransferUC -.->|"Outbox Relay (10s)"| FusionWorker
+    AnalystReview -.->|"Update Status"| Postgres
 ```
 
-### 2.1 Architectural Invariant Enforcement
-- `I-TYPED-001` (Hot-Path Airgap): `br.com.wallet.ledger` and `br.com.wallet.fraud.fusion.gate` MUST NOT import or invoke any class from `br.com.wallet.fraud.decision.*`.
-- `I-TYPED-002` (Latency Non-Degradation): The fraud gate authorization budget ($P99 < 2\text{ms}$) is strictly isolated; SLM calls must never execute on the transaction path.
+### 2.1 Invariant Separation & Non-Interference with Deterministic Parts
+1. **Zero Contamination of Transaction Path (`I-TYPED-001`, `I-TYPED-002`)**:
+   - `FraudGate.evaluateAuthorization()` executes against DragonflyDB and Caffeine in $P99 < 2\text{ms}$.
+   - The transaction path has zero dependency on `br.com.wallet.fraud.decision.*`.
+2. **Zero Contamination of Mathematical Signal Fusion (`I-FUSION-001`, `I-FUSION-008`)**:
+   - `ProbabilisticRiskFusionEngine` and `OnnxRiskModelEvaluator` compute pure tabular statistics.
+   - Micro-ML inference is embedded Java ONNX with strict feature schema versioning.
+   - Semantic decisions **never retroactively modify** $R_{\text{final}}$, rule primacy, or correlation group math.
+3. **Downstream Nearline Attachment**:
+   - The typed decision algebra attaches strictly downstream of deterministic fusion when `RiskDecisionPolicy` signals `REVIEW` or `RESTRICT`.
+   - Replaces loose uncalibrated text narratives with machine-verifiable, hash-grounded verdicts.
+
+### 2.2 Concrete System Attachment Points
+- **Attachment Point 1 (Nearline `InvestigationDispatcher`)**: Asynchronously evaluates catalog questions (`FraudDecisionQuestions.allStandardQuestions()`) using local SLM profiles (`smollm2:360m-instruct-q5_K_M`) and serializes the resulting `CompoundRiskAssessment` into `fraud_investigation_checkpoints`.
+- **Attachment Point 2 (Human-in-the-Loop `FraudInvestigationController`)**: Exposes typed REST endpoints (`GET /fraud/investigations/{entityId}/decisions` and `POST /fraud/investigations/{entityId}/evaluate`) allowing compliance analysts to review grounded claims, trigger on-demand questions, and verify evidence SHA-256 hashes before submitting `AnalystReviewRequest`.
+- **Attachment Point 3 (Shadow CI/CD Quality Gate `FiveGateBenchmarkHarness`)**: Evaluates candidate models, prompt versions, and inference profiles against labeled historical datasets before promoting them to production.
 
 ---
 

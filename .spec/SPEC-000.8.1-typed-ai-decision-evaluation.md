@@ -84,9 +84,11 @@ Per **Histories 64, 65 & 66**, this specification establishes a **Native Typed D
 - **`REQ-TYPED-004` [MUST]**: Multiple questions MUST be evaluated independently against the same immutable `DecisionState` snapshot without cross-question mutation. Implementations MAY execute questions concurrently or as a provider-native batch.
 - **`REQ-TYPED-006` [MUST]**: Implement `DecisionComposer` providing deterministic composition of `EvaluationResult` into `SemanticEvaluation` signals without mutating core ledger state. The composer MUST adhere to `I-TYPED-006` and explicitly handle `DecisionUnavailable` without implicit default coercion.
 
-### 3.3 Pillar C: Architectural Airgap & Failure Isolation [MUST]
+### 3.3 Pillar C: Architectural Airgap & Nearline Flow Attachment [MUST]
 - **`REQ-TYPED-007` [MUST]**: The financial authorization hot path (`POST /operations/*`) MUST NOT invoke `DecisionEvaluator` (`I-TYPED-001`, `I-TYPED-002`). Evaluations are strictly nearline (investigations, analyst checkpoints) or offline benchmarks.
 - **`REQ-TYPED-013` [MUST]**: Failure, timeout, or absence of an evaluator MUST return `DecisionUnavailable<T>` without confidence (`I-TYPED-005`) and MUST NOT block outbox processing or Core transactions.
+- **`REQ-TYPED-017` [MUST]**: **Post-Fusion Nearline Attachment**: When deterministic fusion (`SPEC-000.8`) outputs `REVIEW` or `RESTRICT`, `InvestigationDispatcher` MUST snapshot facts into `DecisionEvidence` (canonical SHA-256), invoke `DecisionEvaluator` nearline using local SLM (`smollm2`), run `DecisionComposer`, and store structured `CompoundRiskAssessment` in checkpoints. Deterministic fusion math ($R_{\text{final}}$) and direct rules MUST NOT be modified.
+- **`REQ-TYPED-018` [MUST]**: **Human-in-the-Loop Analyst API**: `FraudInvestigationController` MUST expose typed endpoints (`GET /fraud/investigations/{entityId}/decisions` and `POST /fraud/investigations/{entityId}/evaluate`) enabling compliance analysts to inspect grounded verdicts and trigger on-demand question evaluation before submitting `AnalystReviewRequest`.
 
 ### 3.4 Pillar D: Five-Gate Benchmark Evaluation Protocol [SHOULD / COULD]
 - **`REQ-TYPED-009` [SHOULD]**: Five-Gate Evaluation Protocol:

@@ -21,7 +21,7 @@ class DecisionBoundaryArchitectureTest {
     void ledgerMustNotDependOnDecisionAlgebra() {
         ArchRule rule = noClasses()
                 .that().resideInAPackage("br.com.wallet.ledger..")
-                .should().dependOnClassesThat().resideInAPackage("br.com.wallet.fraud.decision..")
+                .should().dependOnClassesThat().resideInAPackage("br.com.wallet.decision..")
                 .allowEmptyShould(true);
 
         rule.check(allProductionClasses);
@@ -36,7 +36,7 @@ class DecisionBoundaryArchitectureTest {
                         "br.com.wallet.fraud.fusion.api..",
                         "br.com.wallet.fraud.rules.."
                 )
-                .should().dependOnClassesThat().resideInAPackage("br.com.wallet.fraud.decision..")
+                .should().dependOnClassesThat().resideInAPackage("br.com.wallet.decision..")
                 .allowEmptyShould(true);
 
         rule.check(allProductionClasses);
@@ -46,7 +46,7 @@ class DecisionBoundaryArchitectureTest {
     @DisplayName("REQ-TYPED-010: Decision algebra must be pure Java and not depend on spring-ai or third-party AI frameworks")
     void decisionAlgebraMustNotDependOnExternalAiFrameworks() {
         ArchRule rule = noClasses()
-                .that().resideInAPackage("br.com.wallet.fraud.decision..")
+                .that().resideInAPackage("br.com.wallet.decision..")
                 .should().dependOnClassesThat().resideInAnyPackage(
                         "org.springframework.ai..",
                         "dev.langchain4j..",
@@ -61,8 +61,19 @@ class DecisionBoundaryArchitectureTest {
     @DisplayName("Clean Architecture: Decision algebra must not depend on transactional ledger")
     void decisionAlgebraMustNotDependOnLedger() {
         ArchRule rule = noClasses()
-                .that().resideInAPackage("br.com.wallet.fraud.decision..")
+                .that().resideInAPackage("br.com.wallet.decision..")
                 .should().dependOnClassesThat().resideInAPackage("br.com.wallet.ledger..")
+                .allowEmptyShould(true);
+
+        rule.check(allProductionClasses);
+    }
+
+    @Test
+    @DisplayName("RULE-CAP-007: Infrastructure adapters must not depend directly on decision algebra")
+    void infrastructureMustNotDependOnDecisionAlgebra() {
+        ArchRule rule = noClasses()
+                .that().resideInAPackage("br.com.wallet.infrastructure..")
+                .should().dependOnClassesThat().resideInAPackage("br.com.wallet.decision..")
                 .allowEmptyShould(true);
 
         rule.check(allProductionClasses);

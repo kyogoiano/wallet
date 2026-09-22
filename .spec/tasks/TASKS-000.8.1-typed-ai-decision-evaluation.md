@@ -25,6 +25,8 @@
 | `REQ-TYPED-012` | `[WON'T]` | `DecisionComposerTest` (refusal to coerce unavailable to synthetic values) | `TASK-TYPED-4.1`, `TASK-TYPED-4.2` |
 | `REQ-TYPED-013`, `I-TYPED-005`, Triad 3 | `[MUST]` | `DecisionUnavailableStructureTest`, `DecisionEvaluatorTimeoutTest` | `TASK-TYPED-1.3`, `TASK-TYPED-5.2` |
 | `REQ-TYPED-015` | `[MUST]` | `EvaluationResultTypeBindingTest` | `TASK-TYPED-1.2`, `TASK-TYPED-2.2` |
+| `REQ-TYPED-017` | `[MUST]` | `InvestigationDispatcherIntegrationTest` | `TASK-TYPED-8.1`, `TASK-TYPED-8.2` |
+| `REQ-TYPED-018` | `[MUST]` | `FraudInvestigationControllerTest` | `TASK-TYPED-8.3` |
 
 ---
 
@@ -123,22 +125,39 @@
   - Assert `br.com.wallet.fraud.decision..*` has 0 dependencies on external third-party AI libraries (e.g. `spring-ai-typesafe`).
   - Verify Core transfer execution completes in $<15\text{ms}$ with fraud gate authorization $P99 < 2\text{ms}$ without invoking `DecisionEvaluator`.
 
+### Phase 8: Nearline Flow Attachment & Human-in-the-Loop Integration
+- [x] `TASK-TYPED-8.1` [MUST]: Register `DecisionComposer` as Spring `@Component` and configure `DecisionEvaluator` Spring bean in `:fraud` (`REQ-TYPED-008`, `REQ-TYPED-017`).
+- [x] `TASK-TYPED-8.2` [MUST]: Integrate `DecisionEvaluator` & `DecisionComposer` into `InvestigationDispatcher`:
+  - When fusion triggers `REVIEW` or `RESTRICT`, build `DecisionEvidence` from fusion signals and invoke `DecisionEvaluator.evaluate()` nearline.
+  - Run `DecisionComposer.compose()` under `DEGRADE_TO_UNVERIFIED` and serialize `CompoundRiskAssessment` into `fraud_investigation_checkpoints`.
+  - Update `InvestigationDispatcherTest` asserting structured evaluation persistence without mutating deterministic fusion ($R_{\text{final}}$) (`REQ-TYPED-017`).
+- [x] `TASK-TYPED-8.3` [MUST]: Expose typed decision evaluation in `FraudInvestigationController` & `FraudInvestigationApi`:
+  - Add `POST /api/v1/fraud/intelligence/investigation/{entityId}/evaluate` and `GET /api/v1/fraud/intelligence/investigation/{entityId}/decisions` allowing analysts to inspect grounded verdicts with SHA-256 evidence hashes.
+  - Update `FraudInvestigationControllerTest` (`REQ-TYPED-018`).
+
 ---
 
 ## 4. Practical Verification Guide (`I-SDD-002`)
 
 ```bash
 # 1. Run unit test suite for native decision algebra and anti-coercion gate
-./gradlew test --tests "br.com.wallet.fraud.decision.model.*"
-./gradlew test --tests "br.com.wallet.fraud.decision.composition.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.model.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.composition.*"
 
 # 2. Run evaluator timeout and structural absence tests (Triad 3)
-./gradlew test --tests "br.com.wallet.fraud.decision.evaluator.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.evaluator.*"
 
 # 3. Run Five-Gate benchmark harness
-./gradlew test --tests "br.com.wallet.fraud.decision.benchmark.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.benchmark.*"
 
 # 4. Run Spring Modulith architectural airgap verification (Triad 1)
-./gradlew test --tests "br.com.wallet.DecisionBoundaryArchitectureTest"
-./gradlew test --tests "br.com.wallet.ModulithArchitectureTest"
+./gradlew :test --tests "br.com.wallet.DecisionBoundaryArchitectureTest"
+
+# 5. Run nearline dispatcher and human-in-the-loop REST tests
+./gradlew :test --tests "br.com.wallet.unit.fraud.fusion.InvestigationDispatcherTest"
+./gradlew :test --tests "br.com.wallet.unit.infrastructure.rest.FraudInvestigationControllerTest"
+
+# 6. Verify Human-in-the-Loop REST API (cURL)
+curl -X POST http://localhost:8080/api/v1/fraud/intelligence/investigation/00000000-0000-0000-0000-000000000001/evaluate
+curl -X GET  http://localhost:8080/api/v1/fraud/intelligence/investigation/00000000-0000-0000-0000-000000000001/decisions
 ```

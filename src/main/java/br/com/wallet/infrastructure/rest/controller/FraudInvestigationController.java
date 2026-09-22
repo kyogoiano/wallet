@@ -2,10 +2,12 @@ package br.com.wallet.infrastructure.rest.controller;
 
 import br.com.wallet.fraud.investigation.api.InvestigationService;
 import br.com.wallet.fraud.investigation.api.model.FraudInvestigationDossier;
+import br.com.wallet.fraud.investigation.api.model.TypedEvaluationResponse;
 import br.com.wallet.fraud.investigation.spi.InferenceCapability;
 import br.com.wallet.infrastructure.rest.api.FraudInvestigationApi;
 import br.com.wallet.infrastructure.rest.dto.InvestigationDossierResponse;
 import org.jspecify.annotations.NonNull;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -17,6 +19,7 @@ public class FraudInvestigationController implements FraudInvestigationApi {
 
     private final InvestigationService investigationService;
 
+    @Autowired
     public FraudInvestigationController(@NonNull final InvestigationService investigationService) {
         this.investigationService = Objects.requireNonNull(investigationService, "investigationService cannot be null");
     }
@@ -38,5 +41,17 @@ public class FraudInvestigationController implements FraudInvestigationApi {
             dossier.evidence(),
             dossier.narrative().orElse(null)
         ));
+    }
+
+    @Override
+    public ResponseEntity<TypedEvaluationResponse> evaluateDecisions(final UUID entityId) {
+        Objects.requireNonNull(entityId, "entityId cannot be null");
+        return ResponseEntity.ok(investigationService.evaluateDecisions(entityId));
+    }
+
+    @Override
+    public ResponseEntity<TypedEvaluationResponse> getDecisions(final UUID entityId) {
+        Objects.requireNonNull(entityId, "entityId cannot be null");
+        return ResponseEntity.ok(investigationService.getDecisions(entityId));
     }
 }

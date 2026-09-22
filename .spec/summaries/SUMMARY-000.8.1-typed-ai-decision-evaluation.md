@@ -56,6 +56,14 @@ Phase 000.8.1 implements a production-grade, native Java 27 typed AI decision al
    - Enforced zero dependencies from `br.com.wallet.ledger..*` or `br.com.wallet.fraud.fusion.gate..*` into `br.com.wallet.fraud.decision..*`.
    - Core transfer execution ($<15\text{ms}$) and fraud gate authorization ($P99 < 2\text{ms}$) remain completely isolated from semantic inference.
 
+9. **Nearline Post-Fusion Enrichment Attachment (`REQ-TYPED-017`, `I-TYPED-001`)**:
+   - Integrated [`InvestigationDispatcher`](file:///fraud/src/main/java/br/com/wallet/fraud/fusion/internal/orchestration/InvestigationDispatcher.java) to snapshot deterministic signals into `DecisionEvidence`, execute `DecisionEvaluator.evaluate(...)` for `FraudDecisionQuestions.allStandardQuestions()`, and compose answers with `DecisionComposer.compose(..., DEGRADE_TO_UNVERIFIED, Set.of(BEHAVIOR_ANOMALY))` whenever the deterministic fusion engine outputs `REVIEW` or `RESTRICT`.
+   - Persists `compoundAssessment`, `evaluationId`, and `evidenceHash` into compliance checkpoint payloads without mutating or influencing deterministic fusion calculations ($R_{\text{final}}$).
+
+10. **Human-in-the-Loop Analyst Review API (`REQ-TYPED-018`)**:
+    - Exposed `POST /api/v1/fraud/intelligence/investigation/{entityId}/evaluate` and `GET /api/v1/fraud/intelligence/investigation/{entityId}/decisions` in [`FraudInvestigationApi`](file:///src/main/java/br/com/wallet/infrastructure/rest/api/FraudInvestigationApi.java) and [`FraudInvestigationController`](file:///src/main/java/br/com/wallet/infrastructure/rest/controller/FraudInvestigationController.java).
+    - Returns [`TypedEvaluationResponse`](file:///src/main/java/br/com/wallet/infrastructure/rest/dto/TypedEvaluationResponse.java) allowing compliance investigators to inspect grounded verdicts, question outcomes, confidence levels, cryptographic evidence hashes, and composite assessments.
+
 ---
 
 ## 2. Traceability & Verification Matrix
@@ -75,6 +83,8 @@ Phase 000.8.1 implements a production-grade, native Java 27 typed AI decision al
 | `REQ-TYPED-012` | `[WON'T]` | [`DecisionComposerTest.unavailableMustNotBeCoercedToFalseOrZero`](file:///fraud/src/test/java/br/com/wallet/fraud/decision/composition/DecisionComposerTest.java) | 🟢 PASS |
 | `REQ-TYPED-013`, `I-TYPED-005`, Triad 3 | `[MUST]` | [`DecisionOutcomeTest.decisionUnavailableMustNotExposeScoreOrConfidence`](file:///fraud/src/test/java/br/com/wallet/fraud/decision/model/DecisionOutcomeTest.java), [`DecisionEvaluatorTimeoutTest`](file:///fraud/src/test/java/br/com/wallet/fraud/decision/evaluator/DecisionEvaluatorTimeoutTest.java) | 🟢 PASS |
 | `REQ-TYPED-015` | `[MUST]` | [`EvaluationResultTypeBindingTest.shouldThrowWhenRuntimeTypeWitnessMismatches`](file:///fraud/src/test/java/br/com/wallet/fraud/decision/model/EvaluationResultTypeBindingTest.java) | 🟢 PASS |
+| `REQ-TYPED-017` | `[MUST]` | [`InvestigationDispatcherTest.shouldEnrichCheckpointWithTypedAICompoundAssessment`](file:///src/test/java/br/com/wallet/unit/fraud/fusion/InvestigationDispatcherTest.java) | 🟢 PASS |
+| `REQ-TYPED-018` | `[MUST]` | [`FraudInvestigationControllerTest.shouldEvaluateTypedDecisionsSuccessfully`](file:///src/test/java/br/com/wallet/unit/infrastructure/rest/FraudInvestigationControllerTest.java) | 🟢 PASS |
 
 ---
 
@@ -85,46 +95,35 @@ Run the following Gradle commands to execute and verify the test suites:
 
 ```bash
 # 1. Run unit tests for Decision Value, Questions, Outcomes, and Generic Binding
-./gradlew test --tests "br.com.wallet.fraud.decision.model.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.model.*"
 
 # 2. Run domain catalog verification
-./gradlew test --tests "br.com.wallet.fraud.decision.catalog.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.catalog.*"
 
 # 3. Run Anti-Coercion Composer test suite (Triad 4)
-./gradlew test --tests "br.com.wallet.fraud.decision.composition.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.composition.*"
 
 # 4. Run Evaluator timeout and structural absence tests (Triad 3)
-./gradlew test --tests "br.com.wallet.fraud.decision.evaluator.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.evaluator.*"
 
 # 5. Run Five-Gate Semantic Evaluation Protocol benchmark tests
-./gradlew test --tests "br.com.wallet.fraud.decision.benchmark.*"
+./gradlew :fraud:test --tests "br.com.wallet.fraud.decision.benchmark.*"
 
 # 6. Run Architectural Airgap & Modulith Boundary tests (Triad 1)
-./gradlew test --tests "br.com.wallet.DecisionBoundaryArchitectureTest"
-./gradlew test --tests "br.com.wallet.ModulithArchitectureTest"
+./gradlew :test --tests "br.com.wallet.DecisionBoundaryArchitectureTest"
+
+# 7. Run Nearline Dispatcher and Human-in-the-Loop REST tests
+./gradlew :test --tests "br.com.wallet.unit.fraud.fusion.InvestigationDispatcherTest"
+./gradlew :test --tests "br.com.wallet.unit.infrastructure.rest.FraudInvestigationControllerTest"
 ```
 
-### 3.2 Programmatic Usage Example
-```java
-// 1. Define grounded evidence snapshot with canonical hash
-DecisionEvidence evidence = DecisionEvidence.of(
-    "tx_profile", "Account 30-day velocity profile",
-    Map.of("avg_daily_volume", "1200.00", "current_transfer", "95000.00")
-);
+### 3.2 Human-in-the-Loop Verification (cURL)
+```bash
+# 1. Trigger on-demand typed AI evaluation for entity
+curl -X POST http://localhost:8080/api/v1/fraud/intelligence/investigation/00000000-0000-0000-0000-000000000001/evaluate
 
-// 2. Select typed question from standard catalog
-DecisionQuestion<BooleanDecision> question = FraudDecisionQuestions.BEHAVIOR_ANOMALY;
-
-// 3. Evaluate nearline asynchronously via provider-neutral SPI
-EvaluationResult result = evaluator.evaluate("ACC-12345", List.of(question), Map.of("tx_profile", evidence)).join();
-
-// 4. Retrieve strongly typed outcome with compile-time & runtime witness validation
-DecisionOutcome<BooleanDecision> outcome = result.outcomeFor(question);
-
-// 5. Compose compound assessment enforcing anti-coercion gate
-CompoundRiskAssessment assessment = composer.compose(
-    result, CompositionPolicy.FAIL_CLOSED, Set.of(question)
-);
+# 2. Query latest typed decision verdict and compound assessment
+curl -X GET  http://localhost:8080/api/v1/fraud/intelligence/investigation/00000000-0000-0000-0000-000000000001/decisions
 ```
 
 ---
@@ -140,5 +139,7 @@ CompoundRiskAssessment assessment = composer.compose(
 | **Evaluator SPI** | Nearline `DecisionEvaluator` with timeout containment | `OllamaDecisionEvaluator` wrapping `InferenceBridge` | 0% |
 | **Quality Gates** | Five-Gate Protocol with directed non-inferiority margins | `FiveGateBenchmarkHarness` evaluating G1-G5 | 0% |
 | **Airgap** | Zero hot-path imports or latency degradation | Verified by `DecisionBoundaryArchitectureTest` | 0% |
+| **Nearline Dispatch** | Triggered on REVIEW/RESTRICT, enriches checkpoint | Verified by `InvestigationDispatcherTest` | 0% |
+| **Analyst Review** | REST endpoints exposing typed verdicts & evidenceHash | Verified by `FraudInvestigationControllerTest` | 0% |
 
 Phase 000.8.1 is fully ratified and certified complete.

@@ -92,7 +92,6 @@ public class OllamaDecisionEvaluator implements DecisionEvaluator {
             });
     }
 
-    @SuppressWarnings("unchecked")
     private <T extends DecisionValue> EvaluatedQuestion<T> createAnswer(
         final DecisionQuestion<T> question,
         final DecisionValue val,

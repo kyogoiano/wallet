@@ -117,7 +117,7 @@ public record EvaluationResult(
     List<EvaluatedQuestion<?>> questions,
     Instant evaluatedAt
 ) {
-    @SuppressWarnings("unchecked")
+    
     public <T extends DecisionValue> DecisionOutcome<T> outcomeFor(DecisionQuestion<T> question) {
         return questions.stream()
             .filter(eq -> eq.question().questionId().equals(question.questionId()))
@@ -188,7 +188,7 @@ public class DecisionComposer {
         }
 
         // Process verified answers safely with pattern matching
-        ...
+        
     }
 }
 ```
@@ -209,7 +209,7 @@ public interface DecisionEvaluator {
 
 ### Safe Timeout Handling Pattern:
 ```java
-public CompletableFuture<EvaluationResult> evaluate(...) {
+public CompletableFuture<EvaluationResult> evaluate( ) {
     return client.inferAsync(payload)
         .orTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
         .handle((response, ex) -> {

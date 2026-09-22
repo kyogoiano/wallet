@@ -61,7 +61,7 @@ The Wallet Service follows **Modular Monolith (Spring Modulith)** and **Clean Ar
 
 ## 2. Technology Stack
 
-- **Runtime & Language**: Java 27, Spring Boot 4.2.0-M1, Gradle 9.8-rc-2
+- **Runtime & Language**: Java 27, Spring Boot 4.2.0-M1, Gradle 9.8-rc-3
 - **Database**: PostgreSQL 18.x with schema migrations in `docker/init/schema.sql` and `pgvector` extension (`vector(16)`, `vector(128)`).
 - **In-Memory Store & Distributed State**: DragonflyDB v1.40.1 (multi-threaded, Redis-compatible, RESP3, Epoll Unix Domain Sockets `/var/run/redis/redis.sock` & TCP `6379` fallback).
 - **Messaging & Event Streaming**: NATS JetStream (`events.*`, `commands.*`, `commands.dlq.*`)

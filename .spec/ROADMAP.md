@@ -322,6 +322,21 @@ gantt
 
 ---
 
+### 🔹 Phase 0.8.1: Native Typed Decision Algebra & Semantic Evaluation Engine
+**Spec Identifier**: [`SPEC-000.8.1-typed-ai-decision-evaluation`](file:///.spec/SPEC-000.8.1-typed-ai-decision-evaluation.md)  
+**Status**: 🟢 **Completed & Ratified**  
+**Core Abstraction**: `Native Domain Algebra (DecisionQuestion<T>, DecisionOutcome<T>, DecisionValue), Provider-Neutral SPI, Airgapped Nearline Evaluation & Five-Gate Benchmark (br.com.wallet.fraud.decision)`
+
+- **Intent**: Capture the architectural benefits of atomic typed questions over a single immutable evidence state without external library coupling ("steal the architecture, not the library"; zero dependency on `spring-ai-typesafe`). Implements native domain types (`DecisionQuestion<T>`, sealed `DecisionOutcome<T>`, sealed `DecisionValue`, `EvaluatedQuestion<T>`, `EvaluationResult`, `DecisionEvaluator` SPI, `DecisionComposer`) in pure Java 27. Strictly enforces the **Hot-Path Airgap Invariant** (`I-TYPED-001`, `I-TYPED-002`): generative or SLM inference engines SHALL NEVER execute on the synchronous financial write path. Establishes a Five-Gate benchmark protocol (Contract, Grounding, Directed Task Correctness, Calibration, and Determinism).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.8.1-typed-ai-decision-evaluation.md`](file:///.spec/SPEC-000.8.1-typed-ai-decision-evaluation.md) (Ratified)
+  - [`.spec/architecture/ARCH-000.8.1-native-typed-decision-algebra.md`](file:///.spec/architecture/ARCH-000.8.1-native-typed-decision-algebra.md) (Ratified)
+  - [`plans/PLAN-000.8.1-typed-ai-decision-evaluation.md`](file:///.spec/plans/PLAN-000.8.1-typed-ai-decision-evaluation.md) (Approved)
+  - [`tasks/TASKS-000.8.1-typed-ai-decision-evaluation.md`](file:///.spec/tasks/TASKS-000.8.1-typed-ai-decision-evaluation.md) (Completed)
+  - [`.spec/summaries/SUMMARY-000.8.1-typed-ai-decision-evaluation.md`](file:///.spec/summaries/SUMMARY-000.8.1-typed-ai-decision-evaluation.md) (Verified)
+
+---
+
 ### 🔹 Phase 000.9: Reactive Edge Gateway & Ingress Resilience
 **Spec Identifier**: [`SPEC-000.9-reactive-edge-gateway-and-ingress-resilience`](file:///.spec/SPEC-000.9-reactive-edge-gateway-and-ingress-resilience.md)  
 **Status**: 🟢 **Completed & Verified**  
@@ -376,6 +391,20 @@ gantt
   - `plans/PLAN-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
   - `tasks/TASKS-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
   - `summaries/SUMMARY-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
+
+---
+
+### 🔹 Phase 000.9.4: DragonflyDB 2.0 Migration & Codebase-Wide State Audit
+**Spec Identifier**: [`SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit`](file:///.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md)  
+**Status**: 🟡 **Proposed (Awaiting Ratification per Histories 61 & 62)**  
+**Core Abstraction**: `Dragonfly 2.0 Infrastructure, 3-Gate Upgrade Verification, Dual-Version Behavioral Oracle & DF20-AUDIT State Inventory`
+
+- **Intent**: Upgrade from DragonflyDB 1.40 to 2.0 (released Sept 17, 2026: ~54% higher throughput, 35% lower latency, 30–40% lower memory). Strictly forbids a "blind upgrade". Enforces a 3-Gate verification protocol (Compatibility, Behavioral Correctness, Performance) with zero performance regression (`I-DF20-002`), continuous sorted-set sliding window consistency (`I-DF20-003`), dual-version behavioral parity oracle (`DragonflyBehavioralCompatibilityIT`), bounded emergency timeouts ($\le 20\text{ms}$) with zero DB thread blocking, and a comprehensive codebase state audit (`DF20-AUDIT`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Proposed)
+  - `plans/PLAN-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md` (Pending)
+  - `tasks/TASKS-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md` (Pending)
+  - `summaries/SUMMARY-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md` (Pending)
 
 ---
 

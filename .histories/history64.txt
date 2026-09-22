@@ -1,0 +1,417 @@
+Yes. **For our project, I actually prefer this approach.** I would not add `spring-ai-typesafe` as a dependency in V4 right now.
+
+I checked the repository again: it is currently a very small/new project — GitHub shows **8 commits, 27 stars and 7 forks**, and the published dependency examples are still `0.1.0-SNAPSHOT`. Its core ideas, however, are quite interesting: typed questions, multiple independent evaluations over the same state, typed answer primitives, confidence, and composing decisions in application code rather than asking an LLM for one giant rubric/JSON response. ([GitHub][1])
+
+### I would "steal the architecture, not the library"
+
+This is particularly appropriate for Wallet V4 because we can make the abstraction **ours** and then experiment with whatever implementation eventually proves useful.
+
+I'd extract roughly these ideas:
+
+```text
+                    DecisionState
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+       Question 1     Question 2     Question 3
+       BOOLEAN        BOOLEAN        SCORE
+          │              │              │
+          ▼              ▼              ▼
+       Decision       Decision       Decision
+          │              │              │
+          └──────────────┼──────────────┘
+                         ▼
+                 EvaluationResult
+```
+
+rather than:
+
+```text
+Evidence
+   ↓
+LLM
+   ↓
+"give me a JSON containing everything"
+   ↓
+Jackson
+   ↓
+validation
+   ↓
+hope
+```
+
+The TypeSafe project itself explicitly describes this as **atomic typed questions composed in code**, with `Noul`, `Choice`, and `Score` as primitives. ([GitHub][1])
+
+---
+
+# More importantly: we can make it better for our domain
+
+I wouldn't literally copy their `Noul`, `Choice`, `Score` API.
+
+I'd define **Fraud Intelligence domain types**.
+
+For example:
+
+```java
+sealed interface DecisionValue
+        permits BooleanDecision, ScoreDecision, ChoiceDecision,
+                UnavailableDecision {}
+```
+
+Then:
+
+```java
+record BooleanDecision(
+        boolean value
+) implements DecisionValue {}
+
+record ScoreDecision(
+        double value,
+        ScoreCalibration calibration
+) implements DecisionValue {}
+
+record ChoiceDecision(
+        String value,
+        double confidence
+) implements DecisionValue {}
+
+record UnavailableDecision(
+        String reason
+) implements DecisionValue {}
+```
+
+And most importantly:
+
+```java
+record TypedDecisionResult(
+        QuestionId questionId,
+        DecisionValue value,
+        EvidenceSet evidence,
+        DecisionProvenance provenance
+) {}
+```
+
+Now **the domain owns the semantics**.
+
+---
+
+# I'd go one step further
+
+The really valuable idea isn't actually `Noul`/`Choice`/`Score`.
+
+It's this:
+
+> **One evidence state → multiple atomic questions → typed answers → composition.**
+
+That fits your fraud architecture extremely well.
+
+For example:
+
+```java
+DecisionState state = DecisionState.builder()
+    .transaction(transaction)
+    .behaviorProfile(profile)
+    .deviceEvidence(device)
+    .networkEvidence(network)
+    .graphEvidence(graph)
+    .velocityEvidence(velocity)
+    .build();
+
+var evaluation = evaluator.evaluate(
+    state,
+    Q_BEHAVIOR_ANOMALY,
+    Q_COORDINATED_TOPOLOGY,
+    Q_DEVICE_NETWORK_RISK
+);
+```
+
+Then the evaluator can run those questions **against exactly the same immutable evidence snapshot**.
+
+That gives us an important reproducibility property:
+
+```text
+Evaluation E123
+        │
+        ├── evidence snapshot hash
+        ├── question set version
+        ├── evaluator version
+        ├── model version
+        ├── timestamp
+        │
+        ├── Q1 → TRUE
+        ├── Q2 → FALSE
+        └── Q3 → 0.71
+```
+
+That's much more valuable for a fraud system than simply saying "the LLM returned valid JSON."
+
+---
+
+# And this fixes one weakness in our current 000.8.1
+
+Our current spec talks about:
+
+> typed outputs boolean / score [0,1]
+
+I'd broaden this into a **small typed decision algebra**.
+
+Something like:
+
+```text
+TypedDecisionValue
+│
+├── Boolean
+├── Score
+├── Category
+├── Ranking
+├── EvidenceSupported<T>
+└── Unavailable
+```
+
+The last one is especially important.
+
+I previously suggested that we shouldn't pretend that:
+
+```text
+AI unavailable
+       ↓
+ONNX + Rules
+       ↓
+fake semantic answer
+```
+
+is valid.
+
+Instead:
+
+```text
+semantic question
+       │
+       ├── evaluator available
+       │       ↓
+       │   typed answer
+       │
+       └── evaluator unavailable
+               ↓
+          UNAVAILABLE
+```
+
+Then the **composition layer** decides what `UNAVAILABLE` means.
+
+That is much safer.
+
+---
+
+# The composition layer is where this gets really interesting
+
+The TypeSafe project also explicitly discusses confidence gates, self-consistency and weighted composite scores. ([GitHub][1])
+
+We can take the concept but make it deterministic.
+
+For example:
+
+```text
+Q1 behavior anomaly       = TRUE
+Q2 coordinated topology   = TRUE
+Q3 device/network score   = 0.82
+                            │
+                            ▼
+                 SemanticEvidence
+                            │
+                            ▼
+                Deterministic Fusion
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+       investigation                 benchmark
+         signal                       dataset
+```
+
+Notice that **the AI answers are still evidence, not authorization**.
+
+This preserves:
+
+`I-FRAUD-001`
+`I-FRAUD-002`
+
+and our existing architecture.
+
+---
+
+# I would therefore change the name too
+
+Instead of creating something called:
+
+```text
+JevAdapter
+```
+
+I'd create:
+
+```text
+TypedDecisionEngine
+```
+
+or perhaps:
+
+```text
+DecisionEvaluator
+```
+
+with:
+
+```java
+public interface DecisionEvaluator {
+
+    EvaluationResult evaluate(
+        DecisionContext context,
+        Collection<DecisionQuestion<?>> questions
+    );
+}
+```
+
+Then implementations could eventually be:
+
+```text
+DecisionEvaluator
+│
+├── DeterministicEvaluator
+│
+├── LocalSlmEvaluator
+│
+├── TypeSafeInspiredEvaluator
+│
+└── EnsembleEvaluator
+```
+
+But **we don't need all of those now**.
+
+---
+
+# And we don't need Spring AI in the core abstraction
+
+This is another advantage of stealing the idea.
+
+I'd keep:
+
+```text
+fraud-domain
+    ↓
+DecisionQuestion
+DecisionContext
+DecisionValue
+EvaluationResult
+DecisionEvaluator
+```
+
+completely independent of:
+
+```text
+Spring AI
+Ollama
+ONNX Runtime
+Jev
+OpenAI
+Anthropic
+whatever comes next
+```
+
+Then infrastructure can implement:
+
+```text
+fraud-ai
+    ├── LocalSllmDecisionEvaluator
+    └── SpringAiDecisionAdapter
+```
+
+This is much more aligned with the way we've designed the rest of V4.
+
+---
+
+# One thing I WOULD copy almost literally
+
+The idea of **multiple questions sharing the same state**.
+
+That's excellent for our use case.
+
+Suppose we have:
+
+```text
+EvidenceSnapshot #8a91...
+```
+
+Questions:
+
+```text
+Q001:
+Is behavior inconsistent with historical profile?
+
+Q002:
+Is there evidence of coordinated mule/smurf topology?
+
+Q003:
+Does device/network interaction support elevated risk?
+
+Q004:
+Is the transaction context consistent with the user's normal geography?
+
+Q005:
+Is the evidence insufficient to make a semantic determination?
+```
+
+All five evaluate the **same evidence snapshot**.
+
+That gives us:
+
+* reproducibility
+* correlation
+* auditability
+* comparable benchmarks
+* deterministic question definitions
+* easier A/B evaluation
+* easier model replacement
+
+And it avoids the enormous prompt:
+
+> "Analyze all of this and tell me everything suspicious..."
+
+---
+
+# So my recommendation for 000.8.1
+
+I'd explicitly add a section:
+
+### **Typed Decision Algebra**
+
+and make it a **native V4 capability**, inspired by the TypeSafe/Jev approach but with no dependency.
+
+Something like:
+
+```text
+DecisionState
+     │
+     ├── Evidence
+     ├── Question[]
+     │
+     ▼
+DecisionEvaluator
+     │
+     ▼
+TypedDecisionResult[]
+     │
+     ▼
+DecisionComposer
+     │
+     ▼
+SemanticEvaluation
+```
+
+And then make **Jevify/TypeSafe only an experimental reference implementation concept**, not part of the architecture.
+
+That gives us the best of both worlds:
+
+**we capture the genuinely good idea while avoiding coupling to a 0.1.0-SNAPSHOT external project.** ([GitHub][1])
+
+I think this is actually a **better direction for 000.8.1 than our previous draft**. It turns the spec from "let's evaluate whether this new AI technology is better" into **"let's build a provider-neutral typed semantic evaluation framework, then use it to objectively evaluate AI implementations."**
+
+[1]: https://github.com/spring-ai-community/spring-ai-typesafe "GitHub - spring-ai-community/spring-ai-typesafe: A Java SDK for the TypeSafe AI JEV API, & Spring AI TypeSafe integrations. · GitHub"

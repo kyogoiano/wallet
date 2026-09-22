@@ -1,0 +1,759 @@
+Yes. I reviewed the current **SPEC-000.8.1** as supplied. The evolution is substantially better than the previous version: it has correctly absorbed the “steal the architecture, not the dependency” decision and now defines a native algebra + provider-neutral SPI rather than coupling V4 to `spring-ai-typesafe`.
+
+I would **not ratify it yet**, though. I see a handful of architectural/semantic issues worth fixing first.
+
+## 1. The core direction is right
+
+The strongest part is this architecture:
+
+```text
+DecisionState
+      │
+      ├── DecisionQuestion<T>
+      ├── DecisionQuestion<T>
+      └── DecisionQuestion<T>
+              │
+              ▼
+      DecisionEvaluator
+              │
+              ▼
+      TypedDecisionResult[]
+              │
+              ▼
+       DecisionComposer
+```
+
+with the domain completely independent of Spring AI, Ollama and inference libraries. That's exactly the abstraction we wanted. The spec explicitly establishes this in `REQ-TYPED-001/002` and the provider-neutral SPI in `REQ-TYPED-003`.
+
+The **hot-path airgap** is also now very clear:
+
+> `DecisionEvaluator` is never called by the financial authorization path.
+
+That's consistent with the V4 architecture and `I-FRAUD-001/002`.
+
+So I would **keep the fundamental architecture unchanged**.
+
+---
+
+# 2. `DecisionQuestion<T>` isn't actually type-safe enough yet
+
+This is the biggest design issue I see.
+
+You currently define:
+
+```java
+DecisionQuestion<T>
+```
+
+as a strongly typed question, but then:
+
+```java
+sealed interface DecisionValue
+    permits
+        BooleanDecision,
+        ScoreDecision,
+        ChoiceDecision,
+        UnavailableDecision
+```
+
+There is no demonstrated relationship between `T` and `DecisionValue`.
+
+For example, the compiler should prevent:
+
+```java
+DecisionQuestion<Boolean> Q1
+        ↓
+ScoreDecision(0.87)
+```
+
+But the current specification doesn't establish how that guarantee is achieved.
+
+### I would make this explicit
+
+Something conceptually like:
+
+```java
+public interface DecisionQuestion<T extends DecisionValue> {
+
+    QuestionId id();
+
+    Class<T> valueType();
+
+    DecisionRubric rubric();
+}
+```
+
+Then:
+
+```java
+DecisionQuestion<BooleanDecision>
+DecisionQuestion<ScoreDecision>
+DecisionQuestion<ChoiceDecision>
+```
+
+and:
+
+```java
+public record TypedDecisionResult<T extends DecisionValue>(
+    QuestionId questionId,
+    T value,
+    EvidenceSet evidence,
+    DecisionProvenance provenance
+) {}
+```
+
+Now the "typed" part is real, rather than just being a naming convention.
+
+### Even better
+
+We should consider whether `Class<T>` is sufficient for `ScoreDecision` etc., or whether the question itself should carry the type witness.
+
+The important invariant is:
+
+```text
+Question<T>
+     ↓
+Result<T>
+```
+
+not merely:
+
+```text
+Question<T>
+     ↓
+Result<DecisionValue>
+```
+
+That's the essence of what we're trying to build.
+
+---
+
+# 3. `UnavailableDecision` should not be a DecisionValue in the same semantic sense
+
+This is subtle but important.
+
+You currently define:
+
+```text
+DecisionValue ∈ {
+    BooleanDecision,
+    ScoreDecision,
+    ChoiceDecision,
+    UnavailableDecision
+}
+```
+
+
+
+But semantically:
+
+```text
+TRUE
+FALSE
+0.82
+"MULE"
+```
+
+are **answers**.
+
+Whereas:
+
+```text
+UNAVAILABLE
+```
+
+means:
+
+> there is no answer.
+
+Those are fundamentally different states.
+
+I'd rather model:
+
+```text
+TypedDecisionResult<T>
+    │
+    ├── Answer<T>
+    │      └── T
+    │
+    └── Unavailable
+```
+
+or:
+
+```java
+sealed interface DecisionOutcome<T>
+        permits DecisionAnswered, DecisionUnavailable
+```
+
+Conceptually:
+
+```text
+DecisionQuestion<T>
+       │
+       ▼
+DecisionOutcome<T>
+       │
+       ├── Answer<T>
+       │
+       └── Unavailable
+```
+
+This gives us an important property:
+
+**absence of evidence/answer cannot accidentally be treated as a legitimate decision value.**
+
+That's especially important for fraud.
+
+---
+
+# 4. `FabricatedConfidence = 0` is incorrect semantically
+
+This line should change:
+
+```text
+InferenceUnavailable ⇒ DecisionValue = UnavailableDecision,
+FabricatedConfidence = 0
+```
+
+
+
+Because `0` is itself information.
+
+It can be interpreted as:
+
+> "The system has zero confidence in this conclusion."
+
+But `Unavailable` means:
+
+> "The system did not produce a conclusion."
+
+Those are not equivalent.
+
+I would say:
+
+```text
+InferenceUnavailable
+    ⇒
+DecisionOutcome = UNAVAILABLE
+    AND
+Confidence = ABSENT
+```
+
+or simply:
+
+```text
+UnavailableDecision MUST NOT contain confidence.
+```
+
+This is a small change but an important one.
+
+---
+
+# 5. `I-TYPED-004` needs a little more precision
+
+Current formulation:
+
+```text
+Quality(Cand,T) >= Quality(Base,T)
+BrierScore(Cand) <= BrierScore(Base)
+```
+
+
+
+The direction is correct, but **"Quality" isn't defined**.
+
+More importantly, not every question is necessarily probabilistic.
+
+For:
+
+```text
+Q1 → Boolean
+Q2 → Boolean
+Q3 → Score
+```
+
+Brier score makes sense only if we're treating the output as a calibrated probability/probabilistic prediction.
+
+It doesn't automatically apply to:
+
+```text
+ChoiceDecision
+```
+
+or arbitrary categorical answers.
+
+I'd change the gate to:
+
+```text
+Candidate MUST be evaluated against the baseline using
+task-appropriate metrics.
+
+Classification:
+  precision / recall / F1 / AUROC as applicable
+
+Probabilistic score:
+  Brier / calibration error / reliability
+
+Latency:
+  P50 / P95 / P99
+
+Determinism:
+  repeated evaluation variance
+
+Grounding:
+  evidence attribution validity
+```
+
+And define the benchmark **per question/workload**.
+
+---
+
+# 6. "Non-inferior" needs a threshold
+
+This:
+
+```text
+Quality(Candidate) >= Quality(Baseline)
+```
+
+sounds mathematically clean but is actually too strict in one direction and too loose in another.
+
+Example:
+
+```text
+Baseline F1 = 0.821
+Candidate F1 = 0.8209
+```
+
+Technically it fails.
+
+But:
+
+```text
+Baseline F1 = 0.821
+Candidate F1 = 0.8211
+```
+
+technically passes.
+
+We need a benchmark tolerance.
+
+I'd introduce something like:
+
+```text
+NON_INFERIORITY_MARGIN
+```
+
+defined per metric/workload.
+
+For example:
+
+```text
+Candidate quality MUST NOT degrade beyond the
+predefined workload-specific non-inferiority margin.
+```
+
+And importantly, **the margin must be fixed before running the benchmark**, otherwise we can accidentally tune the acceptance criteria after seeing results.
+
+---
+
+# 7. The "4 gates" are good, but the name `Gate 0` is confusing
+
+You say:
+
+> Gate 0 benchmark harness ... across 4 distinct gates
+
+then:
+
+```text
+1. Contract
+2. Grounding
+3. Predictive correctness
+4. Calibration
+```
+
+
+
+I'd simply call this:
+
+### Four-Gate Evaluation Protocol
+
+Then:
+
+```text
+G1 Contract Validity
+G2 Evidence Grounding
+G3 Predictive Correctness
+G4 Calibration
+```
+
+And separately have:
+
+```text
+Benchmark Harness
+```
+
+No need for `Gate 0`.
+
+---
+
+# 8. We are missing two very important benchmark dimensions
+
+Our previous version explicitly cared about **latency, cost and determinism**.
+
+The new version has:
+
+* contract
+* grounding
+* predictive correctness
+* calibration
+
+But latency and resource consumption disappeared from the formal gates.
+
+That's a regression.
+
+The spec's intent still talks about benchmarking, but `REQ-TYPED-008` no longer explicitly evaluates:
+
+```text
+P50/P95/P99 latency
+CPU
+memory
+cost
+```
+
+I would restore them.
+
+Maybe:
+
+### Gate 5 — Operational Performance
+
+```text
+P50 / P95 / P99 evaluation latency
+CPU allocation
+heap/RSS
+throughput
+resource ceiling
+```
+
+Or, if you want exactly four gates, make operational performance part of the workload acceptance gate.
+
+I'd prefer **five gates**, because operational behavior isn't the same thing as semantic correctness.
+
+---
+
+# 9. `REQ-TYPED-004` says concurrent evaluation, but concurrency is an implementation detail
+
+This is another thing I'd change.
+
+Current requirement:
+
+> evaluator MUST evaluate multiple questions ... concurrently.
+
+The architectural requirement should really be:
+
+> multiple questions MUST be evaluable independently against the same immutable snapshot.
+
+Whether they're actually executed concurrently depends on the evaluator.
+
+For example, an evaluator may have:
+
+```text
+batch inference
+```
+
+where concurrency doesn't make sense.
+
+Or:
+
+```text
+single SLM request containing multiple typed questions
+```
+
+which is logically concurrent but physically sequential.
+
+I'd change it to:
+
+> The evaluator MUST evaluate multiple questions against the same immutable `DecisionState` snapshot without cross-question mutation. Implementations MAY execute questions concurrently or as a provider-native batch.
+
+That is much more future-proof.
+
+---
+
+# 10. "Full cryptographic provenance" is stronger than what the requirements currently guarantee
+
+Intent says:
+
+> full cryptographic provenance.
+
+But `REQ-TYPED-004` only explicitly records:
+
+* timestamp
+* snapshot hash
+* evaluator version
+
+
+
+I'd define provenance explicitly:
+
+```text
+DecisionProvenance
+├── snapshotId
+├── snapshotHash
+├── evidenceReferences
+├── evaluatorId
+├── evaluatorVersion
+├── modelId
+├── modelVersion
+├── evaluationTimestamp
+└── rubricVersion
+```
+
+The **rubric version** is particularly important.
+
+Otherwise:
+
+```text
+Q1 = "behavior inconsistent..."
+```
+
+could change its interpretation while retaining the same question ID.
+
+So:
+
+```text
+QuestionId
+RubricVersion
+```
+
+should both participate in reproducibility.
+
+---
+
+# 11. `EvidenceGrounding` needs one clarification
+
+You currently say:
+
+> Direct citation of valid evidence references in `DecisionProvenance`.
+
+I would avoid the word **citation** here because we're not talking about document citations in the normal sense.
+
+Use:
+
+```text
+EvidenceReference
+```
+
+with references such as:
+
+```text
+DEVICE_SIGNAL:abc123
+GRAPH_EDGE:def456
+BEHAVIOR_WINDOW:2026-09-22T...
+TRANSACTION:operationId
+```
+
+Then the evaluator can say:
+
+```text
+Q2 = TRUE
+
+Evidence:
+  GRAPH_EDGE:...
+  GRAPH_CLUSTER:...
+  VELOCITY_WINDOW:...
+```
+
+This makes grounding machine-verifiable.
+
+---
+
+# 12. The appliance requirement has a traceability problem
+
+Cross-feature matrix says:
+
+> `REQ-TYPED-008`: Evaluator runs within bounded appliance profile budget.
+
+But `REQ-TYPED-008` is actually the benchmark harness requirement.
+
+So the matrix is referencing the wrong requirement.
+
+I'd fix this with a dedicated:
+
+```text
+REQ-TYPED-012 [SHOULD]
+```
+
+or similar:
+
+> Candidate evaluation workloads MUST declare CPU/memory/resource limits appropriate to the target appliance profile.
+
+And then the matrix points to that.
+
+This is exactly the sort of traceability issue worth fixing before ratification.
+
+---
+
+# 13. The `<15ms` test should be separated from the `<2ms` invariant
+
+Current test:
+
+> Core transfer completes in `<15ms`; zero invocation of `DecisionEvaluator`.
+
+But the architecture says:
+
+```text
+Hot-path authorization P99 < 2ms
+```
+
+So a reviewer could ask:
+
+> Why does the test accept 15ms if the invariant is 2ms?
+
+I think you intended `<15ms` as **end-to-end Core transfer**, while `<2ms` is the authorization evaluation budget.
+
+Make that explicit:
+
+```text
+Fraud authorization evaluation:
+    P99 < 2ms
+
+Core transfer end-to-end:
+    <15ms
+```
+
+Otherwise it looks like the test weakens the invariant.
+
+---
+
+# 14. The most important architectural addition I'd make
+
+Given our decision from the previous discussion, I would add a **DecisionQuestion catalog** concept.
+
+Instead of questions being arbitrary strings:
+
+```text
+Q1
+Q2
+Q3
+```
+
+we should have versioned domain definitions:
+
+```java
+public final class FraudDecisionQuestions {
+
+    public static final DecisionQuestion<BooleanDecision>
+        BEHAVIOR_ANOMALY = ...;
+
+    public static final DecisionQuestion<BooleanDecision>
+        COORDINATED_TOPOLOGY = ...;
+
+    public static final DecisionQuestion<ScoreDecision>
+        DEVICE_NETWORK_RISK = ...;
+}
+```
+
+Each question has:
+
+```text
+QuestionId
+RubricVersion
+ExpectedValueType
+EvidenceRequirements
+EvaluationPolicy
+```
+
+That is the part I think is **the real thing we're stealing from TypeSafe**.
+
+Not the library.
+
+Not its API.
+
+The concept of:
+
+> **typed atomic semantic questions as first-class application/domain objects.**
+
+---
+
+# My proposed final architecture
+
+I'd make 8.1 explicitly establish this:
+
+```text
+                         ┌───────────────────────┐
+                         │    DecisionState      │
+                         │ immutable evidence    │
+                         └───────────┬───────────┘
+                                     │
+                     ┌───────────────┼───────────────┐
+                     │               │               │
+                     ▼               ▼               ▼
+              Question<Q1>     Question<Q2>     Question<Q3>
+              Boolean          Boolean          Score
+                     │               │               │
+                     └───────────────┼───────────────┘
+                                     ▼
+                           DecisionEvaluator SPI
+                                     │
+                    ┌────────────────┼────────────────┐
+                    │                │                │
+             Deterministic        Local SLM      Experimental
+               evaluator          evaluator        evaluator
+                    │                │                │
+                    └────────────────┼────────────────┘
+                                     ▼
+                            DecisionOutcome<T>
+                              │             │
+                           Answer       Unavailable
+                              │
+                              ▼
+                       DecisionComposer
+                              │
+                              ▼
+                     SemanticEvaluation
+                              │
+                     ┌────────┴────────┐
+                     ▼                 ▼
+                 analyst            benchmark
+```
+
+And the hard architectural boundary remains:
+
+```text
+                 FINANCIAL HOT PATH
+                        │
+          Rules + ONNX + Dragonfly
+                        │
+                        X
+                        │
+              DecisionEvaluator
+                        │
+                 NEARLINE ONLY
+```
+
+---
+
+## Verdict on the current draft
+
+I would classify it:
+
+| Area                       | Current state               |
+| -------------------------- | --------------------------- |
+| Architecture               | **Ready**                   |
+| Provider neutrality        | **Ready**                   |
+| Hot-path isolation         | **Ready**                   |
+| Native typed algebra       | **Needs refinement**        |
+| Generic type safety        | **Needs refinement**        |
+| Unavailable semantics      | **Needs correction**        |
+| Benchmark methodology      | **Needs refinement**        |
+| Provenance                 | **Needs expansion**         |
+| Cross-feature traceability | **One correction**          |
+| Test specification         | **Good, minor corrections** |
+| Dependency decision        | **Correct**                 |
+
+So I would **keep the spec's structure and most of its wording**, rather than rewrite it from scratch.
+
+The next revision should primarily make the algebra mathematically/type-system coherent and make the benchmark protocol reproducible. In particular, I'd fix **`DecisionQuestion<T> → DecisionOutcome<T>`**, separate **Answer vs Unavailable**, restore **latency/resource/determinism gates**, and formalize **question/rubric/evidence versioning**.
+
+Those changes would turn 8.1 from a good AI experiment specification into a genuinely reusable **domain-level decision framework** for V4.

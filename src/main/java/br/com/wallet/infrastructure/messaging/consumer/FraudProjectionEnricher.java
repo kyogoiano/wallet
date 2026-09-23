@@ -27,14 +27,19 @@ public class FraudProjectionEnricher {
      * @param fraudEvent fraud Event data
      */
     public void processReviewEvent(@NonNull final FraudEvent fraudEvent) {
+        processReviewEvent(fraudEvent, "default");
+    }
+
+    public void processReviewEvent(@NonNull final FraudEvent fraudEvent, String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
         var result = commands.<List<Long>>eval(
                 RedisScripts.REVIEW_COUNT_PROTECTED_SCRIPT,
                 ScriptOutputType.MULTI,
                 new String[]{
                         "fraud:op:" + fraudEvent.operationId(),
-                        userKey(fraudEvent.from(), "review_count"),
-                        userKey(fraudEvent.from(), "risk_score"),
-                        userKey(fraudEvent.from(), "blocked")
+                        userKey(effectiveTenant, fraudEvent.from(), "review_count"),
+                        userKey(effectiveTenant, fraudEvent.from(), "risk_score"),
+                        userKey(effectiveTenant, fraudEvent.from(), "blocked")
                 },
                 String.valueOf(30_000),              // replay TTL
                 String.valueOf(fraudEvent.riskScore()),   // risk increment
@@ -62,18 +67,22 @@ public class FraudProjectionEnricher {
         }
 
         if (fraudEvent.triggeredRules().contains(RuleType.GLOBAL_VELOCITY)) {
-            commands.incr("user:" + fraudEvent.from() + ":velocity_hits");
+            commands.incr("user:" + effectiveTenant + ":" + fraudEvent.from() + ":velocity_hits");
         }
-
     }
 
     public void processBlockEvent(@NonNull final FraudEvent fraudEvent) {
+        processBlockEvent(fraudEvent, "default");
+    }
+
+    public void processBlockEvent(@NonNull final FraudEvent fraudEvent, String tenantId) {
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
         var result = commands.<List<Long>>eval(
                 RedisScripts.BLOCK_PROTECTED_SCRIPT,
                 ScriptOutputType.MULTI,
                 new String[]{
                         "fraud:op:" + fraudEvent.operationId(),
-                        userKey(fraudEvent.from(), "blocked")
+                        userKey(effectiveTenant, fraudEvent.from(), "blocked")
                 },
                 "30000",   // replay TTL
                 "3600"     // block TTL (or "0" for permanent)
@@ -93,7 +102,7 @@ public class FraudProjectionEnricher {
         );
     }
 
-    private String userKey(UUID userId, String suffix) {
-        return "user:" + userId + ":" + suffix;
+    private String userKey(String tenantId, UUID userId, String suffix) {
+        return "user:" + tenantId + ":" + userId + ":" + suffix;
     }
 }

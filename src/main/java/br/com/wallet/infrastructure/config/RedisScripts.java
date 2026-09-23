@@ -8,10 +8,10 @@ public class RedisScripts {
                 -- ============================================
            
                 -- KEYS:
-                -- 1: replay key              -> fraud:op:{operationId}
-                -- 2: review counter key      -> user:{userId}:review_count
-                -- 3: risk score key          -> user:{userId}:risk_score
-                -- 4: blocked flag key        -> user:{userId}:blocked
+                -- 1: replay key              -> fraud:op:{operationId} (global UUID/ULID, I-DF20-007)
+                -- 2: review counter key      -> user:{tenantId}:{userId}:review_count
+                -- 3: risk score key          -> user:{tenantId}:{userId}:risk_score
+                -- 4: blocked flag key        -> user:{tenantId}:{userId}:blocked
            
                 -- ARGV:
                 -- 1: replay TTL (ms)         -> e.g. 30000
@@ -82,8 +82,8 @@ public class RedisScripts {
         -- ============================================
     
         -- KEYS:
-        -- 1: replay key         -> fraud:op:{operationId}
-        -- 2: blocked key        -> user:{userId}:blocked
+        -- 1: replay key         -> fraud:op:{operationId} (global UUID/ULID, I-DF20-007)
+        -- 2: blocked key        -> user:{tenantId}:{userId}:blocked
     
         -- ARGV:
         -- 1: replay TTL (ms)    -> e.g. 30000

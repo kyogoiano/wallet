@@ -121,21 +121,23 @@ public class NewRecipientStore {
     public CompletionStage<RecipientRisk> checkNewRecipient(@NonNull final UUID senderId,
                                                             @Nullable final UUID recipientId,
                                                             @NonNull Instant timestamp) {
-        return checkNewRecipient(senderId, recipientId, timestamp, "default");
+        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for recipient check");
     }
 
     public CompletionStage<RecipientRisk> checkNewRecipient(@NonNull final UUID senderId,
                                                             @Nullable final UUID recipientId,
                                                             @NonNull Instant timestamp,
                                                             final String tenantId) {
+        if (tenantId == null || tenantId.isBlank() || tenantId.length() > 64) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
+        }
 
         if (recipientId == null) {
             return CompletableFuture.completedFuture(new RecipientRisk.Normal());
         }
 
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
-        String key1 = "fraud:" + effectiveTenant + ":user:" + senderId + ":recipients";
-        String key2 = "fraud:" + effectiveTenant + ":recipient:" + recipientId + ":senders";
+        String key1 = "tenant:" + tenantId + ":sender:" + senderId;
+        String key2 = "tenant:" + tenantId + ":recipient:" + recipientId;
 
         return commands.<List<Long>>eval(
                 NEW_RECIPIENT_SCRIPT,

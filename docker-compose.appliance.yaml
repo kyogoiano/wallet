@@ -79,7 +79,7 @@ services:
       - appliance-net
 
   dragonfly:
-    image: docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0
     container_name: wallet-appliance-dragonfly
     restart: always
     ports:
@@ -89,7 +89,8 @@ services:
       - "-c"
       - |
         mkdir -p /var/run/redis
-        chmod 777 /var/run/redis
+        chown -R 999:10001 /var/run/redis 2>/dev/null || chown -R dfly:10001 /var/run/redis 2>/dev/null || true
+        chmod 770 /var/run/redis
         rm -f /var/run/redis/redis.sock
         exec entrypoint.sh "$$@"
       - "--"
@@ -97,8 +98,8 @@ services:
       - "--logtostderr"
       - "--proactor_threads=2"
       - "--unixsocket=/var/run/redis/redis.sock"
-      - "--unixsocketperm=777"
-      - "--maxmemory=512mb"
+      - "--unixsocketperm=770"
+      - "--maxmemory=768mb"
       - "--cache_mode=true"
     volumes:
       - ./dragonfly-data:/data

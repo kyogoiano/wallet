@@ -396,15 +396,16 @@ gantt
 
 ### 🔹 Phase 000.9.4: DragonflyDB 2.0 Migration & Codebase-Wide State Audit
 **Spec Identifier**: [`SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit`](file:///.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md)  
-**Status**: 🟡 **Proposed (Awaiting Ratification per Histories 61 & 62)**  
+**Status**: 🟢 **Completed & Ratified**  
 **Core Abstraction**: `Dragonfly 2.0 Infrastructure, 3-Gate Upgrade Verification, Dual-Version Behavioral Oracle & DF20-AUDIT State Inventory`
 
 - **Intent**: Upgrade from DragonflyDB 1.40 to 2.0 (released Sept 17, 2026: ~54% higher throughput, 35% lower latency, 30–40% lower memory). Strictly forbids a "blind upgrade". Enforces a 3-Gate verification protocol (Compatibility, Behavioral Correctness, Performance) with zero performance regression (`I-DF20-002`), continuous sorted-set sliding window consistency (`I-DF20-003`), dual-version behavioral parity oracle (`DragonflyBehavioralCompatibilityIT`), bounded emergency timeouts ($\le 20\text{ms}$) with zero DB thread blocking, and a comprehensive codebase state audit (`DF20-AUDIT`).
 - **Spec Kit Artifacts**:
-  - [`.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Proposed)
-  - `plans/PLAN-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md` (Pending)
-  - `tasks/TASKS-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md` (Pending)
-  - `summaries/SUMMARY-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md` (Pending)
+  - [`.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Ratified)
+  - [`.spec/architecture/ARCH-000.9.4-dragonfly-2.0-and-state-audit.md`](file:///.spec/architecture/ARCH-000.9.4-dragonfly-2.0-and-state-audit.md) (Ratified)
+  - [`plans/PLAN-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/plans/PLAN-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Approved)
+  - [`tasks/TASKS-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/tasks/TASKS-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Completed)
+  - [`summaries/SUMMARY-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/summaries/SUMMARY-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Ratified)
 
 ---
 

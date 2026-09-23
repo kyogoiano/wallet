@@ -1,0 +1,852 @@
+Sim. Agora temos o **SPEC-000.9.4** correto. Fiz uma revisão de consistência interna, rastreabilidade e das invariantes, comparando também com o ARCH/PLAN-000.9.4 que você havia enviado antes.
+
+Minha leitura: **a direção está correta, mas eu não ratificaria esta versão como “final” sem alguns ajustes importantes**. Há principalmente **3 problemas de arquitetura/contrato** que eu corrigiria antes de gerar as TASKS.
+
+---
+
+# 1. O que o SPEC está tentando garantir
+
+O escopo está bem definido: migrar Dragonfly 1.40 → 2.0 sem fazer um upgrade cego, verificando cliente/protocolo, semântica dos scripts/TTL/keys e regressão de performance. O próprio SPEC explicita os três gates e o inventário DF20-AUDIT.
+
+As cinco invariantes principais também estão coerentes com o restante da arquitetura:
+
+* latência UDS/TCP;
+* zero regressão;
+* sliding window contínua;
+* isolamento por tenant;
+* timeout/degradação sem bloquear threads de transação.
+
+Isso está alinhado com o que já estabelecemos em `000.9.3`: **Dragonfly é estado quente não-autoritativo; PostgreSQL continua sendo a fonte de verdade financeira**.
+
+---
+
+# 2. Problema #1 — “3-Gate” na realidade virou 4 gates
+
+Este é pequeno, mas eu corrigiria porque afeta a estrutura de PLAN/TASKS.
+
+O SPEC diz:
+
+> “3-Gate Migration & Codebase-Wide State Audit Protocol”
+
+mas logo depois define:
+
+1. Compatibility
+2. Behavioral Correctness
+3. Performance
+4. DF20-AUDIT Improvement Inventory
+
+E no MoSCoW o inventário aparece como “Gate 3”, enquanto performance praticamente desaparece como requisito explícito de Gate.
+
+### Eu faria:
+
+**3 Gates + 1 Cross-Cutting Audit**
+
+```text
+GATE 1 — Compatibility & Infrastructure
+GATE 2 — Behavioral Correctness & Oracle
+GATE 3 — Performance / Non-Regression
+
+CROSS-CUTTING — DF20-AUDIT
+```
+
+Isso é melhor porque o DF20-AUDIT não é realmente um gate de migração. Ele é o **inventário que alimenta os Gates 1–3**.
+
+---
+
+# 3. Problema #2 — I-DF20-002 está forte demais
+
+Este é o ponto mais importante.
+
+Hoje temos:
+
+```text
+Latency DF2.0 <= Latency DF1.40
+Throughput DF2.0 >= Throughput DF1.40
+Memory DF2.0 <= Memory DF1.40
+```
+
+como **invariante MUST**.
+
+Isso parece bom, mas é uma especificação problemática para benchmark.
+
+Imagine:
+
+```text
+DF 1.40: P99 = 0.42 ms
+DF 2.0 : P99 = 0.43 ms
+```
+
+Você poderia ter uma migração funcionalmente perfeita, dentro do SLA arquitetural, mas o SPEC consideraria a versão 2.0 inválida.
+
+Além disso, benchmark de memória depende de:
+
+* dataset;
+* cardinalidade;
+* TTL;
+* allocator;
+* fragmentation;
+* workload;
+* warm-up;
+* RSS vs memória lógica;
+* configuração de `maxmemory`.
+
+Então eu separaria **invariante operacional** de **target de benchmark**.
+
+### Sugestão
+
+```text
+I-DF20-002 — Non-Regression Against Baseline
+
+Dragonfly 2.0 MUST remain within the established
+production-equivalent acceptance envelope defined for V4.
+
+No statistically significant regression is permitted
+for the critical hot-path metrics.
+
+Benchmark targets:
+- memory reduction >= 30%
+- throughput improvement >= 30%
+```
+
+E aí:
+
+```text
+PASS = dentro do envelope obrigatório
+TARGET = >=30% improvement
+```
+
+Ou seja, os 30% continuam sendo um objetivo mensurável, mas não contaminam a definição de correção.
+
+O próprio histórico citado pelo SPEC aparentemente já chegou nessa conclusão: vendor claims são benchmark targets, não invariants.
+
+---
+
+# 4. Problema #3 — `I-DF20-001` mistura SLO do sistema com capacidade do ambiente
+
+Hoje:
+
+```text
+P99 Dragonfly UDS < 0.5ms
+P99 Dragonfly TCP < 1.0ms
+```
+
+é tratado como **invariante universal**.
+
+Eu manteria esses números, mas mudaria a classificação.
+
+Porque:
+
+```text
+0.5ms
+1.0ms
+```
+
+dependem muito do appliance/hardware/runtime.
+
+O que é realmente arquitetural é:
+
+```text
+Fraud Gate P99 < 2ms
+```
+
+já estabelecido anteriormente.
+
+Dragonfly:
+
+```text
+UDS P99 < 0.5ms
+TCP P99 < 1ms
+```
+
+deveria ser o **performance envelope esperado para o deployment profile V4**, medido pelo benchmark.
+
+Assim:
+
+```text
+I-FRAUD-002
+    ↓
+Fraud Gate P99 < 2ms
+
+DF20 benchmark envelope
+    ↓
+UDS < 0.5ms
+TCP < 1ms
+```
+
+Isso evita que uma pequena variação de infraestrutura seja confundida com quebra de arquitetura.
+
+---
+
+# 5. Problema #4 — `REQ-DF20-008` contém uma armadilha de atomicidade
+
+Esse é o problema técnico que considero mais importante no SPEC.
+
+Está escrito:
+
+> eliminar round-trips via pipelining e substituir GET seguido de SET por equivalentes atômicos.
+
+Mas:
+
+```text
+pipeline(GET)
+pipeline(SET)
+```
+
+**não significa atomicidade**.
+
+Pipeline reduz round trips, mas não transforma operações independentes em uma operação atomicamente indivisível.
+
+Portanto precisamos separar:
+
+### Performance
+
+```text
+pipeline
+```
+
+de:
+
+### Atomicidade
+
+```text
+single atomic command
+Lua
+MULTI/EXEC
+```
+
+ou outra primitiva comprovadamente atômica.
+
+Eu mudaria para:
+
+```text
+REQ-DF20-008 [SHOULD]
+
+Eliminate redundant round-trips where semantics permit.
+
+Pipelining MAY be used for batching independent operations.
+
+Whenever read-modify-write atomicity is required,
+the implementation MUST use a single atomic command,
+transactional primitive, or Lua script.
+
+Pipelining alone MUST NOT be considered atomic.
+```
+
+Isso é particularmente importante para o nosso fraud state.
+
+---
+
+# 6. Problema #5 — “exact behavioral equivalence” precisa de equivalência semântica
+
+`REQ-DF20-013` está conceitualmente excelente:
+
+```text
+Result_DF1.40(op) ≡ Result_DF2.0(op)
+```
+
+e exige o `DragonflyBehavioralCompatibilityIT`.
+
+Mas precisamos definir **o que significa `≡`**.
+
+Não devemos exigir necessariamente igualdade byte-a-byte para coisas como:
+
+* ordem de campos de hash;
+* representações internas;
+* timestamps;
+* TTL residual;
+* respostas cujo ordering não faz parte do contrato.
+
+Eu adicionaria:
+
+```text
+≡ means normalized semantic equivalence,
+not necessarily byte-for-byte equality.
+```
+
+E definiria uma normalização:
+
+```text
+normalize(result)
+    ↓
+canonical representation
+    ↓
+compare
+```
+
+Para:
+
+* Lua result;
+* counters;
+* block state;
+* TTL;
+* sorted-set contents;
+* rate-limit result.
+
+---
+
+# 7. Problema #6 — TTL precisa distinguir “expiração” de “eviction”
+
+A frase:
+
+> “expire deterministically without ghost retention or premature eviction under memory pressure”
+
+mistura dois fenômenos diferentes:
+
+### TTL expiration
+
+```text
+TTL reaches zero
+→ key expires
+```
+
+### Memory eviction
+
+```text
+memory pressure
+→ key may be evicted before TTL
+```
+
+Para o nosso sistema isso é fundamental porque Dragonfly é **não-autoritativo**.
+
+Eu especificaria:
+
+```text
+TTL expiration semantics
+≠
+memory eviction semantics
+```
+
+E principalmente:
+
+> O que acontece quando um risk profile/velocity state desaparece por eviction?
+
+Isso precisa estar amarrado a `000.9.3`:
+
+```text
+cache unavailable / missing
+        ↓
+deterministic fallback
+        ↓
+não pode transformar ausência de estado em autorização
+```
+
+O SPEC atual diz “fallback to deterministic rules” no matrix, mas não define suficientemente a semântica de **missing/evicted**.
+
+Esse deveria virar um requisito explícito.
+
+---
+
+# 8. Problema #7 — Tenant scoping está bom, mas precisa de um contrato de key namespace
+
+`I-DF20-004` está correto conceitualmente:
+
+```text
+tenant-scoped key
+    ↓
+tenantId
+```
+
+e diferencia corretamente keys globais.
+
+Mas falta uma coisa importante: **canonicalização do tenantId na composição da chave**.
+
+Já temos:
+
+```text
+tenantId <= 64
+```
+
+em `000.9.3`.
+
+Eu colocaria algo como:
+
+```text
+Every tenant-scoped key MUST use the canonical tenant-key
+encoding defined by SPEC-000.9.3.
+
+Raw/unvalidated tenant identifiers MUST NOT be concatenated
+into Dragonfly keys.
+```
+
+E também:
+
+```text
+tenantId missing
+    → TenantContextMissingException
+```
+
+Isso aparece somente no teste, não no requisito estrutural.
+
+---
+
+# 9. Problema #8 — Global `fraud:op:{operationId}` precisa de contrato explícito
+
+Aqui temos uma questão que já apareceu na arquitetura de segurança.
+
+Se replay/idempotency state for:
+
+```text
+fraud:op:{operationId}
+```
+
+e não:
+
+```text
+fraud:op:{tenantId}:{operationId}
+```
+
+então `operationId` precisa ser explicitamente **globalmente único**.
+
+Caso contrário:
+
+```text
+Tenant A
+operationId = X
+
+Tenant B
+operationId = X
+```
+
+pode haver colisão.
+
+Eu prefiro manter global **se** o contrato de `operationId` for:
+
+```text
+globally unique UUID/ULID
+```
+
+e isso ficar explícito.
+
+Alternativamente:
+
+```text
+fraud:op:{tenantId}:{operationId}
+```
+
+é mais naturalmente alinhado ao modelo multi-tenant.
+
+Mas não deixaria isso implícito.
+
+---
+
+# 10. Problema #9 — `I-DF20-005` está correto, mas falta definir o ponto de isolamento
+
+A intenção é excelente:
+
+```text
+DBTxBlockedByCache = 0
+ThreadLeak(Fallback) = 0
+```
+
+
+
+Mas eu tornaria a arquitetura explícita:
+
+```text
+request
+   ↓
+cache/fraud pre-check
+   ↓
+decision
+   ↓
+BEGIN DB TRANSACTION
+   ↓
+SELECT FOR UPDATE
+```
+
+e **não**:
+
+```text
+BEGIN TRANSACTION
+   ↓
+Dragonfly
+   ↓
+timeout
+```
+
+O matrix atualmente fala em “Transaction Execution Thread”, mas precisamos tornar isso um requisito de ordering.
+
+Sugestão:
+
+```text
+REQ-DF20-014 [MUST]
+
+All Dragonfly operations used for authorization/risk pre-check
+MUST complete before acquisition of the financial DB transaction.
+
+No Dragonfly I/O MAY occur after the DB transaction begins.
+```
+
+Isso casa perfeitamente com a arquitetura que já definimos.
+
+---
+
+# 11. Problema #10 — fallback de 20 ms precisa definir cancelamento
+
+Temos:
+
+```text
+T_emergency <= 20ms
+```
+
+
+
+Mas isso não garante:
+
+```text
+20ms timeout
+→ underlying Redis/Dragonfly operation stops
+```
+
+Precisamos testar:
+
+```text
+timeout
+→ request stops waiting
+→ no thread leak
+→ no unbounded pending command
+→ no resource accumulation
+```
+
+Isso é especialmente importante com Lettuce/reactive/Netty.
+
+Eu acrescentaria uma requirement:
+
+```text
+REQ-DF20-015 [MUST]
+
+Emergency timeout MUST bound request-side waiting and MUST NOT
+create unbounded in-flight Dragonfly operations or fallback tasks.
+```
+
+---
+
+# 12. Problema #11 — Triad 1 tem uma pequena ambiguidade
+
+Temos:
+
+> “Exactly at threshold + 1 ... violation”
+
+Mas não está claro se:
+
+```text
+threshold
+```
+
+é:
+
+* quantidade;
+* soma monetária;
+* score;
+* ou genericamente uma regra.
+
+Como `I-DF20-003` define **Count e Amount**, o teste deveria ser explícito:
+
+```text
+Count threshold
+```
+
+e
+
+```text
+Amount threshold
+```
+
+como casos separados.
+
+Por exemplo:
+
+```text
+count = 10
+threshold = 10
+→ allowed
+
+count = 11
+threshold = 10
+→ violation
+```
+
+e:
+
+```text
+amount = 9999
+threshold = 10000
+→ allowed
+
+amount = 10001
+threshold = 10000
+→ violation
+```
+
+Isso também evita que o teste fique acoplado à implementação Lua.
+
+---
+
+# 13. Problema #12 — DF20-AUDIT deveria ser MUST, não SHOULD
+
+Esse eu mudaria.
+
+O título do SPEC é:
+
+> **Migration & Codebase-Wide State Audit**
+
+e `REQ-DF20-006` já exige:
+
+> 100% das interações tenant-scoped.
+
+Mas o inventário completo está como:
+
+```text
+REQ-DF20-007 [SHOULD]
+```
+
+Isso abre uma brecha:
+
+```text
+implementamos migration
++
+passamos compatibility tests
++
+não auditamos algum acesso legado
+```
+
+Eu faria:
+
+```text
+REQ-DF20-007 [MUST]
+```
+
+E deixaria otimizações individuais como SHOULD.
+
+Ou seja:
+
+### MUST
+
+```text
+encontrar todos os acessos
+classificar todos
+corrigir todos os E/D críticos
+```
+
+### SHOULD
+
+```text
+otimizar B
+eliminar round-trips
+Caffeine
+etc.
+```
+
+---
+
+# 14. O inventário deveria ter uma coluna que está faltando
+
+Hoje:
+
+```text
+Tenant-Scoped
+Atomic
+Round Trips
+Grade
+```
+
+Eu adicionaria:
+
+```text
+Authority
+```
+
+Porque isso é crítico para nosso modelo.
+
+Exemplo:
+
+| State        | Tenant         | Atomic      | Authority         |
+| ------------ | -------------- | ----------- | ----------------- |
+| Velocity     | YES            | Lua         | Non-authoritative |
+| Risk profile | YES            | command/Lua | Non-authoritative |
+| Block cache  | YES            | atomic      | Non-authoritative |
+| Replay key   | GLOBAL/defined | atomic      | Idempotency guard |
+| Ledger       | YES            | PostgreSQL  | **Authoritative** |
+
+Isso impede que alguém trate Dragonfly como source of truth simplesmente porque o acesso é “atomic”.
+
+---
+
+# 15. Outro ponto: “3-Gate” deveria definir critérios de PASS/FAIL
+
+Atualmente sabemos o que testar, mas não temos completamente a regra de promoção.
+
+Eu criaria:
+
+```text
+GATE 1 PASS
+    client/protocol/transport/commands green
+
+GATE 2 PASS
+    all behavioral oracle tests green
+    tenant audit 100% green
+    no semantic divergence
+
+GATE 3 PASS
+    no statistically significant regression
+    hot-path SLA preserved
+    benchmark targets recorded
+
+PROMOTION
+    Gate 1 = PASS
+    AND Gate 2 = PASS
+    AND Gate 3 = PASS
+```
+
+E:
+
+```text
+SHOULD/COULD failures
+    do not block migration
+    unless promoted to MUST by implementation decision
+```
+
+Isso vai ajudar bastante quando formos montar `PLAN-000.9.4`.
+
+---
+
+# 16. Uma coisa que eu manteria exatamente como está
+
+A parte matemática do sliding window está muito boa:
+
+```text
+t - W < occurredAt <= t
+```
+
+com:
+
+```text
+Count(W,t)
+Amount(W,t)
+```
+
+
+
+Isso é significativamente melhor que uma definição baseada em buckets discretos, porque elimina ambiguidade na fronteira temporal.
+
+Eu preservaria exatamente essa semântica no contrato e faria o teste de boundary explicitamente em:
+
+```text
+occurredAt = t-W
+occurredAt = t-W+ε
+occurredAt = t
+occurredAt = t+ε
+```
+
+Esperado:
+
+```text
+t-W       → excluded
+t-W+ε     → included
+t         → included
+t+ε       → excluded
+```
+
+Esse teste vale ouro para o `DragonflyBehavioralCompatibilityIT`.
+
+---
+
+# 17. Minha proposta de estrutura final
+
+Eu deixaria o SPEC assim:
+
+```text
+SPEC-000.9.4
+│
+├── 0. Pre-flight history
+│
+├── 1. Intent
+│
+├── 2. Invariants
+│   ├── I-DF20-001 Hot-path envelope
+│   ├── I-DF20-002 Non-regression
+│   ├── I-DF20-003 Sliding window semantics
+│   ├── I-DF20-004 Tenant namespace
+│   └── I-DF20-005 DB transaction isolation
+│
+├── 3. Requirements
+│   │
+│   ├── Gate 1 [MUST]
+│   │   ├── client
+│   │   ├── RESP3
+│   │   ├── UDS/TCP
+│   │   └── commands
+│   │
+│   ├── Gate 2 [MUST]
+│   │   ├── Lua
+│   │   ├── TTL
+│   │   ├── tenant isolation
+│   │   ├── behavioral oracle
+│   │   └── degradation semantics
+│   │
+│   ├── Gate 3 [MUST]
+│   │   ├── latency
+│   │   ├── throughput
+│   │   └── memory
+│   │
+│   └── DF20-AUDIT [MUST]
+│       └── exhaustive inventory
+│
+├── 4. Cross-feature impact
+│
+├── 5. Test Triads
+│
+└── 6. Gate promotion criteria
+```
+
+---
+
+# 18. Veredicto da revisão
+
+Eu classificaria o SPEC atual assim:
+
+| Área                          | Situação                               |
+| ----------------------------- | -------------------------------------- |
+| Escopo                        | ✅                                      |
+| Relação com 000.9.3           | ✅                                      |
+| Tenant isolation              | ✅ conceitualmente                      |
+| Sliding-window math           | ✅                                      |
+| Dual-version oracle           | ✅ muito bom                            |
+| Non-authoritative cache model | ⚠️ precisa explicitar eviction/missing |
+| Performance model             | ⚠️ ajustar invariant vs benchmark      |
+| Atomicidade                   | ⚠️ corrigir pipeline ≠ atomic          |
+| Timeout/degradation           | ⚠️ definir cancellation/in-flight      |
+| DF20 audit                    | ⚠️ deveria ser MUST                    |
+| Key namespace                 | ⚠️ falta canonicalização               |
+| Global operation key          | ⚠️ falta contrato de unicidade         |
+| Gate structure                | ⚠️ 3 gates + audit, não 4              |
+| Test triads                   | ⚠️ melhorar boundary semantics         |
+| Promotion criteria            | ❌ faltando                             |
+
+### Minha recomendação para a próxima versão
+
+**Não precisamos reescrever o SPEC inteiro.** A arquitetura fundamental está correta. Eu faria um **SPEC-000.9.4 Rev.1**, mantendo os IDs existentes e acrescentando apenas:
+
+```text
+I-DF20-006  — Cache degradation semantics
+REQ-DF20-014 — Cache-before-transaction ordering
+REQ-DF20-015 — Timeout/in-flight boundedness
+REQ-DF20-016 — Canonical tenant key encoding
+```
+
+e corrigiria:
+
+1. `I-DF20-001` → performance envelope, não universal invariant.
+2. `I-DF20-002` → non-regression + targets separados.
+3. `REQ-DF20-007` → **MUST**.
+4. `REQ-DF20-008` → deixar explícito que pipeline não é atomicidade.
+5. `REQ-DF20-013` → definir `≡` como **semantic normalized equivalence**.
+6. separar TTL expiration de memory eviction.
+7. definir `operationId` global vs tenant-scoped.
+8. transformar “3-Gate” em **3 Gates + DF20-AUDIT**.
+9. adicionar critérios objetivos de promoção.
+10. reforçar os testes de boundary do sliding window.
+
+**Depois disso eu consideraria o SPEC pronto para PLAN/TASKS.**
+
+E há uma conexão importante com o PLAN-000.9.4 que você mandou antes: **a correção de `HSET + EXPIRE` como “pipelined atomic submission” precisa ser feita no PLAN também**. Pipeline pode reduzir os round-trips, mas não deve ser usado como garantia de atomicidade. Isso é uma inconsistência que vale corrigir antes de começarmos a implementação.

@@ -35,6 +35,7 @@ public class RedisRiskProfileStore implements RiskProfileStore {
         Objects.requireNonNull(subject, "subject cannot be null");
         Objects.requireNonNull(profile, "profile cannot be null");
         Objects.requireNonNull(ttl, "ttl cannot be null");
+        validateCanonicalTenantId(subject.tenantId());
 
         String key = subject.toKey();
         Map<String, String> fields = new HashMap<>(10);
@@ -50,8 +51,9 @@ public class RedisRiskProfileStore implements RiskProfileStore {
         fields.put("updated_at", String.valueOf(profile.updatedAt().toEpochMilli()));
 
         try {
-            redisCommands.hset(key, fields).toCompletableFuture().join();
-            redisCommands.expire(key, Math.max(1, ttl.toSeconds())).toCompletableFuture().join();
+            var f1 = redisCommands.hset(key, fields).toCompletableFuture();
+            var f2 = redisCommands.expire(key, Math.max(1, ttl.toSeconds())).toCompletableFuture();
+            java.util.concurrent.CompletableFuture.allOf(f1, f2).join();
             log.debug("Cached risk profile for {} with TTL {}s", key, ttl.toSeconds());
         } catch (Exception e) {
             log.error("Failed to cache risk profile for key {}: {}", key, e.getMessage());
@@ -62,6 +64,7 @@ public class RedisRiskProfileStore implements RiskProfileStore {
     @NonNull
     public Optional<RiskProfile> getProfile(@NonNull final RiskSubject subject) {
         Objects.requireNonNull(subject, "subject cannot be null");
+        validateCanonicalTenantId(subject.tenantId());
 
         String key = subject.toKey();
         try {
@@ -95,10 +98,17 @@ public class RedisRiskProfileStore implements RiskProfileStore {
     @Override
     public void evictProfile(@NonNull final RiskSubject subject) {
         Objects.requireNonNull(subject, "subject cannot be null");
+        validateCanonicalTenantId(subject.tenantId());
         try {
             redisCommands.del(subject.toKey()).toCompletableFuture().join();
         } catch (Exception e) {
             log.warn("Failed evicting risk profile for key {}: {}", subject.toKey(), e.getMessage());
+        }
+    }
+
+    private void validateCanonicalTenantId(String tenantId) {
+        if (tenantId == null || tenantId.isBlank() || tenantId.length() > 64) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
         }
     }
 }

@@ -28,6 +28,7 @@ public class IntegrationTestBase {
      */
     @Bean
     @ServiceConnection
+    @org.springframework.context.annotation.Conditional(DockerAvailableCondition.class)
     public PostgreSQLContainer postgresContainer() {
         return new PostgreSQLContainer(POSTGRES_FSYNC_OFF_IMAGE)
                 .withReuse(true)
@@ -38,26 +39,63 @@ public class IntegrationTestBase {
     }
 
     private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.15.0-alpine");
+    public static final DockerImageName DRAGONFLY_IMAGE_V2 = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0");
+    public static final DockerImageName DRAGONFLY_IMAGE_V1 = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1");
 
-    public static final GenericContainer<?> NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
-            .withExposedPorts(4222, 8222)
-            .withCommand("-js", "-sd", "/tmp", "--auth", "dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n", "-m", "8222")
-            .waitingFor(
-                    Wait.forHttp("/healthz")
-                            .forPort(8222)
-                            .forStatusCode(200)
-            );
-
-    private static final DockerImageName DRAGONFLY_IMAGE = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1");
-    public static final GenericContainer<?> REDIS = new GenericContainer<>(DRAGONFLY_IMAGE)
-            .withExposedPorts(6379)
-            .withCommand("--logtostderr", "--proactor_threads=2")
-            .waitingFor(Wait.forListeningPort());
-    public static final GenericContainer<?> DRAGONFLY = REDIS;
+    private static final boolean DOCKER_AVAILABLE;
+    public static final GenericContainer<?> NATS_CONTAINER;
+    public static final GenericContainer<?> REDIS;
+    public static final GenericContainer<?> DRAGONFLY;
 
     static {
-        NATS_CONTAINER.start();
-        REDIS.start();
+        boolean available = false;
+        try {
+            available = org.testcontainers.DockerClientFactory.instance().isDockerAvailable();
+        } catch (Throwable t) {
+            available = false;
+        }
+        DOCKER_AVAILABLE = available;
+
+        if (DOCKER_AVAILABLE) {
+            NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
+                    .withExposedPorts(4222, 8222)
+                    .withCommand("-js", "-sd", "/tmp", "--auth", "dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n", "-m", "8222")
+                    .waitingFor(
+                            Wait.forHttp("/healthz")
+                                    .forPort(8222)
+                                    .forStatusCode(200)
+                    );
+            REDIS = new GenericContainer<>(DRAGONFLY_IMAGE_V2)
+                    .withExposedPorts(6379)
+                    .withCommand("--logtostderr", "--proactor_threads=2")
+                    .waitingFor(Wait.forListeningPort());
+            DRAGONFLY = REDIS;
+
+            NATS_CONTAINER.start();
+            REDIS.start();
+        } else {
+            NATS_CONTAINER = null;
+            REDIS = null;
+            DRAGONFLY = null;
+        }
+    }
+
+    public static boolean isDockerAvailable() {
+        return DOCKER_AVAILABLE;
+    }
+
+    public static GenericContainer<?> createDragonflyV1Container() {
+        return new GenericContainer<>(DRAGONFLY_IMAGE_V1)
+                .withExposedPorts(6379)
+                .withCommand("--logtostderr", "--proactor_threads=2")
+                .waitingFor(Wait.forListeningPort());
+    }
+
+    public static GenericContainer<?> createDragonflyV2Container() {
+        return new GenericContainer<>(DRAGONFLY_IMAGE_V2)
+                .withExposedPorts(6379)
+                .withCommand("--logtostderr", "--proactor_threads=2")
+                .waitingFor(Wait.forListeningPort());
     }
 
     @Bean

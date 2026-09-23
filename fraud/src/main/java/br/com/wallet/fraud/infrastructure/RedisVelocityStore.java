@@ -73,18 +73,34 @@ public class RedisVelocityStore implements VelocityStore {
     @Bulkhead(name ="redisVelocity", fallbackMethod = "fallbackVelocity")
     @CircuitBreaker(name = "redisVelocity", fallbackMethod = "fallbackVelocity")
     public VelocityResult checkVelocity(@NonNull final UUID userId, @NonNull final UUID operationId, @NonNull final Instant timestamp) {
-        return checkVelocity(userId, operationId, timestamp, "default");
+        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for velocity check");
     }
 
     @Override
     @Bulkhead(name ="redisVelocity", fallbackMethod = "fallbackVelocityTenant")
     @CircuitBreaker(name = "redisVelocity", fallbackMethod = "fallbackVelocityTenant")
     public VelocityResult checkVelocity(@NonNull final UUID userId, @NonNull final UUID operationId, @NonNull final Instant timestamp, final String tenantId) {
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
-        return checkVelocityAsync(userId, operationId, timestamp, effectiveTenant)
+        validateCanonicalTenantId(tenantId);
+        return checkVelocityAsync(userId, operationId, timestamp, tenantId, Long.parseLong(WINDOW))
                 .thenApply(velocityResult -> cacheSnapshot(userId, velocityResult))
                 .toCompletableFuture()
                 .join();
+    }
+
+    @Override
+    public VelocityResult recordTransaction(String tenantId, UUID userId, Instant timestamp, Duration window) {
+        validateCanonicalTenantId(tenantId);
+        UUID operationId = UUID.randomUUID();
+        return checkVelocityAsync(userId, operationId, timestamp, tenantId, window.toMillis())
+                .thenApply(velocityResult -> cacheSnapshot(userId, velocityResult))
+                .toCompletableFuture()
+                .join();
+    }
+
+    public static void validateCanonicalTenantId(String tenantId) {
+        if (tenantId == null || tenantId.isBlank() || tenantId.length() > 64) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
+        }
     }
 
     private VelocityResult cacheSnapshot(@NonNull final UUID userId, final @NonNull VelocityResult result) {
@@ -106,17 +122,17 @@ public class RedisVelocityStore implements VelocityStore {
             @NonNull final UUID userId,
             @NonNull final UUID operationId,
             @NonNull final Instant timestamp,
-            @NonNull final String tenantId
+            @NonNull final String tenantId,
+            long windowMillis
     ) {
-
-        String key = "fraud:" + tenantId + ":user:" + userId + ":tx_window";
+        String key = "fraud:velocity:" + tenantId + ":" + userId;
 
         return commands.<List<Long>>eval(
                 VELOCITY_SCRIPT,
                 ScriptOutputType.MULTI,
                 new String[]{key},
                 String.valueOf(timestamp.toEpochMilli()),
-                WINDOW,
+                String.valueOf(windowMillis),
                 operationId.toString(),
                 THRESHOLD
         ).thenApply(result -> {
@@ -132,6 +148,9 @@ public class RedisVelocityStore implements VelocityStore {
     }
 
     public VelocityResult fallbackVelocity(UUID userId, UUID operationId, Instant timestamp, Throwable ex) {
+        if (ex instanceof br.com.wallet.core.exceptions.TenantContextMissingException tcme) {
+            throw tcme;
+        }
         log.error("Redis unavailable for velocity check, userId={}, operationId={}, timestamp={}, now returning cached value", userId, operationId, timestamp, ex);
         return fallbackCache.get(userId)
                 .toCompletableFuture()
@@ -139,6 +158,9 @@ public class RedisVelocityStore implements VelocityStore {
     }
 
     public VelocityResult fallbackVelocityTenant(UUID userId, UUID operationId, Instant timestamp, String tenantId, Throwable ex) {
+        if (ex instanceof br.com.wallet.core.exceptions.TenantContextMissingException tcme) {
+            throw tcme;
+        }
         return fallbackVelocity(userId, operationId, timestamp, ex);
     }
 }

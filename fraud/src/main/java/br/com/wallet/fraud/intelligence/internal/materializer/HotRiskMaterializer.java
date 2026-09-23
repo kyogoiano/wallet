@@ -26,14 +26,14 @@ public class HotRiskMaterializer {
 
     @NonNull
     public CompletionStage<String> materializeGraphRisk(@NonNull final UUID entityId, final double graphRisk) {
-        return materializeGraphRisk(entityId, graphRisk, "default");
+        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for graph risk materialization");
     }
 
     @NonNull
     public CompletionStage<String> materializeGraphRisk(@NonNull final UUID entityId, final double graphRisk, final String tenantId) {
         Objects.requireNonNull(entityId, "entityId cannot be null");
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
-        String key = "risk:" + effectiveTenant + ":user:" + entityId + ":graph_risk";
+        validateCanonicalTenantId(tenantId);
+        String key = "risk:" + tenantId + ":user:" + entityId + ":graph_risk";
         String value = String.valueOf(graphRisk);
 
         log.debug("Materializing graph risk for {} into DragonflyDB: key={}, score={}", entityId, key, value);
@@ -41,15 +41,26 @@ public class HotRiskMaterializer {
     }
 
     @NonNull
+    public CompletionStage<String> materializeTemporalRisk(@NonNull final UUID entityId, final double temporalRisk, final String tenantId) {
+        Objects.requireNonNull(entityId, "entityId cannot be null");
+        validateCanonicalTenantId(tenantId);
+        String key = "risk:" + tenantId + ":user:" + entityId + ":temporal_risk";
+        String value = String.valueOf(temporalRisk);
+
+        log.debug("Materializing temporal risk for {} into DragonflyDB: key={}, score={}", entityId, key, value);
+        return redisCommands.set(key, value, SetArgs.Builder.ex(DEFAULT_TTL));
+    }
+
+    @NonNull
     public CompletionStage<Double> getHotGraphRisk(@NonNull final UUID entityId) {
-        return getHotGraphRisk(entityId, "default");
+        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required to get graph risk");
     }
 
     @NonNull
     public CompletionStage<Double> getHotGraphRisk(@NonNull final UUID entityId, final String tenantId) {
         Objects.requireNonNull(entityId, "entityId cannot be null");
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
-        String key = "risk:" + effectiveTenant + ":user:" + entityId + ":graph_risk";
+        validateCanonicalTenantId(tenantId);
+        String key = "risk:" + tenantId + ":user:" + entityId + ":graph_risk";
 
         return redisCommands.get(key).thenApply(val -> {
             if (val == null || val.isBlank()) {
@@ -62,5 +73,30 @@ public class HotRiskMaterializer {
                 return 0.0;
             }
         });
+    }
+
+    @NonNull
+    public CompletionStage<Double> getHotTemporalRisk(@NonNull final UUID entityId, final String tenantId) {
+        Objects.requireNonNull(entityId, "entityId cannot be null");
+        validateCanonicalTenantId(tenantId);
+        String key = "risk:" + tenantId + ":user:" + entityId + ":temporal_risk";
+
+        return redisCommands.get(key).thenApply(val -> {
+            if (val == null || val.isBlank()) {
+                return 0.0;
+            }
+            try {
+                return Double.parseDouble(val);
+            } catch (NumberFormatException e) {
+                log.warn("Invalid temporal risk value cached for key {}: {}", key, val);
+                return 0.0;
+            }
+        });
+    }
+
+    private void validateCanonicalTenantId(String tenantId) {
+        if (tenantId == null || tenantId.isBlank() || tenantId.length() > 64) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
+        }
     }
 }

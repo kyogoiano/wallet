@@ -59,6 +59,8 @@ public class RedisConfig {
             socketOptionsBuilder.keepAlive(SocketOptions.KeepAliveOptions.builder().enable(false).build());
         }
 
+        long commandTimeoutMs = env.getProperty("redis.command.timeout-ms", Long.class, 20L);
+
         client.setOptions(ClientOptions.builder()
                 .autoReconnect(true)
                 .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
@@ -66,7 +68,7 @@ public class RedisConfig {
                 .protocolVersion(ProtocolVersion.RESP3)
                 .replayFilter(cmd -> false)
                 .socketOptions(socketOptionsBuilder.build())
-                .timeoutOptions(TimeoutOptions.builder().fixedTimeout(Duration.ofSeconds(2)).build())
+                .timeoutOptions(TimeoutOptions.builder().fixedTimeout(Duration.ofMillis(commandTimeoutMs)).build())
                 .build());
 
         return client;

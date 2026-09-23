@@ -100,7 +100,7 @@ public class GraphRebuildService {
             GraphRiskSignals signals = featureProvider.evaluateGraphSignals(entityId, asOf);
             double score = signals.calculateCompositeScore();
             store.updateGraphRisk(entityId, score, asOf);
-            materializer.materializeGraphRisk(entityId, score);
+            materializer.materializeGraphRisk(entityId, score, "default");
         });
 
         log.info("Graph rebuild completed: {} events, {} entities recomputed", events.size(), touchedEntities.size());

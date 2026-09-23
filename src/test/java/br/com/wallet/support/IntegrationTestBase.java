@@ -5,6 +5,7 @@ import br.com.wallet.ledger.api.event.EventPublisher;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.context.annotation.Primary;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -28,7 +29,7 @@ public class IntegrationTestBase {
      */
     @Bean
     @ServiceConnection
-    @org.springframework.context.annotation.Conditional(DockerAvailableCondition.class)
+    @Conditional(DockerAvailableCondition.class)
     public PostgreSQLContainer postgresContainer() {
         return new PostgreSQLContainer(POSTGRES_FSYNC_OFF_IMAGE)
                 .withReuse(true)
@@ -52,7 +53,6 @@ public class IntegrationTestBase {
         try {
             available = org.testcontainers.DockerClientFactory.instance().isDockerAvailable();
         } catch (Throwable t) {
-            available = false;
         }
         DOCKER_AVAILABLE = available;
 
@@ -82,6 +82,13 @@ public class IntegrationTestBase {
 
     public static boolean isDockerAvailable() {
         return DOCKER_AVAILABLE;
+    }
+
+    public static String getNatsUrl() {
+        if (DOCKER_AVAILABLE && NATS_CONTAINER != null) {
+            return "nats://" + NATS_CONTAINER.getHost() + ":" + NATS_CONTAINER.getMappedPort(4222);
+        }
+        return "nats://localhost:4222";
     }
 
     public static GenericContainer<?> createDragonflyV1Container() {

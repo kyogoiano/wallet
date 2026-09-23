@@ -85,7 +85,7 @@ public class GraphRebuildServiceIT extends DockerProperties {
         assertThat(ab.get().totalAmount()).isEqualByComparingTo(new BigDecimal("100.00"));
 
         // 5. Verify Dragonfly hot cache is rematerialized with cycle risk
-        Double hotRiskA = materializer.getHotGraphRisk(walletA).toCompletableFuture().get();
+        Double hotRiskA = materializer.getHotGraphRisk(walletA, "default").toCompletableFuture().get();
         assertThat(hotRiskA).isGreaterThan(0.35); // Cycle detected!
     }
 }

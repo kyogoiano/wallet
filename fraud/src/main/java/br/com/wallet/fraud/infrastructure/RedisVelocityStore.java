@@ -1,5 +1,6 @@
 package br.com.wallet.fraud.infrastructure;
 
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import br.com.wallet.fraud.domain.VelocityResult;
 import com.github.benmanes.caffeine.cache.AsyncLoadingCache;
 import com.github.benmanes.caffeine.cache.Caffeine;
@@ -73,7 +74,7 @@ public class RedisVelocityStore implements VelocityStore {
     @Bulkhead(name ="redisVelocity", fallbackMethod = "fallbackVelocity")
     @CircuitBreaker(name = "redisVelocity", fallbackMethod = "fallbackVelocity")
     public VelocityResult checkVelocity(@NonNull final UUID userId, @NonNull final UUID operationId, @NonNull final Instant timestamp) {
-        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for velocity check");
+        throw new TenantContextMissingException("Tenant identifier is required for velocity check");
     }
 
     @Override
@@ -99,7 +100,7 @@ public class RedisVelocityStore implements VelocityStore {
 
     public static void validateCanonicalTenantId(String tenantId) {
         if (tenantId == null || tenantId.isBlank() || tenantId.length() > 64) {
-            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
+            throw new TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
         }
     }
 
@@ -148,7 +149,7 @@ public class RedisVelocityStore implements VelocityStore {
     }
 
     public VelocityResult fallbackVelocity(UUID userId, UUID operationId, Instant timestamp, Throwable ex) {
-        if (ex instanceof br.com.wallet.core.exceptions.TenantContextMissingException tcme) {
+        if (ex instanceof TenantContextMissingException tcme) {
             throw tcme;
         }
         log.error("Redis unavailable for velocity check, userId={}, operationId={}, timestamp={}, now returning cached value", userId, operationId, timestamp, ex);
@@ -158,7 +159,7 @@ public class RedisVelocityStore implements VelocityStore {
     }
 
     public VelocityResult fallbackVelocityTenant(UUID userId, UUID operationId, Instant timestamp, String tenantId, Throwable ex) {
-        if (ex instanceof br.com.wallet.core.exceptions.TenantContextMissingException tcme) {
+        if (ex instanceof TenantContextMissingException tcme) {
             throw tcme;
         }
         return fallbackVelocity(userId, operationId, timestamp, ex);

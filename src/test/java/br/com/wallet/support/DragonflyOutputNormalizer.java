@@ -30,24 +30,23 @@ public final class DragonflyOutputNormalizer {
     /**
      * Canonicalizes list output for deterministic comparison.
      */
-    public static List<Object> normalizeList(List<?> input) {
+    public static List<Object> normalizeList(final List<?> input) {
         if (input == null) {
             return Collections.emptyList();
         }
         List<Object> normalized = new ArrayList<>(input.size());
-        for (Object item : input) {
-            if (item instanceof Map<?, ?> map) {
-                Map<String, String> strMap = new HashMap<>();
-                map.forEach((k, v) -> strMap.put(String.valueOf(k), String.valueOf(v)));
-                normalized.add(normalizeMap(strMap));
-            } else if (item instanceof List<?> list) {
-                normalized.add(normalizeList(list));
-            } else if (item instanceof Number num) {
-                normalized.add(num.longValue());
-            } else {
-                normalized.add(String.valueOf(item));
+        input.forEach(item -> {
+            switch (item) {
+                case Map<?, ?> map -> {
+                    Map<String, String> strMap = new HashMap<>();
+                    map.forEach((k, v) -> strMap.put(String.valueOf(k), String.valueOf(v)));
+                    normalized.add(normalizeMap(strMap));
+                }
+                case List<?> list -> normalized.add(normalizeList(list));
+                case Number num -> normalized.add(num.longValue());
+                case null, default -> normalized.add(String.valueOf(item));
             }
-        }
+        });
         return normalized;
     }
 

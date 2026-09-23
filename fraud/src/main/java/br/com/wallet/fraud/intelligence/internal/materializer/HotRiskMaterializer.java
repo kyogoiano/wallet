@@ -1,5 +1,6 @@
 package br.com.wallet.fraud.intelligence.internal.materializer;
 
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import io.lettuce.core.SetArgs;
 import io.lettuce.core.api.async.RedisAsyncCommands;
 import org.jspecify.annotations.NonNull;
@@ -25,11 +26,6 @@ public class HotRiskMaterializer {
     }
 
     @NonNull
-    public CompletionStage<String> materializeGraphRisk(@NonNull final UUID entityId, final double graphRisk) {
-        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for graph risk materialization");
-    }
-
-    @NonNull
     public CompletionStage<String> materializeGraphRisk(@NonNull final UUID entityId, final double graphRisk, final String tenantId) {
         Objects.requireNonNull(entityId, "entityId cannot be null");
         validateCanonicalTenantId(tenantId);
@@ -49,11 +45,6 @@ public class HotRiskMaterializer {
 
         log.debug("Materializing temporal risk for {} into DragonflyDB: key={}, score={}", entityId, key, value);
         return redisCommands.set(key, value, SetArgs.Builder.ex(DEFAULT_TTL));
-    }
-
-    @NonNull
-    public CompletionStage<Double> getHotGraphRisk(@NonNull final UUID entityId) {
-        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required to get graph risk");
     }
 
     @NonNull
@@ -96,7 +87,7 @@ public class HotRiskMaterializer {
 
     private void validateCanonicalTenantId(String tenantId) {
         if (tenantId == null || tenantId.isBlank() || tenantId.length() > 64) {
-            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
+            throw new TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
         }
     }
 }

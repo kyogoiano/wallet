@@ -104,7 +104,7 @@ public class DefaultRelationalGraphProjector implements RelationalGraphProjector
         store.updateGraphRisk(sourceWalletId, graphScore, timestamp);
 
         // 6. Materialize hot cache in DragonflyDB
-        materializer.materializeGraphRisk(sourceUserId, graphScore);
-        materializer.materializeGraphRisk(sourceWalletId, graphScore);
+        materializer.materializeGraphRisk(sourceUserId, graphScore, "default");
+        materializer.materializeGraphRisk(sourceWalletId, graphScore, "default");
     }
 }

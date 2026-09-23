@@ -50,7 +50,7 @@ public class DurableStatusRecoveryIT extends DockerProperties {
 
     @BeforeEach
     void setUp() throws Exception {
-        String natsUrl = "nats://" + IntegrationTestBase.NATS_CONTAINER.getHost() + ":" + IntegrationTestBase.NATS_CONTAINER.getMappedPort(4222);
+        String natsUrl = IntegrationTestBase.getNatsUrl();
         char[] token = "dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n".toCharArray();
 
         Options edgeOpts = new Options.Builder().server(natsUrl).token(token).build();

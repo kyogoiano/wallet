@@ -21,9 +21,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyDouble;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -43,7 +41,7 @@ class RelationalGraphProjectorTest {
         materializer = Mockito.mock(HotRiskMaterializer.class);
         projector = new DefaultRelationalGraphProjector(store, featureProvider, materializer);
 
-        when(materializer.materializeGraphRisk(any(UUID.class), anyDouble()))
+        when(materializer.materializeGraphRisk(any(UUID.class), anyDouble(), anyString()))
             .thenReturn(CompletableFuture.completedFuture("OK"));
     }
 
@@ -76,7 +74,7 @@ class RelationalGraphProjectorTest {
         verify(store, times(3)).upsertRelationship(any(FraudRelationship.class));
 
         // Verify hot risk materialized
-        verify(materializer).materializeGraphRisk(eq(userA), anyDouble());
-        verify(materializer).materializeGraphRisk(eq(walletA), anyDouble());
+        verify(materializer).materializeGraphRisk(eq(userA), anyDouble(), anyString());
+        verify(materializer).materializeGraphRisk(eq(walletA), anyDouble(), anyString());
     }
 }

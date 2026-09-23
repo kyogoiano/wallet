@@ -1,5 +1,6 @@
 package br.com.wallet.fraud.infrastructure;
 
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import br.com.wallet.fraud.domain.RecipientRisk;
 import io.lettuce.core.ScriptOutputType;
 import io.lettuce.core.api.async.RedisAsyncCommands;
@@ -121,7 +122,7 @@ public class NewRecipientStore {
     public CompletionStage<RecipientRisk> checkNewRecipient(@NonNull final UUID senderId,
                                                             @Nullable final UUID recipientId,
                                                             @NonNull Instant timestamp) {
-        throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for recipient check");
+        throw new TenantContextMissingException("Tenant identifier is required for recipient check");
     }
 
     public CompletionStage<RecipientRisk> checkNewRecipient(@NonNull final UUID senderId,
@@ -129,7 +130,7 @@ public class NewRecipientStore {
                                                             @NonNull Instant timestamp,
                                                             final String tenantId) {
         if (tenantId == null || tenantId.isBlank() || tenantId.length() > 64) {
-            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
+            throw new TenantContextMissingException("Tenant identifier is missing or invalid: " + tenantId);
         }
 
         if (recipientId == null) {

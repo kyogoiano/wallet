@@ -198,11 +198,9 @@ public class TenantStateIsolationTest extends DockerProperties {
                 .isInstanceOf(TenantContextMissingException.class);
 
         // 4. HotRiskMaterializer with missing/invalid tenant
-        assertThatThrownBy(() -> hotRiskMaterializer.materializeGraphRisk(userId, 0.5))
-                .isInstanceOf(TenantContextMissingException.class);
         assertThatThrownBy(() -> hotRiskMaterializer.materializeGraphRisk(userId, 0.5, null))
                 .isInstanceOf(TenantContextMissingException.class);
-        assertThatThrownBy(() -> hotRiskMaterializer.getHotGraphRisk(userId))
+        assertThatThrownBy(() -> hotRiskMaterializer.getHotGraphRisk(userId, null))
                 .isInstanceOf(TenantContextMissingException.class);
         assertThatThrownBy(() -> hotRiskMaterializer.getHotGraphRisk(userId, ""))
                 .isInstanceOf(TenantContextMissingException.class);

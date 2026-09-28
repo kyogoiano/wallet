@@ -157,7 +157,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
                                     operationId,
                                     e.getMessage(),
                                     failureCategory,
-                                    tenantId
+                                    tenantId != null ? tenantId : "tenant-alpha"
                             );
                         }
                     }

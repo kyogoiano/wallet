@@ -7,7 +7,6 @@ import br.com.wallet.edge.api.CredentialSnapshot;
 import br.com.wallet.edge.api.ResolvedCredential;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
-import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Map;

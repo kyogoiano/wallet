@@ -137,7 +137,7 @@ public class TenantStateIsolationTest extends DockerProperties {
                 keysTenantAlpha,
                 args
         );
-        assertThat(resAlpha.get(0)).isEqualTo(1L);
+        assertThat(resAlpha.getFirst()).isEqualTo(1L);
 
         // Attempt to execute with identical operationId for tenant-beta -> Replay detected
         String[] keysTenantBeta = new String[]{

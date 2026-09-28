@@ -97,7 +97,7 @@ class SavingsEventListenerTest {
                 planId, activePlan.rules().getFirst().id(), SavingsRuleType.PERCENTAGE,
                 sourceWallet, targetWallet, new BigDecimal("500.00")
         );
-        when(ruleEngine.evaluateDeposit(activePlan, new BigDecimal("5000.00"), new BigDecimal("5000.00")))
+        when(ruleEngine.evaluateDeposit(activePlan, new BigDecimal("5000.00"), new BigDecimal("5000.00"), "tenant-alpha"))
                 .thenReturn(List.of(action));
 
         listener.onDeposit(event);
@@ -119,7 +119,7 @@ class SavingsEventListenerTest {
                 planId, activePlan.rules().getFirst().id(), SavingsRuleType.ROUND_UP,
                 sourceWallet, targetWallet, new BigDecimal("2.70")
         );
-        when(ruleEngine.evaluateTransfer(activePlan, new BigDecimal("47.30"), new BigDecimal("100.00")))
+        when(ruleEngine.evaluateTransfer(activePlan, new BigDecimal("47.30"), new BigDecimal("100.00"), "tenant-alpha"))
                 .thenReturn(List.of(action));
 
         listener.onTransfer(event);

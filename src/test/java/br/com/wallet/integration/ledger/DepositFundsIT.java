@@ -53,12 +53,12 @@ public class DepositFundsIT extends DockerProperties {
         // given
         var walletId = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(walletId, userId);
+        createWalletUseCase.handle(walletId, userId, "tenant-alpha");
         BigDecimal depositAmount = new  BigDecimal("100.00");
         UUID operationId =  UUID.randomUUID();
 
         // when
-        depositFundsUseCase.handle(new Deposit(walletId, userId, depositAmount, operationId));
+        depositFundsUseCase.handle(new Deposit(walletId, userId, depositAmount, operationId, "tenant-alpha"));
 
         // then
         testDataHelper.assertBalance(walletId, depositAmount);
@@ -71,13 +71,13 @@ public class DepositFundsIT extends DockerProperties {
         // given
         var walletId = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(walletId, BigDecimal.TEN, userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(walletId, BigDecimal.TEN, userId, UUID.randomUUID(), "tenant-alpha"));
         BigDecimal depositAmount = new BigDecimal("50.00");
         UUID operationId = UUID.randomUUID();
 
         // when
-        depositFundsUseCase.handle(new Deposit(walletId, userId, depositAmount, operationId));
-        assertThatThrownBy(() -> depositFundsUseCase.handle(new Deposit(walletId, userId, depositAmount, operationId))).isInstanceOf(IdempotencyException.class); // retry
+        depositFundsUseCase.handle(new Deposit(walletId, userId, depositAmount, operationId, "tenant-alpha"));
+        assertThatThrownBy(() -> depositFundsUseCase.handle(new Deposit(walletId, userId, depositAmount, operationId, "tenant-alpha"))).isInstanceOf(IdempotencyException.class); // retry
 
         // then
         // Initial 10 + one deposit of 50 = 60

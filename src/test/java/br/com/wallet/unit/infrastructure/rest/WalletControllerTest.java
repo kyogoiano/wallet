@@ -147,7 +147,7 @@ class WalletControllerTest {
         UUID walletId = UUID.randomUUID();
         var entries = List.of(
                 new LedgerEntry(UUID.randomUUID(), BigDecimal.TEN, LedgerType.CREDIT, UUID.randomUUID(), UUID.randomUUID(),
-                        1L, "hash", "previousHash", Instant.now())
+                        1L, "hash", "previousHash", Instant.now(), "tenant-alpha")
         );
         when(ledgerUseCase.getLedger(walletId, 100)).thenReturn(entries);
 

@@ -29,7 +29,7 @@ public class AccountDao {
             rs.getTimestamp("blocked_at") != null ? rs.getTimestamp("blocked_at").toInstant() : null,
             rs.getString("blocked_reason"),
             rs.getTimestamp("created_at").toInstant(),
-            rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+            rs.getString("tenant_id")
     );
 
     public AccountDao(final JdbcTemplate jdbc, NamedParameterJdbcTemplate namedParameterJdbcTemplate) {
@@ -44,14 +44,17 @@ public class AccountDao {
      * @param userId user id
      */
     public void insertAccount(final UUID walletId, final UUID userId) {
-        insertAccount(walletId, userId, "default");
+        insertAccount(walletId, userId, "tenant-alpha");
     }
 
     public void insertAccount(final UUID walletId, final UUID userId, final String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for inserting account");
+        }
         jdbc.update("""
             INSERT INTO accounts (id, balance, user_id, status, version, tenant_id)
             VALUES (?, ?, ?, 'ACTIVE', 0, ?)
-        """, walletId, BigDecimal.ZERO, userId, tenantId != null ? tenantId : "default");
+        """, walletId, BigDecimal.ZERO, userId, tenantId);
     }
 
     public Optional<Account> findAccount(@NonNull final UUID walletId) {
@@ -108,7 +111,7 @@ public class AccountDao {
                         rs.getObject("user_id", UUID.class),
                         rs.getBigDecimal("balance"),
                         status,
-                        rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+                        rs.getString("tenant_id")
                 ));
             }
             return Optional.empty();
@@ -149,7 +152,7 @@ public class AccountDao {
                                 rs.getObject("user_id", UUID.class),
                                 rs.getBigDecimal("balance"),
                                 status,
-                                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+                                rs.getString("tenant_id")
                         )
                 );
             }

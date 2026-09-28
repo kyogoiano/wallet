@@ -74,7 +74,8 @@ public class SavingsExecutionService {
                 action.targetWalletId(),
                 action.sweepAmount(),
                 savingsOperationId,
-                OperationOrigin.SAVINGS_AUTOMATION
+                OperationOrigin.SAVINGS_AUTOMATION,
+                action.tenantId()
         );
 
         try {

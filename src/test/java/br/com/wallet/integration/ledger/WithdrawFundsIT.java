@@ -50,12 +50,12 @@ public class WithdrawFundsIT extends DockerProperties {
         var walletId = UUID.randomUUID();
         var userId = UUID.randomUUID();
         BigDecimal initialBalance = new BigDecimal("100.00");
-        createWalletUseCase.handle(new Wallet(walletId, initialBalance, userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(walletId, initialBalance, userId, UUID.randomUUID(), "tenant-alpha"));
         BigDecimal withdrawAmount = new BigDecimal("30.00");
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId));
+        withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId, "tenant-alpha"));
 
         // then
         testDataHelper.assertBalance(walletId, new BigDecimal("70.00"));
@@ -66,12 +66,12 @@ public class WithdrawFundsIT extends DockerProperties {
         // given
         var walletId = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(walletId, BigDecimal.TEN, userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(walletId, BigDecimal.TEN, userId, UUID.randomUUID(), "tenant-alpha"));
         BigDecimal withdrawAmount = new BigDecimal("50.00");
 
         // when / then
         org.assertj.core.api.Assertions.assertThatThrownBy(() ->
-                withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, UUID.randomUUID()))
+                withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, UUID.randomUUID(), "tenant-alpha"))
         ).isInstanceOf(InsufficientFundsException.class);
     }
 
@@ -80,13 +80,13 @@ public class WithdrawFundsIT extends DockerProperties {
         // given
         var walletId = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(walletId, new BigDecimal("100.00"), userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(walletId, new BigDecimal("100.00"), userId, UUID.randomUUID(), "tenant-alpha"));
         BigDecimal withdrawAmount = new BigDecimal("40");
         UUID operationId = UUID.randomUUID();
 
         // when
-        withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId));
-        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId))).isInstanceOf(IdempotencyException.class); // retry
+        withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId, "tenant-alpha"));
+        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(walletId, userId, withdrawAmount, operationId, "tenant-alpha"))).isInstanceOf(IdempotencyException.class); // retry
 
         // then
         // Initial 100 - one withdraw of 40 = 60

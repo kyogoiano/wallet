@@ -40,13 +40,11 @@ public class IntegrationTestBase {
     }
 
     private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.15.0-alpine");
-    public static final DockerImageName DRAGONFLY_IMAGE_V2 = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0");
-    public static final DockerImageName DRAGONFLY_IMAGE_V1 = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v1.40.1");
+    public static final DockerImageName DRAGONFLY_IMAGE = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0");
 
     private static final boolean DOCKER_AVAILABLE;
     public static final GenericContainer<?> NATS_CONTAINER;
     public static final GenericContainer<?> REDIS;
-    public static final GenericContainer<?> DRAGONFLY;
 
     static {
         boolean available = false;
@@ -65,18 +63,16 @@ public class IntegrationTestBase {
                                     .forPort(8222)
                                     .forStatusCode(200)
                     );
-            REDIS = new GenericContainer<>(DRAGONFLY_IMAGE_V2)
+            REDIS = new GenericContainer<>(DRAGONFLY_IMAGE)
                     .withExposedPorts(6379)
                     .withCommand("--logtostderr", "--proactor_threads=2")
                     .waitingFor(Wait.forListeningPort());
-            DRAGONFLY = REDIS;
 
             NATS_CONTAINER.start();
             REDIS.start();
         } else {
             NATS_CONTAINER = null;
             REDIS = null;
-            DRAGONFLY = null;
         }
     }
 
@@ -91,15 +87,8 @@ public class IntegrationTestBase {
         return "nats://localhost:4222";
     }
 
-    public static GenericContainer<?> createDragonflyV1Container() {
-        return new GenericContainer<>(DRAGONFLY_IMAGE_V1)
-                .withExposedPorts(6379)
-                .withCommand("--logtostderr", "--proactor_threads=2")
-                .waitingFor(Wait.forListeningPort());
-    }
-
     public static GenericContainer<?> createDragonflyV2Container() {
-        return new GenericContainer<>(DRAGONFLY_IMAGE_V2)
+        return new GenericContainer<>(DRAGONFLY_IMAGE)
                 .withExposedPorts(6379)
                 .withCommand("--logtostderr", "--proactor_threads=2")
                 .waitingFor(Wait.forListeningPort());

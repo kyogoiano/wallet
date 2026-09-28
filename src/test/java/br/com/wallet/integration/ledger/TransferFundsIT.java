@@ -80,13 +80,13 @@ class TransferFundsIT extends DockerProperties {
         // given
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         // when
-        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID(), "tenant-alpha"));
 
         // then
         testDataHelper.assertBalance(from, scenario.expectedFrom());
@@ -98,14 +98,14 @@ class TransferFundsIT extends DockerProperties {
         // given
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         // when / then
         assertThatThrownBy(() ->
-                transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID()))
+                transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha"))
         ).isInstanceOf(InsufficientFundsException.class);
     }
 
@@ -113,10 +113,10 @@ class TransferFundsIT extends DockerProperties {
     void shouldNotAllowTransferToSameWallet() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
 
         assertThatThrownBy(() ->
-                transferFundsUseCase.handle(new Transfer(from, from, BigDecimal.TEN, UUID.randomUUID()))
+                transferFundsUseCase.handle(new Transfer(from, from, BigDecimal.TEN, UUID.randomUUID(), "tenant-alpha"))
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
@@ -124,14 +124,14 @@ class TransferFundsIT extends DockerProperties {
     void shouldInsertOutboxEventOnTransfer() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId, "tenant-alpha"));
 
         var count = testDataHelper.countProcessedOutbox(opId);
 
@@ -142,13 +142,13 @@ class TransferFundsIT extends DockerProperties {
     void shouldNotDuplicateOutboxEventOnRetry() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, toUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, toUserId, UUID.randomUUID(), "tenant-alpha"));
 
         UUID opId = UUID.randomUUID();
-        var transfer = new Transfer(from, to, new BigDecimal("50"), opId);
+        var transfer = new Transfer(from, to, new BigDecimal("50"), opId, "tenant-alpha");
         transferFundsUseCase.handle(transfer);
         assertThatThrownBy(() -> transferFundsUseCase.handle(transfer)).isInstanceOf(IdempotencyException.class); // retry
 
@@ -161,14 +161,14 @@ class TransferFundsIT extends DockerProperties {
     void shouldHaveStrictlyIncreasingSequence() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
-        var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
+        var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha");
         transferFundsUseCase.handle(transfer50);
-        var transfer10 = new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID());
+        var transfer10 = new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID(), "tenant-alpha");
         transferFundsUseCase.handle(transfer10);
 
         var entries = testDataHelper.getLedgerEntries(from);

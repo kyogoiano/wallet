@@ -64,15 +64,15 @@ class DepositFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final BigDecimal amount = BigDecimal.valueOf(250.00);
 
-        final Deposit deposit = new Deposit(walletId, userId, amount, opId);
-        Account account = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.ACTIVE, null, null, Instant.now());
+        final Deposit deposit = new Deposit(walletId, userId, amount, opId, "tenant-alpha");
+        Account account = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.of(account));
 
         service.handle(deposit);
 
-        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()), eq("default"));
+        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()), eq("tenant-alpha"));
         verify(outboxDao).save(any(DepositCompletedEvent.class));
         verify(operationsDao).completeOperation(eq(opId), any());
     }
@@ -85,15 +85,15 @@ class DepositFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final BigDecimal amount = BigDecimal.valueOf(100.00);
 
-        final Deposit deposit = new Deposit(walletId, null, amount, opId);
-        Account account = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.ACTIVE, null, null, Instant.now());
+        final Deposit deposit = new Deposit(walletId, null, amount, opId, "tenant-alpha");
+        Account account = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.of(account));
 
         service.handle(deposit);
 
-        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()), eq("default"));
+        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(userId), eq(clock.instant()), eq("tenant-alpha"));
     }
 
     @Test
@@ -102,8 +102,8 @@ class DepositFundsServiceTest {
         final UUID walletId = UUID.randomUUID();
         final UUID userId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
-        final Deposit deposit = new Deposit(walletId, userId, BigDecimal.TEN, opId);
-        Account blockedAccount = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.BLOCKED, Instant.now(), "Suspected fraud", Instant.now());
+        final Deposit deposit = new Deposit(walletId, userId, BigDecimal.TEN, opId, "tenant-alpha");
+        Account blockedAccount = new Account(walletId, BigDecimal.ZERO, 0L, userId, AccountStatus.BLOCKED, Instant.now(), "Suspected fraud", Instant.now(), "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.of(blockedAccount));
@@ -119,7 +119,7 @@ class DepositFundsServiceTest {
     void shouldThrowWhenAccountNotFound() {
         final UUID walletId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
-        final Deposit deposit = new Deposit(walletId, null, BigDecimal.TEN, opId);
+        final Deposit deposit = new Deposit(walletId, null, BigDecimal.TEN, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(walletId)).thenReturn(Optional.empty());
@@ -132,7 +132,7 @@ class DepositFundsServiceTest {
     @DisplayName("Should throw IdempotencyException if operation already processed")
     void shouldThrowIdempotencyException() {
         final UUID opId = UUID.randomUUID();
-        final Deposit deposit = new Deposit(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId);
+        final Deposit deposit = new Deposit(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(false);
 

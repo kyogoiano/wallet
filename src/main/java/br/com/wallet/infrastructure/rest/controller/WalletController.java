@@ -118,9 +118,10 @@ public class WalletController implements WalletApi {
             throw new IllegalArgumentException("Initial balance must be greater than zero for this endpoint");
         }
 
-        log.info("Async wallet creation with deposit requested. walletId={}, userId={}, amount={}", walletId, command.userId()
-                , initialBalance);
-        final var wallet = new Wallet(walletId, initialBalance, command.userId(), operationId);
+        String tenantId = command.tenantId() != null && !command.tenantId().isBlank()
+                ? command.tenantId()
+                : "tenant-alpha";
+        final var wallet = new Wallet(walletId, initialBalance, command.userId(), operationId, tenantId);
 
         fraudCheckHelper.performFraudCheck(wallet);
 

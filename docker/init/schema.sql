@@ -9,11 +9,11 @@ CREATE TABLE IF NOT EXISTS accounts (
     blocked_reason TEXT NULL,
     last_sequence BIGINT DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+    tenant_id VARCHAR(64) NOT NULL,
     CONSTRAINT chk_account_status CHECK (status IN ('ACTIVE', 'BLOCKED', 'SUSPENDED', 'FROZEN'))
 );
 
-ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default';
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status) WHERE status != 'ACTIVE';
 CREATE INDEX IF NOT EXISTS idx_accounts_user_status ON accounts(user_id, status);
@@ -29,7 +29,7 @@ CREATE TABLE IF NOT EXISTS ledger (
     operation_id UUID NOT NULL,
     user_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+    tenant_id VARCHAR(64) NOT NULL,
 
     -- tamper-proof fields
     sequence BIGINT NOT NULL,
@@ -58,7 +58,7 @@ CREATE TABLE IF NOT EXISTS ledger (
             )
 );
 
-ALTER TABLE ledger ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default';
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_ledger_wallet_time
@@ -110,14 +110,14 @@ CREATE TABLE IF NOT EXISTS wallet_operations (
     status VARCHAR(20) NOT NULL DEFAULT 'PROCESSING',
     error_message TEXT NULL,
     failure_type VARCHAR(32) NULL,
-    tenant_id VARCHAR(64) NOT NULL DEFAULT 'default',
+    tenant_id VARCHAR(64) NOT NULL,
     CONSTRAINT wallet_operations_status_chk
         CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
     -- TODO: include payload for debugging
     -- For high-write event workloads, increase max_wal_size and wal_buffers to reduce checkpoint frequency and improve throughput.
 );
 
-ALTER TABLE wallet_operations ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL DEFAULT 'default';
+ALTER TABLE wallet_operations ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
 ALTER TABLE wallet_operations ADD COLUMN IF NOT EXISTS failure_type VARCHAR(32) NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_operations_tenant_id

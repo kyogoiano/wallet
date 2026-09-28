@@ -71,7 +71,7 @@ public class FraudReactionIT extends DockerProperties {
 
         // Seed initial balance in user wallet
         depositFundsUseCase.handle(new Deposit(
-                userWalletId, userId, new BigDecimal("1000.00"), UUID.randomUUID(), OperationOrigin.SYSTEM
+                userWalletId, userId, new BigDecimal("1000.00"), UUID.randomUUID(), OperationOrigin.SYSTEM, "tenant-alpha"
         ));
     }
 
@@ -89,12 +89,12 @@ public class FraudReactionIT extends DockerProperties {
 
         // And: Subsequent transfer is rejected with AccountBlockedException
         assertThatThrownBy(() -> transferFundsUseCase.handle(new Transfer(
-                userWalletId, merchantWalletId, new BigDecimal("50.00"), UUID.randomUUID(), OperationOrigin.USER
+                userWalletId, merchantWalletId, new BigDecimal("50.00"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ))).isInstanceOf(AccountBlockedException.class);
 
         // And: Subsequent deposit is rejected with AccountBlockedException
         assertThatThrownBy(() -> depositFundsUseCase.handle(new Deposit(
-                userWalletId, userId, new BigDecimal("100.00"), UUID.randomUUID(), OperationOrigin.USER
+                userWalletId, userId, new BigDecimal("100.00"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ))).isInstanceOf(AccountBlockedException.class);
     }
 }

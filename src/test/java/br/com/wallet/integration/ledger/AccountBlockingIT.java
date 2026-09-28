@@ -67,7 +67,7 @@ public class AccountBlockingIT extends DockerProperties {
 
         // Seed initial balance in active wallet
         depositFundsUseCase.handle(new Deposit(
-                activeWalletId, userId, new BigDecimal("1000.00"), UUID.randomUUID(), OperationOrigin.SYSTEM
+                activeWalletId, userId, new BigDecimal("1000.00"), UUID.randomUUID(), OperationOrigin.SYSTEM, "tenant-alpha"
         ));
     }
 
@@ -80,7 +80,7 @@ public class AccountBlockingIT extends DockerProperties {
 
         // Attempt deposit
         assertThatThrownBy(() -> depositFundsUseCase.handle(new Deposit(
-                blockedWalletId, null, new BigDecimal("500.00"), UUID.randomUUID(), OperationOrigin.USER
+                blockedWalletId, null, new BigDecimal("500.00"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ))).isInstanceOf(AccountBlockedException.class);
     }
 
@@ -89,7 +89,7 @@ public class AccountBlockingIT extends DockerProperties {
     void shouldRejectTransferInvolvingBlockedAccount() {
         // Seed funds in blocked wallet before blocking
         depositFundsUseCase.handle(new Deposit(
-                blockedWalletId, null, new BigDecimal("500.00"), UUID.randomUUID(), OperationOrigin.SYSTEM
+                blockedWalletId, null, new BigDecimal("500.00"), UUID.randomUUID(), OperationOrigin.SYSTEM, "tenant-alpha"
         ));
 
         // Block the wallet
@@ -97,12 +97,12 @@ public class AccountBlockingIT extends DockerProperties {
 
         // 1. Attempt transfer FROM blocked wallet
         assertThatThrownBy(() -> transferFundsUseCase.handle(new Transfer(
-                blockedWalletId, activeWalletId, new BigDecimal("100.00"), UUID.randomUUID(), OperationOrigin.USER
+                blockedWalletId, activeWalletId, new BigDecimal("100.00"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ))).isInstanceOf(AccountBlockedException.class);
 
         // 2. Attempt transfer TO blocked wallet
         assertThatThrownBy(() -> transferFundsUseCase.handle(new Transfer(
-                activeWalletId, blockedWalletId, new BigDecimal("100.00"), UUID.randomUUID(), OperationOrigin.USER
+                activeWalletId, blockedWalletId, new BigDecimal("100.00"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ))).isInstanceOf(AccountBlockedException.class);
 
         // 3. Balances remain unchanged
@@ -122,7 +122,7 @@ public class AccountBlockingIT extends DockerProperties {
 
         // Subsequent deposit succeeds
         depositFundsUseCase.handle(new Deposit(
-                blockedWalletId, null, new BigDecimal("250.00"), UUID.randomUUID(), OperationOrigin.USER
+                blockedWalletId, null, new BigDecimal("250.00"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ));
 
         assertThat(balanceUseCase.getBalance(blockedWalletId)).isEqualByComparingTo("250.00");

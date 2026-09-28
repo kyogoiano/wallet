@@ -33,7 +33,7 @@ class OperationStateServiceTest {
 
         service.markOperationCompleted(opId);
 
-        verify(walletOperationsDao).completeOperation(opId);
+        verify(walletOperationsDao).completeOperation(opId, "tenant-alpha");
     }
 
     @Test
@@ -42,14 +42,14 @@ class OperationStateServiceTest {
 
         service.markOperationFailed(opId, "Insufficient funds", "BUSINESS");
 
-        verify(walletOperationsDao).failOperation(opId, "Insufficient funds", "BUSINESS");
+        verify(walletOperationsDao).failOperation(opId, "Insufficient funds", "BUSINESS", "tenant-alpha");
     }
 
     @Test
     void shouldReturnOperationStatusWhenFound() {
         UUID opId = UUID.randomUUID();
         Instant now = Instant.now();
-        Operation op = new Operation(opId, OperationStatus.FAILED, "Insufficient funds", "BUSINESS", now, now);
+        Operation op = new Operation(opId, OperationStatus.FAILED, "Insufficient funds", "BUSINESS", now, now, "tenant-alpha");
         when(walletOperationsDao.findOperation(opId)).thenReturn(Optional.of(op));
 
         var result = service.getOperationStatus(opId);

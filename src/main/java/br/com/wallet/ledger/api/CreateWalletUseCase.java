@@ -8,5 +8,8 @@ import java.util.UUID;
 public interface CreateWalletUseCase extends UseCase<Wallet> {
     @Override
     void handle(Wallet wallet);
-    void handle(UUID walletId, UUID userId);
+    void handle(UUID walletId, UUID userId, String tenantId);
+    default void handle(UUID walletId, UUID userId) {
+        handle(walletId, userId, "tenant-alpha");
+    }
 }

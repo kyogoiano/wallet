@@ -101,7 +101,7 @@ class FraudSignalFusionServiceTest {
         };
 
         verify(profileStore).putProfile(
-            eq(new RiskSubject(expectedType, entityId.toString())),
+            eq(new RiskSubject(expectedType, entityId.toString(), "tenant-alpha")),
             any(),
             any()
         );

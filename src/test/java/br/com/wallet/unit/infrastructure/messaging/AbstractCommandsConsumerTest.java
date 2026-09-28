@@ -72,7 +72,7 @@ class AbstractCommandsConsumerTest {
     @Test
     void shouldAckAndNotMarkFailedOnSuccessfulProcessing() {
         UUID opId = UUID.randomUUID();
-        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER);
+        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER, "tenant-alpha");
         byte[] payload = objectMapper.writeValueAsBytes(transfer);
 
         when(message.getData()).thenReturn(payload);
@@ -89,7 +89,7 @@ class AbstractCommandsConsumerTest {
     @Test
     void shouldMarkOperationFailedAndAckOnInsufficientFundsException() {
         UUID opId = UUID.randomUUID();
-        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER);
+        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER, "tenant-alpha");
         byte[] payload = objectMapper.writeValueAsBytes(transfer);
 
         when(message.getData()).thenReturn(payload);
@@ -99,7 +99,7 @@ class AbstractCommandsConsumerTest {
 
         consumer.handleMessage(message);
 
-        verify(operationStateUseCase).markOperationFailed(eq(opId), eq("Insufficient funds"), eq("BUSINESS"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), eq("Insufficient funds"), eq("BUSINESS"), eq("tenant-alpha"));
         verify(message).ack();
         verifyNoInteractions(dlqPublisher);
     }
@@ -107,7 +107,7 @@ class AbstractCommandsConsumerTest {
     @Test
     void shouldMarkOperationFailedAndAckOnAccountBlockedException() {
         UUID opId = UUID.randomUUID();
-        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER);
+        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER, "tenant-alpha");
         byte[] payload = objectMapper.writeValueAsBytes(transfer);
 
         when(message.getData()).thenReturn(payload);
@@ -117,7 +117,7 @@ class AbstractCommandsConsumerTest {
 
         consumer.handleMessage(message);
 
-        verify(operationStateUseCase).markOperationFailed(eq(opId), eq("Account is blocked"), eq("BUSINESS"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), eq("Account is blocked"), eq("BUSINESS"), eq("tenant-alpha"));
         verify(message).ack();
         verifyNoInteractions(dlqPublisher);
     }
@@ -125,7 +125,7 @@ class AbstractCommandsConsumerTest {
     @Test
     void shouldRetryOnTransientExceptionWhenUnderMaxDeliveries() {
         UUID opId = UUID.randomUUID();
-        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER);
+        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER, "tenant-alpha");
         byte[] payload = objectMapper.writeValueAsBytes(transfer);
 
         when(message.getData()).thenReturn(payload);
@@ -143,7 +143,7 @@ class AbstractCommandsConsumerTest {
     @Test
     void shouldMarkFailedAndSendToDlqWhenRetriesExhausted() {
         UUID opId = UUID.randomUUID();
-        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER);
+        Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, OperationOrigin.USER, "tenant-alpha");
         byte[] payload = objectMapper.writeValueAsBytes(transfer);
 
         when(message.getData()).thenReturn(payload);
@@ -153,7 +153,7 @@ class AbstractCommandsConsumerTest {
 
         consumer.handleMessage(message);
 
-        verify(operationStateUseCase).markOperationFailed(eq(opId), eq("Connection timeout"), eq("TRANSIENT"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), eq("Connection timeout"), eq("TRANSIENT"), eq("tenant-alpha"));
         verify(dlqPublisher).handleDlqMessage(eq("commands.dlq.transfer"), eq(natsConnection), eq(message), any());
         verify(message).ack();
     }

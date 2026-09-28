@@ -88,12 +88,12 @@ class TransferOriginPropagationTest {
     @DisplayName("Should propagate USER origin from Transfer command to TransferCompletedEvent")
     void shouldPropagateUserOriginOnTransfer() {
         UUID opId = UUID.randomUUID();
-        Transfer transfer = new Transfer(fromWallet, toWallet, new BigDecimal("100.00"), opId, OperationOrigin.USER);
+        Transfer transfer = new Transfer(fromWallet, toWallet, new BigDecimal("100.00"), opId, OperationOrigin.USER, "tenant-alpha");
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(false);
         when(operationsDao.getStatus(opId)).thenReturn(OperationStatus.PROCESSING);
         when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
-                fromWallet, new AccountBalance(userId, new BigDecimal("500.00"), AccountStatus.ACTIVE),
-                toWallet, new AccountBalance(userId, new BigDecimal("200.00"), AccountStatus.ACTIVE))
+                fromWallet, new AccountBalance(userId, new BigDecimal("500.00"), AccountStatus.ACTIVE, "tenant-alpha"),
+                toWallet, new AccountBalance(userId, new BigDecimal("200.00"), AccountStatus.ACTIVE, "tenant-alpha"))
         );
 
         transferFundsService.handle(transfer);
@@ -106,18 +106,19 @@ class TransferOriginPropagationTest {
         assertThat(publishedEvent.from()).isEqualTo(fromWallet);
         assertThat(publishedEvent.to()).isEqualTo(toWallet);
         assertThat(publishedEvent.amount()).isEqualByComparingTo("100.00");
+        assertThat(publishedEvent.tenantId()).isEqualTo("tenant-alpha");
     }
 
     @Test
     @DisplayName("Should propagate SAVINGS_AUTOMATION origin from Transfer command to TransferCompletedEvent")
     void shouldPropagateSavingsAutomationOriginOnTransfer() {
         UUID opId = UUID.randomUUID();
-        Transfer transfer = new Transfer(fromWallet, toWallet, new BigDecimal("25.50"), opId, OperationOrigin.SAVINGS_AUTOMATION);
+        Transfer transfer = new Transfer(fromWallet, toWallet, new BigDecimal("25.50"), opId, OperationOrigin.SAVINGS_AUTOMATION, "tenant-alpha");
 
         when(operationsDao.getStatus(opId)).thenReturn(OperationStatus.FAILED);
         when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
-                fromWallet, new AccountBalance(userId, new BigDecimal("500.00"), AccountStatus.ACTIVE),
-                toWallet, new AccountBalance(userId, new BigDecimal("200.00"), AccountStatus.ACTIVE)
+                fromWallet, new AccountBalance(userId, new BigDecimal("500.00"), AccountStatus.ACTIVE, "tenant-alpha"),
+                toWallet, new AccountBalance(userId, new BigDecimal("200.00"), AccountStatus.ACTIVE, "tenant-alpha")
         ));
 
         transferFundsService.handle(transfer);
@@ -127,14 +128,15 @@ class TransferOriginPropagationTest {
 
         TransferCompletedEvent publishedEvent = eventCaptor.getValue();
         assertThat(publishedEvent.origin()).isEqualTo(OperationOrigin.SAVINGS_AUTOMATION);
+        assertThat(publishedEvent.tenantId()).isEqualTo("tenant-alpha");
     }
 
     @Test
     @DisplayName("Should propagate USER origin from Deposit command to DepositCompletedEvent")
     void shouldPropagateUserOriginOnDeposit() {
         UUID opId = UUID.randomUUID();
-        Deposit deposit = new Deposit(fromWallet, userId, new BigDecimal("1000.00"), opId, OperationOrigin.USER);
-        Account account = new Account(fromWallet, BigDecimal.ZERO, 1L, userId, Instant.now());
+        Deposit deposit = new Deposit(fromWallet, userId, new BigDecimal("1000.00"), opId, OperationOrigin.USER, "tenant-alpha");
+        Account account = new Account(fromWallet, BigDecimal.ZERO, 1L, userId, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(deposit.walletId())).thenReturn(Optional.of(account));
@@ -147,14 +149,15 @@ class TransferOriginPropagationTest {
         assertThat(publishedEvent.origin()).isEqualTo(OperationOrigin.USER);
         assertThat(publishedEvent.walletId()).isEqualTo(fromWallet);
         assertThat(publishedEvent.amount()).isEqualByComparingTo("1000.00");
+        assertThat(publishedEvent.tenantId()).isEqualTo("tenant-alpha");
     }
 
     @Test
     @DisplayName("Should propagate SYSTEM origin from Deposit command to DepositCompletedEvent")
     void shouldPropagateSystemOriginOnDeposit() {
         UUID opId = UUID.randomUUID();
-        Deposit deposit = new Deposit(fromWallet, userId, new BigDecimal("50.00"), opId, OperationOrigin.SYSTEM);
-        Account account = new Account(fromWallet, BigDecimal.ZERO, 1L, userId, Instant.now());
+        Deposit deposit = new Deposit(fromWallet, userId, new BigDecimal("50.00"), opId, OperationOrigin.SYSTEM, "tenant-alpha");
+        Account account = new Account(fromWallet, BigDecimal.ZERO, 1L, userId, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findAccount(deposit.walletId())).thenReturn(Optional.of(account));

@@ -85,7 +85,7 @@ public class LedgerDao {
                              @NonNull final UUID userId,
                              @NonNull final Long nextSequence,
                              @NonNull final Instant now) {
-        insertLedger(walletId, amount, ledgerType, operationId, userId, nextSequence, now, "default");
+        insertLedger(walletId, amount, ledgerType, operationId, userId, nextSequence, now, "tenant-alpha");
     }
 
     public void insertLedger(@NonNull final UUID walletId,
@@ -95,7 +95,10 @@ public class LedgerDao {
                              @NonNull final UUID userId,
                              @NonNull final Long nextSequence,
                              @NonNull final Instant now,
-                             @Nullable final String tenantId) {
+                             @NonNull final String tenantId) {
+        if (tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for inserting ledger entry");
+        }
         final var params = new MapSqlParameterSource()
                 .addValue("id", UUID.randomUUID())
                 .addValue("walletId", walletId)
@@ -105,7 +108,7 @@ public class LedgerDao {
                 .addValue("userId", userId)
                 .addValue("now", now.atOffset(ZoneOffset.UTC))
                 .addValue("sequence", nextSequence)
-                .addValue("tenantId", tenantId != null ? tenantId : "default");
+                .addValue("tenantId", tenantId);
         namedParameterJdbcTemplate.update("""
                             INSERT INTO ledger (
                                 id, wallet_id, amount, type, operation_id, user_id, created_at, sequence, previous_hash, hash, tenant_id
@@ -170,7 +173,7 @@ public class LedgerDao {
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+                rs.getString("tenant_id")
         ), walletId, limit);
     }
 
@@ -198,7 +201,7 @@ public class LedgerDao {
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
                 rs.getTimestamp("created_at").toInstant(),
-                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+                rs.getString("tenant_id")
         ), walletId);
     }
 

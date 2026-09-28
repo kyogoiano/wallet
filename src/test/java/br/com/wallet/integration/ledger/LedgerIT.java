@@ -63,13 +63,13 @@ public class LedgerIT extends DockerProperties {
     void shouldReturnLedgerEntriesAfterTransfer() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("40"), UUID.randomUUID()));
+                new BigDecimal("40"), UUID.randomUUID(), "tenant-alpha"));
 
         var result = ledgerUseCase.getLedger(from, 100);
 
@@ -88,16 +88,16 @@ public class LedgerIT extends DockerProperties {
     void shouldReturnEntriesOrderedBySequence() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), UUID.randomUUID()));
+                new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha"));
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("30"), UUID.randomUUID()));
+                new BigDecimal("30"), UUID.randomUUID(), "tenant-alpha"));
 
         var result = ledgerUseCase.getLedger(from, 3);
 
@@ -112,19 +112,19 @@ public class LedgerIT extends DockerProperties {
     void shouldRespectLimit() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("10"), UUID.randomUUID()));
+                new BigDecimal("10"), UUID.randomUUID(), "tenant-alpha"));
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("10"), UUID.randomUUID()));
+                new BigDecimal("10"), UUID.randomUUID(), "tenant-alpha"));
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("10"), UUID.randomUUID()));
+                new BigDecimal("10"), UUID.randomUUID(), "tenant-alpha"));
 
         var result = ledgerUseCase.getLedger(from, 2);
 
@@ -135,20 +135,20 @@ public class LedgerIT extends DockerProperties {
     void shouldNotMixLedgerBetweenWallets() {
         var wallet1 = UUID.randomUUID();
         var userId1 = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet1, new BigDecimal("100"), userId1, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(wallet1, new BigDecimal("100"), userId1, UUID.randomUUID(), "tenant-alpha"));
         var wallet2 = UUID.randomUUID();
         var userId2 = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet2, new BigDecimal("100"), userId2, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(wallet2, new BigDecimal("100"), userId2, UUID.randomUUID(), "tenant-alpha"));
 
         var other = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(other, userId);
+        createWalletUseCase.handle(other, userId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(wallet1, other,
-                new BigDecimal("10"), UUID.randomUUID()));
+                new BigDecimal("10"), UUID.randomUUID(), "tenant-alpha"));
 
         transferFundsUseCase.handle(new Transfer(wallet2, other,
-                new BigDecimal("20"), UUID.randomUUID()));
+                new BigDecimal("20"), UUID.randomUUID(), "tenant-alpha"));
 
         var ledger1 = ledgerUseCase.getLedger(wallet1, 100);
         var ledger2 = ledgerUseCase.getLedger(wallet2, 100);
@@ -166,13 +166,13 @@ public class LedgerIT extends DockerProperties {
     void shouldReturnCorrectTypesForDebitAndCredit() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("25"), UUID.randomUUID()));
+                new BigDecimal("25"), UUID.randomUUID(), "tenant-alpha"));
 
         var fromLedger = ledgerUseCase.getLedger(from, 100);
         var toLedger = ledgerUseCase.getLedger(to, 100);
@@ -189,13 +189,13 @@ public class LedgerIT extends DockerProperties {
     void ledgerSumShouldMatchCurrentBalance() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("40"), UUID.randomUUID()));
+                new BigDecimal("40"), UUID.randomUUID(), "tenant-alpha"));
 
         var ledger = ledgerUseCase.getLedger(from, 100);
 

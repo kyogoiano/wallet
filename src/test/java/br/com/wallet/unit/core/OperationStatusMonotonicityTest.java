@@ -58,7 +58,7 @@ class OperationStatusMonotonicityTest {
     void shouldDelegateCompletionIdempotently() {
         UUID opId = UUID.randomUUID();
         operationStateService.markOperationCompleted(opId);
-        verify(walletOperationsDao, times(1)).completeOperation(opId);
+        verify(walletOperationsDao, times(1)).completeOperation(opId, "tenant-alpha");
     }
 
     @Test
@@ -66,6 +66,6 @@ class OperationStatusMonotonicityTest {
     void shouldDelegateFailure() {
         UUID opId = UUID.randomUUID();
         operationStateService.markOperationFailed(opId, "Insufficient funds", "BUSINESS_ERROR");
-        verify(walletOperationsDao, times(1)).failOperation(opId, "Insufficient funds", "BUSINESS_ERROR");
+        verify(walletOperationsDao, times(1)).failOperation(opId, "Insufficient funds", "BUSINESS_ERROR", "tenant-alpha");
     }
 }

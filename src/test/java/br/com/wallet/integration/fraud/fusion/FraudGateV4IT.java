@@ -38,7 +38,7 @@ public class FraudGateV4IT extends DockerProperties {
     @Test
     @DisplayName("REQ-FUSION-007: Authorization SLA — Authorizes within gateway SLA (P99 < 2ms)")
     void shouldAuthorizeWithinGatewaySla() {
-        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString());
+        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString(), "tenant-alpha");
         RiskProfile profile = new RiskProfile(
             0.05, 0.10, 0.05, 0.10, 0.10, 0.12,
             FraudDecision.ALLOW, "NONE", false, Instant.now()
@@ -61,7 +61,7 @@ public class FraudGateV4IT extends DockerProperties {
     @Test
     @DisplayName("REQ-FUSION-007: Hard Block — Blocks transactions when profile is HARD_BLOCK")
     void shouldBlockHardBlockedProfile() {
-        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString());
+        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString(), "tenant-alpha");
         RiskProfile profile = new RiskProfile(
             1.0, 0.5, 0.5, 0.5, 0.5, 1.0,
             FraudDecision.HARD_BLOCK, "DIRECT_HARD_RULE", false, Instant.now()
@@ -77,7 +77,7 @@ public class FraudGateV4IT extends DockerProperties {
     @Test
     @DisplayName("REQ-FUSION-007: Restrict — Rejects transactions when profile is RESTRICT")
     void shouldRestrictHighRiskProfile() {
-        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString());
+        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString(), "tenant-alpha");
         RiskProfile profile = new RiskProfile(
             0.1, 0.9, 0.8, 0.8, 0.7, 0.92,
             FraudDecision.RESTRICT, "GRAPH_INTELLIGENCE", false, Instant.now()
@@ -93,7 +93,7 @@ public class FraudGateV4IT extends DockerProperties {
     @Test
     @DisplayName("REQ-FUSION-007: Contextual Degradation — Fails closed for high-risk amount, fallback for normal amount")
     void shouldHandleDegradationContextually() {
-        RiskSubject unmaterializedSubject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString());
+        RiskSubject unmaterializedSubject = new RiskSubject(RiskSubjectType.USER, UUID.randomUUID().toString(), "tenant-alpha");
 
         // High value (>= 5000.00) without cached profile -> Fail closed
         GateAuthorizationResult highValue = fraudGate.authorize(unmaterializedSubject, new BigDecimal("5000.00"));

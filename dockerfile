@@ -31,10 +31,10 @@ RUN set -eux; \
 
 # 2. Download and extract Gradle 9.8
 RUN set -eux; \
-    GRADLE_URL="https://services.gradle.org/distributions/gradle-9.8.0-rc-3-bin.zip"; \
+    GRADLE_URL="https://services.gradle.org/distributions/gradle-9.8.0-bin.zip"; \
     curl -fL -o gradle.zip "$GRADLE_URL"; \
     unzip -d /opt gradle.zip; \
-    mv /opt/gradle-9.8.0-rc-3 "$GRADLE_HOME"; \
+    mv /opt/gradle-9.8.0 "$GRADLE_HOME"; \
     rm gradle.zip
 
 # Verify installations

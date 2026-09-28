@@ -36,7 +36,7 @@ class GlobalVelocityRuleTest {
         final UUID userId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
         final Instant now = Instant.now();
-        final FraudContext context = new FraudContext(userId, null, opId, 5000, now);
+        final FraudContext context = new FraudContext(userId, null, opId, 5000, now, "tenant-alpha");
 
         when(redisVelocityStore.checkVelocity(eq(userId), eq(opId), eq(now), any()))
                 .thenReturn(new VelocityResult.Exceeded(10));
@@ -54,7 +54,7 @@ class GlobalVelocityRuleTest {
         final UUID userId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
         final Instant now = Instant.now();
-        final FraudContext context = new FraudContext(userId, null, opId, 5000, now);
+        final FraudContext context = new FraudContext(userId, null, opId, 5000, now, "tenant-alpha");
 
         when(redisVelocityStore.checkVelocity(eq(userId), eq(opId), eq(now), any()))
                 .thenReturn(new VelocityResult.Ok(3));
@@ -71,7 +71,7 @@ class GlobalVelocityRuleTest {
         final UUID userId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
         final Instant now = Instant.now();
-        final FraudContext context = new FraudContext(userId, null, opId, 5000, now);
+        final FraudContext context = new FraudContext(userId, null, opId, 5000, now, "tenant-alpha");
 
         when(redisVelocityStore.checkVelocity(eq(userId), eq(opId), eq(now), any()))
                 .thenReturn(new VelocityResult.Replay(3));

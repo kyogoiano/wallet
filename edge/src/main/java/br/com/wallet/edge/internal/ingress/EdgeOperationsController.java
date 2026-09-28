@@ -68,9 +68,13 @@ public class EdgeOperationsController {
                 ? (AuthenticatedPrincipal) request.getAttribute(HmacAuthenticationFilter.AUTHENTICATED_PRINCIPAL_ATTR)
                 : null;
 
-        String tenantId = principal != null ? principal.tenantId() : "default";
-        String principalId = principal != null ? principal.principalId() : "unknown";
-        String keyId = principal != null ? principal.keyId() : "unknown";
+        if (principal == null || principal.tenantId().isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Missing required tenant authentication context");
+        }
+
+        String tenantId = principal.tenantId();
+        String principalId = principal.principalId();
+        String keyId = principal.keyId();
 
         CommandEnvelope envelope = CommandEnvelope.create(
                 opId, type, requestJson, clientIp, tenantId, principalId, keyId

@@ -34,7 +34,7 @@ class NewRecipientRuleTest {
     @Test
     @DisplayName("Should return not triggered when targetUserId is null")
     void shouldReturnNotTriggeredWhenTargetIsNull() {
-        final FraudContext context = new FraudContext(UUID.randomUUID(), null, UUID.randomUUID(), 1000, Instant.now());
+        final FraudContext context = new FraudContext(UUID.randomUUID(), null, UUID.randomUUID(), 1000, Instant.now(), "tenant-alpha");
 
         final RuleResult result = rule.evaluate(context);
 
@@ -48,7 +48,7 @@ class NewRecipientRuleTest {
         final UUID userId = UUID.randomUUID();
         final UUID targetId = UUID.randomUUID();
         final Instant now = Instant.now();
-        final FraudContext context = new FraudContext(userId, targetId, UUID.randomUUID(), 1000, now);
+        final FraudContext context = new FraudContext(userId, targetId, UUID.randomUUID(), 1000, now, "tenant-alpha");
 
         when(newRecipientStore.checkNewRecipient(eq(userId), eq(targetId), eq(now), any()))
                 .thenReturn(CompletableFuture.completedFuture(new RecipientRisk.Ring(5, 4)));
@@ -66,7 +66,7 @@ class NewRecipientRuleTest {
         final UUID userId = UUID.randomUUID();
         final UUID targetId = UUID.randomUUID();
         final Instant now = Instant.now();
-        final FraudContext context = new FraudContext(userId, targetId, UUID.randomUUID(), 1000, now);
+        final FraudContext context = new FraudContext(userId, targetId, UUID.randomUUID(), 1000, now, "tenant-alpha");
 
         when(newRecipientStore.checkNewRecipient(eq(userId), eq(targetId), eq(now), any()))
                 .thenReturn(CompletableFuture.completedFuture(new RecipientRisk.Mule(6)));

@@ -63,13 +63,14 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
         log.info("Processing fraud event: operationId={}, decision={}",
                 event.operationId(), event.decision());
 
+        final String tenantId = !event.tenantId().isBlank() ? event.tenantId() : "tenant-alpha";
         switch (event.decision()) {
-            case REVIEW -> fraudStateProjectionService.processReviewEvent(event);
+            case REVIEW -> fraudStateProjectionService.processReviewEvent(event, tenantId);
 
-            case BLOCK -> fraudStateProjectionService.processBlockEvent(event);
+            case BLOCK -> fraudStateProjectionService.processBlockEvent(event, tenantId);
 
             case ALLOW -> {
-                final String timelineKey = "user:" + event.from() + ":tx_timeline";
+                final String timelineKey = "user:" + tenantId + ":" + event.from() + ":tx_timeline";
                 commands.zadd(
                         timelineKey,
                         (double) event.timestamp().toEpochMilli(),
@@ -80,7 +81,7 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
 
             default -> {
                 commands.hset(
-                    "tx:" + event.operationId(),
+                    "tx:" + tenantId + ":" + event.operationId(),
                     Map.of(
                             "amount", event.amount().toString(),
                             "recipient", event.to() != null ? event.to().toString() : "",
@@ -90,7 +91,7 @@ public class FraudConsumer extends AbstractEventConsumer<FraudEvent>{
                 );
 
                 commands.expire(
-                        "tx:" + event.operationId(),
+                        "tx:" + tenantId + ":" + event.operationId(),
                         86400 * 30
                 );
             }

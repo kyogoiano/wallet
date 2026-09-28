@@ -1,5 +1,6 @@
 package br.com.wallet.ledger.api.domain;
 
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
@@ -16,17 +17,13 @@ public record AccountBalance(
         Objects.requireNonNull(userId, "userId cannot be null");
         Objects.requireNonNull(balance, "balance cannot be null");
         Objects.requireNonNull(status, "status cannot be null");
-        if (tenantId == null) {
-            tenantId = "default";
+        if (tenantId.isBlank()) {
+            throw new TenantContextMissingException("Tenant identifier is required for AccountBalance");
         }
     }
 
-    public AccountBalance(UUID userId, BigDecimal balance, AccountStatus status) {
-        this(userId, balance, status, "default");
-    }
-
-    public AccountBalance(UUID userId, BigDecimal balance) {
-        this(userId, balance, AccountStatus.ACTIVE, "default");
+    public AccountBalance(@NonNull UUID userId, @NonNull BigDecimal balance, @NonNull String tenantId) {
+        this(userId, balance, AccountStatus.ACTIVE, tenantId);
     }
 
     public boolean isActive() {

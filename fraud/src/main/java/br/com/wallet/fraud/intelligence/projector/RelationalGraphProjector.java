@@ -18,6 +18,19 @@ public interface RelationalGraphProjector {
         @NonNull UUID targetUserId,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
-        @NonNull Instant timestamp
+        @NonNull Instant timestamp,
+        @NonNull String tenantId
     );
+
+    default void projectTransfer(
+        @NonNull UUID sourceWalletId,
+        @NonNull UUID targetWalletId,
+        @NonNull UUID sourceUserId,
+        @NonNull UUID targetUserId,
+        @NonNull BigDecimal amount,
+        @NonNull UUID operationId,
+        @NonNull Instant timestamp
+    ) {
+        projectTransfer(sourceWalletId, targetWalletId, sourceUserId, targetUserId, amount, operationId, timestamp, "tenant-alpha");
+    }
 }

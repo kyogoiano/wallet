@@ -81,13 +81,13 @@ class ValidateLedgerIT extends DockerProperties {
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         // simulate transactions
-        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID(), "tenant-alpha"));
 
 
         var fromResult = validateLedgerUseCase.execute(from);
@@ -107,18 +107,18 @@ class ValidateLedgerIT extends DockerProperties {
     void shouldValidateLedgerAfterMultipleTransfers() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("300"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("300"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
-        var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
-        var transfer100 = new Transfer(from, to, new BigDecimal("100"), UUID.randomUUID());
+        var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha");
+        var transfer100 = new Transfer(from, to, new BigDecimal("100"), UUID.randomUUID(), "tenant-alpha");
 
         transferFundsUseCase.handle(transfer50);
         transferFundsUseCase.handle(transfer100);
         //NOTE: reload userId, so this is not a repeated transfer
-        transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
+        transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha");
 
         transferFundsUseCase.handle(transfer50);
 
@@ -136,13 +136,13 @@ class ValidateLedgerIT extends DockerProperties {
     void shouldDetectTamperedLedger() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), UUID.randomUUID()));
+                new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha"));
 
         // 💥 fraud
         testDataHelper.tamperFirstLedgerEntry(from, new BigDecimal("999"));
@@ -162,13 +162,13 @@ class ValidateLedgerIT extends DockerProperties {
     void shouldDetectBrokenSequence() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), UUID.randomUUID()));
+                new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha"));
 
         // 💥 trying to break sequence
         assertThatThrownBy(()-> testDataHelper.tamperSequence(from, 1L, 99L))
@@ -187,18 +187,18 @@ class ValidateLedgerIT extends DockerProperties {
     void shouldDetectBrokenHashChain() {
         var fromWallet = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(fromWallet, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(fromWallet, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var toWallet = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(toWallet, toUserId);
+        createWalletUseCase.handle(toWallet, toUserId, "tenant-alpha");
 
         var opId1 = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
-                new BigDecimal("50"), opId1));
+                new BigDecimal("50"), opId1, "tenant-alpha"));
 
         var opId2 = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
-                new BigDecimal("50"), opId2));
+                new BigDecimal("50"), opId2, "tenant-alpha"));
 
         // 💥 broke chaining (second entry) -- on the credit operation for opId1
         testDataHelper.tamperPreviousHash(fromWallet, 2L, "fake_hash", opId1);
@@ -217,12 +217,12 @@ class ValidateLedgerIT extends DockerProperties {
     void shouldDetectTamperedAmount() {
         var wallet = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"),  userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"),  userId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to, userId);
+        createWalletUseCase.handle(to, userId, "tenant-alpha");
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(wallet, to,
-                new BigDecimal("50"), opId));
+                new BigDecimal("50"), opId, "tenant-alpha"));
 
         testDataHelper.tamperAmount(wallet, 2L, new BigDecimal("999"), opId);
 
@@ -243,14 +243,14 @@ class ValidateLedgerIT extends DockerProperties {
     void shouldDetectChainLinkBroken() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         // Entry 1: Genesis (Sequence 1)
         // Entry 2: Transfer (Sequence 2)
-        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID(), "tenant-alpha"));
 
         // We need to manipulate the DB such that:
         // 1. findCorruptedEntries returns empty (all individual hashes are valid)

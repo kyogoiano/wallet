@@ -62,8 +62,8 @@ class CreateWalletIT extends DockerProperties {
 
         // when
         jdbc.update("""
-            INSERT INTO accounts (id, balance, user_id, version)
-            VALUES (?, ?, ?, 0)
+            INSERT INTO accounts (id, balance, user_id, version, tenant_id)
+            VALUES (?, ?, ?, 0, 'tenant-alpha')
         """, walletId, initialBalance, userId);
 
         // then
@@ -79,7 +79,7 @@ class CreateWalletIT extends DockerProperties {
         var walletId = UUID.randomUUID();
         var userId = UUID.randomUUID();
         // when
-         createWalletUseCase.handle(walletId, userId);
+        createWalletUseCase.handle(walletId, userId, "tenant-alpha");
 
         // then
         testDataHelper.assertWalletExists(walletId);
@@ -93,7 +93,7 @@ class CreateWalletIT extends DockerProperties {
     void shouldCreateWalletWithGivenInitialBalance(BigDecimal initialBalance) {
         var walletId = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(walletId, initialBalance, userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(walletId, initialBalance, userId, UUID.randomUUID(), "tenant-alpha"));
 
         testDataHelper.assertBalance(walletId, initialBalance);
     }

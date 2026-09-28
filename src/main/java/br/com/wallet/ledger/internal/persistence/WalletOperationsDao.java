@@ -23,38 +23,47 @@ public class WalletOperationsDao {
      * @return true if operation already exists, false otherwise
      */
     public boolean startOperation(@NonNull final UUID operationId) {
-        return startOperation(operationId, "default");
+        return startOperation(operationId, "tenant-alpha");
     }
 
     public boolean startOperation(@NonNull final UUID operationId, final String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for starting operation");
+        }
         final var rowsAffected = jdbc.update("""
             INSERT INTO wallet_operations (operation_id, status, tenant_id)
             VALUES (?, 'PROCESSING', ?)
             ON CONFLICT (operation_id) DO NOTHING;
-        """, operationId, tenantId != null ? tenantId : "default");
+        """, operationId, tenantId);
 
         return rowsAffected == 1;
     }
 
     public void completeOperation(@NonNull final UUID operationId) {
-        completeOperation(operationId, "default");
+        completeOperation(operationId, "tenant-alpha");
     }
 
     public void completeOperation(@NonNull final UUID operationId, final String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for completing operation");
+        }
         jdbc.update("""
             INSERT INTO wallet_operations (operation_id, status, created_at, updated_at, tenant_id)
             VALUES (?, 'COMPLETED', NOW(), NOW(), ?)
             ON CONFLICT (operation_id) DO UPDATE
             SET status = 'COMPLETED',
                 updated_at = NOW();
-        """, operationId, tenantId != null ? tenantId : "default");
+        """, operationId, tenantId);
     }
 
     public void failOperation(@NonNull final UUID operationId, final String errorMessage, final String failureType) {
-        failOperation(operationId, errorMessage, failureType, "default");
+        failOperation(operationId, errorMessage, failureType, "tenant-alpha");
     }
 
     public void failOperation(@NonNull final UUID operationId, final String errorMessage, final String failureType, final String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for failing operation");
+        }
         jdbc.update("""
             INSERT INTO wallet_operations (operation_id, status, error_message, failure_type, created_at, updated_at, tenant_id)
             VALUES (?, 'FAILED', ?, ?, NOW(), NOW(), ?)
@@ -64,7 +73,7 @@ public class WalletOperationsDao {
                 failure_type = EXCLUDED.failure_type,
                 updated_at = NOW()
             WHERE wallet_operations.status != 'COMPLETED';
-        """, operationId, errorMessage, failureType, tenantId != null ? tenantId : "default");
+        """, operationId, errorMessage, failureType, tenantId);
     }
 
     public java.util.Optional<br.com.wallet.ledger.internal.operation.Operation> findOperation(@NonNull final UUID operationId) {
@@ -80,7 +89,7 @@ public class WalletOperationsDao {
                 rs.getString("failure_type"),
                 rs.getTimestamp("created_at").toInstant(),
                 rs.getTimestamp("updated_at").toInstant(),
-                rs.getString("tenant_id") != null ? rs.getString("tenant_id") : "default"
+                rs.getString("tenant_id")
         ), operationId).stream().findFirst();
     }
 

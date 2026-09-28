@@ -178,15 +178,7 @@ public class TenantStateIsolationTest extends DockerProperties {
                 .isInstanceOf(TenantContextMissingException.class);
 
         // 2. RiskProfileStore with missing/invalid tenant
-        RiskSubject invalidSubject = new RiskSubject(RiskSubjectType.USER, userId.toString(), null);
-        RiskProfile profile = new RiskProfile(0.1, 0.1, 0.1, 0.1, 0.1, 0.1, FraudDecision.ALLOW, "NONE", false, now);
-        // RiskSubject constructor defaults null to "default" if not specified, but let's test invalid empty tenant in subject
-        RiskSubject emptySubject = new RiskSubject(RiskSubjectType.USER, userId.toString(), "   ");
-        assertThatThrownBy(() -> riskProfileStore.putProfile(emptySubject, profile, Duration.ofMinutes(5)))
-                .isInstanceOf(TenantContextMissingException.class);
-        assertThatThrownBy(() -> riskProfileStore.getProfile(emptySubject))
-                .isInstanceOf(TenantContextMissingException.class);
-        assertThatThrownBy(() -> riskProfileStore.evictProfile(emptySubject))
+        assertThatThrownBy(() -> new RiskSubject(RiskSubjectType.USER, userId.toString(), "   "))
                 .isInstanceOf(TenantContextMissingException.class);
 
         // 3. NewRecipientStore with missing/invalid tenant

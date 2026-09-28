@@ -38,8 +38,7 @@ public class AccountStateService implements AccountStateUseCase {
 
         log.warn("Blocking account: walletId={}, reason={}", walletId, reason);
         accountDao.blockAccount(walletId, reason);
-
-        accountDao.findUserId(walletId).ifPresent(fraudService::blockUser);
+        accountDao.findAccount(walletId).ifPresent(account -> fraudService.blockUser(account.userId(), account.tenantId()));
     }
 
     @Override
@@ -50,7 +49,7 @@ public class AccountStateService implements AccountStateUseCase {
         log.info("Unblocking account: walletId={}", walletId);
         accountDao.unblockAccount(walletId);
 
-        accountDao.findUserId(walletId).ifPresent(fraudService::unblockUser);
+        accountDao.findAccount(walletId).ifPresent(account -> fraudService.unblockUser(account.userId(), account.tenantId()));
     }
 
     @Override

@@ -1,6 +1,7 @@
 package br.com.wallet.ledger.api.event;
 
 import br.com.wallet.core.context.OperationOrigin;
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
@@ -11,17 +12,25 @@ public record DepositCompletedEvent(
         @NonNull UUID walletId,
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
-        @NonNull OperationOrigin origin
+        @NonNull OperationOrigin origin,
+        @NonNull String tenantId
 ) implements DomainEvent {
     public DepositCompletedEvent {
         Objects.requireNonNull(walletId, "walletId cannot be null");
         Objects.requireNonNull(amount, "amount cannot be null");
         Objects.requireNonNull(operationId, "operationId cannot be null");
         Objects.requireNonNull(origin, "origin cannot be null");
+        if (tenantId.isBlank()) {
+            throw new TenantContextMissingException("Tenant identifier is required for DepositCompletedEvent");
+        }
+    }
+
+    public DepositCompletedEvent(@NonNull UUID walletId, @NonNull BigDecimal amount, @NonNull UUID operationId, @NonNull OperationOrigin origin) {
+        this(walletId, amount, operationId, origin, "tenant-alpha");
     }
 
     public DepositCompletedEvent(@NonNull UUID walletId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
-        this(walletId, amount, operationId, OperationOrigin.USER);
+        this(walletId, amount, operationId, OperationOrigin.USER, "tenant-alpha");
     }
 
     @Override

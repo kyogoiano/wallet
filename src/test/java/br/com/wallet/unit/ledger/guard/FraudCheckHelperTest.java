@@ -72,6 +72,7 @@ class FraudCheckHelperTest {
         when(operation.amount()).thenReturn(amount);
         when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
         when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.tenantId()).thenReturn("tenant-alpha");
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.ALLOW, 0, List.of());
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);
@@ -92,6 +93,7 @@ class FraudCheckHelperTest {
         assertThat(capturedEvent.amount()).isEqualTo(amount);
         assertThat(capturedEvent.from()).isEqualTo(sourceUserId);
         assertThat(capturedEvent.to()).isEqualTo(targetUserId);
+        assertThat(capturedEvent.tenantId()).isEqualTo("tenant-alpha");
     }
 
     @Test
@@ -103,6 +105,7 @@ class FraudCheckHelperTest {
         when(operation.amount()).thenReturn(amount);
         when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
         when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.tenantId()).thenReturn("tenant-alpha");
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.REVIEW, 50, List.of(RuleType.GLOBAL_VELOCITY));
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);
@@ -131,6 +134,7 @@ class FraudCheckHelperTest {
         when(operation.amount()).thenReturn(amount);
         when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
         when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.tenantId()).thenReturn("tenant-alpha");
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.BLOCK, 100, List.of(RuleType.SLIDING_WINDOW));
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);
@@ -145,7 +149,7 @@ class FraudCheckHelperTest {
         verify(fraudService).check(any(FraudContext.class));
         verify(outboxDao).save(any(FraudEvent.class));
         verify(accountDao).blockAccountByUserId(eq(sourceUserId), contains("Fraud risk score: 100"));
-        verify(fraudService).blockUser(sourceUserId);
+        verify(fraudService).blockUser(sourceUserId, "tenant-alpha");
     }
 
     @Test
@@ -157,6 +161,7 @@ class FraudCheckHelperTest {
         when(operation.amount()).thenReturn(new BigDecimal("123.45"));
         when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
         when(operation.targetUserIdForFraudCheck()).thenReturn(targetUserId);
+        when(operation.tenantId()).thenReturn("tenant-alpha");
 
         FraudResponse fraudResponse = new FraudResponse(FraudDecision.ALLOW, 0, List.of());
         when(fraudService.check(any(FraudContext.class))).thenReturn(fraudResponse);
@@ -174,6 +179,7 @@ class FraudCheckHelperTest {
         assertThat(capturedContext.operationId()).isEqualTo(operationId);
         assertThat(capturedContext.amountInCents()).isEqualTo(12345L); // 123.45 * 100
         assertThat(capturedContext.timestamp()).isEqualTo(fixedInstant);
+        assertThat(capturedContext.tenantId()).isEqualTo("tenant-alpha");
     }
 
     @Test
@@ -184,6 +190,7 @@ class FraudCheckHelperTest {
         when(operation.operationId()).thenReturn(operationId);
         when(operation.amount()).thenReturn(amount);
         when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+        when(operation.tenantId()).thenReturn("tenant-alpha");
 
         when(fraudGate.authorize(any(), any())).thenReturn(
                 GateAuthorizationResult.block(br.com.wallet.fraud.fusion.api.model.FraudDecision.HARD_BLOCK, "HARD_BLOCK: Direct rule violated")
@@ -196,7 +203,7 @@ class FraudCheckHelperTest {
                 .hasFieldOrPropertyWithValue("userId", sourceUserId);
 
         verify(accountDao).blockAccountByUserId(eq(sourceUserId), contains("Direct rule violated"));
-        verify(fraudService).blockUser(sourceUserId);
+        verify(fraudService).blockUser(sourceUserId, "tenant-alpha");
         verifyNoInteractions(outboxDao); // Legacy rules not evaluated when pre-execution gate blocks
     }
 
@@ -208,6 +215,7 @@ class FraudCheckHelperTest {
         when(operation.operationId()).thenReturn(operationId);
         when(operation.amount()).thenReturn(amount);
         when(operation.sourceUserIdForFraudCheck()).thenReturn(sourceUserId);
+        when(operation.tenantId()).thenReturn("tenant-alpha");
 
         when(fraudGate.authorize(any(), any())).thenReturn(
                 GateAuthorizationResult.block(br.com.wallet.fraud.fusion.api.model.FraudDecision.RESTRICT, "RESTRICT: High fused risk")
@@ -220,7 +228,7 @@ class FraudCheckHelperTest {
                 .hasFieldOrPropertyWithValue("userId", sourceUserId);
 
         verifyNoInteractions(accountDao); // RESTRICT does not hard block the account in PostgreSQL
-        verify(fraudService, never()).blockUser(any());
+        verify(fraudService, never()).blockUser(any(), any());
         verifyNoInteractions(outboxDao);
     }
 }

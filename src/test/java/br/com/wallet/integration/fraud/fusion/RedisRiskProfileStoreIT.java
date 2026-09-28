@@ -63,11 +63,11 @@ public class RedisRiskProfileStoreIT extends DockerProperties {
     @DisplayName("REQ-FUSION-006: Key Format Verification — Verifies risk_profile:{tenantId}:{type}:{id} namespace")
     void shouldGenerateCorrectKeyFormat() {
         String id = UUID.randomUUID().toString();
-        RiskSubject userSubject = new RiskSubject(RiskSubjectType.USER, id);
-        assertThat(userSubject.toKey()).isEqualTo("risk_profile:default:USER:" + id);
+        RiskSubject userSubject = new RiskSubject(RiskSubjectType.USER, id, "tenant-alpha");
+        assertThat(userSubject.toKey()).isEqualTo("risk_profile:tenant-alpha:USER:" + id);
 
-        RiskSubject deviceSubject = new RiskSubject(RiskSubjectType.DEVICE, "dev-12345");
-        assertThat(deviceSubject.toKey()).isEqualTo("risk_profile:default:DEVICE:dev-12345");
+        RiskSubject deviceSubject = new RiskSubject(RiskSubjectType.DEVICE, "dev-12345", "tenant-alpha");
+        assertThat(deviceSubject.toKey()).isEqualTo("risk_profile:tenant-alpha:DEVICE:dev-12345");
 
         RiskSubject tenantSubject = new RiskSubject(RiskSubjectType.USER, id, "tenant-corp");
         assertThat(tenantSubject.toKey()).isEqualTo("risk_profile:tenant-corp:USER:" + id);

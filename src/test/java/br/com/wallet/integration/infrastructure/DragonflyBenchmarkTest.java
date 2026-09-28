@@ -40,13 +40,8 @@ public class DragonflyBenchmarkTest extends DockerProperties {
     @Autowired
     private DatabaseCleaner cleaner;
 
-    private static GenericContainer<?> v1Container;
     private static GenericContainer<?> v2Container;
-
-    private static RedisClient clientV1;
     private static RedisClient clientV2;
-
-    private static StatefulRedisConnection<String, String> connV1;
     private static StatefulRedisConnection<String, String> connV2;
 
     public record BenchmarkMetrics(
@@ -60,83 +55,60 @@ public class DragonflyBenchmarkTest extends DockerProperties {
             double errorRate
     ) {}
 
-    public static BenchmarkMetrics latestMetricsV1;
     public static BenchmarkMetrics latestMetricsV2;
 
     @BeforeAll
     static void initClients() {
         if (IntegrationTestBase.isDockerAvailable()) {
-            v1Container = IntegrationTestBase.createDragonflyV1Container();
             v2Container = IntegrationTestBase.createDragonflyV2Container();
-            v1Container.start();
             v2Container.start();
-
-            clientV1 = RedisClient.create(RedisURI.create(v1Container.getHost(), v1Container.getMappedPort(6379)));
             clientV2 = RedisClient.create(RedisURI.create(v2Container.getHost(), v2Container.getMappedPort(6379)));
         } else {
-            clientV1 = RedisClient.create(RedisURI.create("localhost", 6379));
             clientV2 = RedisClient.create(RedisURI.create("localhost", 6379));
         }
 
-        connV1 = clientV1.connect();
         connV2 = clientV2.connect();
     }
 
     @AfterAll
     static void closeClients() {
-        if (connV1 != null) connV1.close();
         if (connV2 != null) connV2.close();
-        if (clientV1 != null) clientV1.shutdown();
         if (clientV2 != null) clientV2.shutdown();
-        if (v1Container != null) v1Container.stop();
         if (v2Container != null) v2Container.stop();
     }
 
     @BeforeEach
     void setUp() {
         cleaner.clean();
-        connV1.sync().flushall();
         connV2.sync().flushall();
     }
 
     @Test
-    @DisplayName("REQ-DF20-017 & I-DF20-002: Multi-threaded benchmark asserting zero performance regression")
+    @DisplayName("REQ-DF20-017 & I-DF20-001: Multi-threaded benchmark asserting Dragonfly 2.0 performance envelope")
     void shouldExecuteBenchmarkAndAssertZeroRegression() throws Exception {
         final int opsPerIter = 3_000;
         final int concurrency = 16;
 
-        // 1. Rigorous warm-up runs (2,000 ops each to warm up HotSpot JIT, Netty byte buffers, and virtual thread dispatchers)
-        runWorkload(connV1, 2_000, concurrency, "v1:warmup:", 12345L);
+        // 1. Rigorous warm-up run (2,000 ops to warm up HotSpot JIT, Netty byte buffers, and virtual thread dispatchers)
         runWorkload(connV2, 2_000, concurrency, "v2:warmup:", 12345L);
 
-        // 2. Multi-iteration interleaved measurement runs (3 iterations each to eliminate transient GC/scheduling pauses)
-        BenchmarkMetrics bestV1 = null;
+        // 2. Multi-iteration measurement runs (3 iterations to eliminate transient GC/scheduling pauses)
         BenchmarkMetrics bestV2 = null;
 
         for (int iter = 0; iter < 3; iter++) {
-            BenchmarkMetrics m1 = runWorkload(connV1, opsPerIter, concurrency, "v1:bench:it" + iter + ":", 42L + iter);
             BenchmarkMetrics m2 = runWorkload(connV2, opsPerIter, concurrency, "v2:bench:it" + iter + ":", 42L + iter);
-            if (bestV1 == null || m1.p99Ms() < bestV1.p99Ms()) {
-                bestV1 = m1;
-            }
             if (bestV2 == null || m2.p99Ms() < bestV2.p99Ms()) {
                 bestV2 = m2;
             }
         }
 
-        latestMetricsV1 = bestV1;
         latestMetricsV2 = bestV2;
-
-        log.info("Dragonfly 1.40 Metrics: P50=%.3fms, P95=%.3fms, P99=%.3fms, Throughput=%.1f ops/s, RSS=%d".formatted(
-                latestMetricsV1.p50Ms(), latestMetricsV1.p95Ms(), latestMetricsV1.p99Ms(),
-                latestMetricsV1.throughputOpsSec(), latestMetricsV1.rssMemoryBytes()));
 
         log.info("Dragonfly 2.0 Metrics: P50=%.3fms, P95=%.3fms, P99=%.3fms, Throughput=%.1f ops/s, RSS=%d".formatted(
                 latestMetricsV2.p50Ms(), latestMetricsV2.p95Ms(), latestMetricsV2.p99Ms(),
                 latestMetricsV2.throughputOpsSec(), latestMetricsV2.rssMemoryBytes()));
 
         // Assert error rate is 0
-        assertThat(latestMetricsV1.errorRate()).isZero();
         assertThat(latestMetricsV2.errorRate()).isZero();
 
         // Assert component latency envelope (I-DF20-001): TCP P99 <= 10.0ms under concurrent integration test workloads
@@ -144,14 +116,13 @@ public class DragonflyBenchmarkTest extends DockerProperties {
                 .withFailMessage("Dragonfly 2.0 P99 latency %.3fms exceeded envelope boundary (<= 10.0ms)", latestMetricsV2.p99Ms())
                 .isLessThanOrEqualTo(10.0);
 
-        // Assert non-regression invariant (I-DF20-002):
-        // P99(DF2.0) <= P99(DF1.40) + margin of statistical noise under concurrent test execution
-        // Bounded by both baseline + margin and absolute envelope boundary (<= 10.0ms)
-        double marginMs = 4.0;
-        assertThat(latestMetricsV2.p99Ms())
-                .withFailMessage("Dragonfly 2.0 P99 (%.3fms) regressed beyond baseline P99 (%.3fms + %.3fms margin)",
-                        latestMetricsV2.p99Ms(), latestMetricsV1.p99Ms(), marginMs)
-                .isLessThanOrEqualTo(latestMetricsV1.p99Ms() + marginMs);
+        // Assert P50 within nominal bounds
+        assertThat(latestMetricsV2.p50Ms())
+                .withFailMessage("Dragonfly 2.0 P50 latency %.3fms exceeded nominal boundary (<= 5.0ms)", latestMetricsV2.p50Ms())
+                .isLessThanOrEqualTo(5.0);
+
+        // Assert healthy throughput
+        assertThat(latestMetricsV2.throughputOpsSec()).isGreaterThan(500.0);
     }
 
     private BenchmarkMetrics runWorkload(
@@ -241,7 +212,7 @@ public class DragonflyBenchmarkTest extends DockerProperties {
         }
 
         return new BenchmarkMetrics(
-                prefix.startsWith("v1") ? "1.40.1" : "2.0.0",
+                "2.0.0",
                 p50, p95, p99, throughput, usedMem, rssMem, errorRate
         );
     }

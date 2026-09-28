@@ -100,7 +100,7 @@ class NatsEdgeCommandPublisherTest {
         String payload = """
                 {"walletId":"%s","amount":50.00}
                 """.formatted(UUID.randomUUID());
-        CommandEnvelope envelope = CommandEnvelope.create(opId, CommandType.DEPOSIT, payload, "127.0.0.1", "default");
+        CommandEnvelope envelope = CommandEnvelope.create(opId, CommandType.DEPOSIT, payload, "127.0.0.1", "tenant-alpha");
 
         when(jetStream.publishAsync(any(Message.class), any(PublishOptions.class)))
                 .thenReturn(CompletableFuture.completedFuture(publishAck));
@@ -119,7 +119,7 @@ class NatsEdgeCommandPublisherTest {
         String payload = """
                 {"walletId":"%s","amount":75.00}
                 """.formatted(UUID.randomUUID());
-        CommandEnvelope envelope = CommandEnvelope.create(opId, CommandType.WITHDRAW, payload, "127.0.0.1", "default");
+        CommandEnvelope envelope = CommandEnvelope.create(opId, CommandType.WITHDRAW, payload, "127.0.0.1", "tenant-alpha");
 
         when(jetStream.publishAsync(any(Message.class), any(PublishOptions.class)))
                 .thenReturn(CompletableFuture.completedFuture(publishAck));

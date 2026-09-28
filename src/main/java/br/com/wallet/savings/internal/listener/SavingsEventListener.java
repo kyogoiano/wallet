@@ -60,7 +60,7 @@ public class SavingsEventListener {
         final var currentBalance = balanceUseCase.getBalance(event.walletId());
 
         for (final SavingsPlan plan : activePlans) {
-            final List<IntendedSweepAction> actions = ruleEngine.evaluateDeposit(plan, event.amount(), currentBalance);
+            final List<IntendedSweepAction> actions = ruleEngine.evaluateDeposit(plan, event.amount(), currentBalance, event.tenantId());
             for (final IntendedSweepAction action : actions) {
                 executionService.executeSweep(action, event.operationId(), "DEPOSIT_COMPLETED");
             }
@@ -86,7 +86,7 @@ public class SavingsEventListener {
         BigDecimal currentBalance = balanceUseCase.getBalance(event.from());
 
         for (SavingsPlan plan : activePlans) {
-            List<IntendedSweepAction> actions = ruleEngine.evaluateTransfer(plan, event.amount(), currentBalance);
+            List<IntendedSweepAction> actions = ruleEngine.evaluateTransfer(plan, event.amount(), currentBalance, event.tenantId());
             for (IntendedSweepAction action : actions) {
                 executionService.executeSweep(action, event.operationId(), "TRANSFER_COMPLETED");
             }

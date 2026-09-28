@@ -44,7 +44,7 @@ class CommandSerializationTest {
         UUID operationId = UUID.randomUUID();
         BigDecimal amount = new BigDecimal("150.75");
 
-        Withdraw original = new Withdraw(walletId, userId, amount, operationId, OperationOrigin.USER);
+        Withdraw original = new Withdraw(walletId, userId, amount, operationId, OperationOrigin.USER, "tenant-alpha");
 
         byte[] bytes = objectMapper.writeValueAsBytes(original);
         Withdraw deserialized = deserializePayload(bytes, Withdraw.class);
@@ -55,6 +55,7 @@ class CommandSerializationTest {
         assertThat(deserialized.amount()).isEqualByComparingTo(amount);
         assertThat(deserialized.operationId()).isEqualTo(operationId);
         assertThat(deserialized.origin()).isEqualTo(OperationOrigin.USER);
+        assertThat(deserialized.tenantId()).isEqualTo("tenant-alpha");
 
         // Verify traceTags() can be safely invoked without NPE
         assertThat(deserialized.traceTags())
@@ -66,7 +67,7 @@ class CommandSerializationTest {
     @DisplayName("Should deserialize string-wrapped and unknown-field Withdraw command from DLQ replay")
     void shouldDeserializeStringWrappedWithdrawCommand() {
         String innerJson = """
-                {"walletId":"0a35fb14-75ee-4125-943b-500893c30d33","userId":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","amount":50,"operationId":"0a35fb14-75ee-4125-943b-500893c30d39","origin":"USER","sourceUserIdForFraudCheck":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","targetUserIdForFraudCheck":null}
+                {"walletId":"0a35fb14-75ee-4125-943b-500893c30d33","userId":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","amount":50,"operationId":"0a35fb14-75ee-4125-943b-500893c30d39","origin":"USER","tenantId":"tenant-alpha","sourceUserIdForFraudCheck":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","targetUserIdForFraudCheck":null}
                 """.trim();
 
         // Simulate string wrapping (e.g. from JSON serialization of String payload)
@@ -80,13 +81,14 @@ class CommandSerializationTest {
         assertThat(deserialized.amount()).isEqualByComparingTo(new BigDecimal("50"));
         assertThat(deserialized.operationId()).isEqualTo(UUID.fromString("0a35fb14-75ee-4125-943b-500893c30d39"));
         assertThat(deserialized.origin()).isEqualTo(OperationOrigin.USER);
+        assertThat(deserialized.tenantId()).isEqualTo("tenant-alpha");
     }
 
     @Test
     @DisplayName("Should deserialize double-encoded JSON String payload for Deposit command")
     void shouldDeserializeDoubleEncodedDepositCommand() {
         String innerJson = """
-                {"walletId":"0a35fb14-75ee-4125-943b-500893c30d33","userId":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","amount":100000,"operationId":"0a35fb14-75ee-4125-943b-500893c30d32","origin":"USER","sourceUserIdForFraudCheck":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","targetUserIdForFraudCheck":null}
+                {"walletId":"0a35fb14-75ee-4125-943b-500893c30d33","userId":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","amount":100000,"operationId":"0a35fb14-75ee-4125-943b-500893c30d32","origin":"USER","tenantId":"tenant-alpha","sourceUserIdForFraudCheck":"2d0b175d-ee1c-41ab-9dda-a050ef29dfa8","targetUserIdForFraudCheck":null}
                 """.trim();
 
         byte[] stringWrappedPayload = objectMapper.writeValueAsBytes(innerJson);
@@ -99,6 +101,7 @@ class CommandSerializationTest {
         assertThat(deserialized.amount()).isEqualByComparingTo(new BigDecimal("100000"));
         assertThat(deserialized.operationId()).isEqualTo(UUID.fromString("0a35fb14-75ee-4125-943b-500893c30d32"));
         assertThat(deserialized.origin()).isEqualTo(OperationOrigin.USER);
+        assertThat(deserialized.tenantId()).isEqualTo("tenant-alpha");
     }
 
     @Test
@@ -109,7 +112,7 @@ class CommandSerializationTest {
         UUID operationId = UUID.randomUUID();
         BigDecimal amount = new BigDecimal("250.00");
 
-        Deposit original = new Deposit(walletId, userId, amount, operationId, OperationOrigin.USER);
+        Deposit original = new Deposit(walletId, userId, amount, operationId, OperationOrigin.USER, "tenant-alpha");
 
         byte[] bytes = objectMapper.writeValueAsBytes(original);
         Deposit deserialized = deserializePayload(bytes, Deposit.class);
@@ -120,6 +123,7 @@ class CommandSerializationTest {
         assertThat(deserialized.amount()).isEqualByComparingTo(amount);
         assertThat(deserialized.operationId()).isEqualTo(operationId);
         assertThat(deserialized.origin()).isEqualTo(OperationOrigin.USER);
+        assertThat(deserialized.tenantId()).isEqualTo("tenant-alpha");
 
         assertThat(deserialized.traceTags())
                 .containsEntry("wallet.id", walletId.toString())
@@ -134,7 +138,7 @@ class CommandSerializationTest {
         UUID operationId = UUID.randomUUID();
         BigDecimal amount = new BigDecimal("80.50");
 
-        Transfer original = new Transfer(from, to, amount, operationId, OperationOrigin.USER);
+        Transfer original = new Transfer(from, to, amount, operationId, OperationOrigin.USER, "tenant-alpha");
 
         byte[] bytes = objectMapper.writeValueAsBytes(original);
         Transfer deserialized = deserializePayload(bytes, Transfer.class);
@@ -145,6 +149,7 @@ class CommandSerializationTest {
         assertThat(deserialized.amount()).isEqualByComparingTo(amount);
         assertThat(deserialized.operationId()).isEqualTo(operationId);
         assertThat(deserialized.origin()).isEqualTo(OperationOrigin.USER);
+        assertThat(deserialized.tenantId()).isEqualTo("tenant-alpha");
 
         assertThat(deserialized.traceTags())
                 .containsEntry("wallet.from", from.toString())
@@ -160,7 +165,7 @@ class CommandSerializationTest {
         UUID operationId = UUID.randomUUID();
         BigDecimal initialBalance = new BigDecimal("1000.00");
 
-        Wallet original = new Wallet(walletId, initialBalance, userId, operationId);
+        Wallet original = new Wallet(walletId, initialBalance, userId, operationId, "tenant-alpha");
 
         byte[] bytes = objectMapper.writeValueAsBytes(original);
         Wallet deserialized = deserializePayload(bytes, Wallet.class);
@@ -170,6 +175,7 @@ class CommandSerializationTest {
         assertThat(deserialized.userId()).isEqualTo(userId);
         assertThat(deserialized.amount()).isEqualByComparingTo(initialBalance);
         assertThat(deserialized.operationId()).isEqualTo(operationId);
+        assertThat(deserialized.tenantId()).isEqualTo("tenant-alpha");
 
         assertThat(deserialized.traceTags())
                 .containsEntry("user.id", userId.toString())

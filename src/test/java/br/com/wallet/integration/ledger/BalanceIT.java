@@ -60,7 +60,7 @@ class BalanceIT extends DockerProperties {
     void shouldReturnCurrentBalance() {
         var wallet = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID(), "tenant-alpha"));
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -71,12 +71,12 @@ class BalanceIT extends DockerProperties {
     void shouldDecreaseSourceBalanceAndIncreaseTargetBalanceAfterTransfer() {
         var from = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to, userId);
+        createWalletUseCase.handle(to, userId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("40"), UUID.randomUUID()));
+                new BigDecimal("40"), UUID.randomUUID(), "tenant-alpha"));
 
         assertThat(balanceUseCase.getBalance(from))
                 .isEqualByComparingTo("60");
@@ -89,14 +89,14 @@ class BalanceIT extends DockerProperties {
     void shouldReturnHistoricalBalance() {
         var from = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to, userId);
+        createWalletUseCase.handle(to, userId, "tenant-alpha");
 
         Instant before = Instant.now();
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("30"), UUID.randomUUID()));
+                new BigDecimal("30"), UUID.randomUUID(), "tenant-alpha"));
 
         Instant after = before.plusMillis(10);
 
@@ -113,15 +113,15 @@ class BalanceIT extends DockerProperties {
     void shouldCalculateHistoricalBalanceWithMultipleTransactions() {
         var wallet = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("200"), userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("200"), userId, UUID.randomUUID(), "tenant-alpha"));
         var other = UUID.randomUUID();
-        createWalletUseCase.handle(other, userId);
+        createWalletUseCase.handle(other, userId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(wallet, other,
-                new BigDecimal("50"), UUID.randomUUID()));
+                new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha"));
 
         transferFundsUseCase.handle(new Transfer(wallet, other,
-                new BigDecimal("30"), UUID.randomUUID()));
+                new BigDecimal("30"), UUID.randomUUID(), "tenant-alpha"));
 
         Instant now = Instant.now();
 
@@ -134,7 +134,7 @@ class BalanceIT extends DockerProperties {
     void shouldReturnZeroWhenNoTransactions() {
         var wallet = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(wallet, userId);
+        createWalletUseCase.handle(wallet, userId, "tenant-alpha");
 
         var result = balanceUseCase.getHistoricalBalance(wallet, Instant.now());
 
@@ -149,11 +149,11 @@ class BalanceIT extends DockerProperties {
     void shouldNotApplySameOperationTwice() {
         var wallet = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID(), "tenant-alpha"));
         UUID opId = UUID.randomUUID();
 
-        withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId));
-        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId))).isInstanceOf(IdempotencyException.class);
+        withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId, "tenant-alpha"));
+        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId, "tenant-alpha"))).isInstanceOf(IdempotencyException.class);
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -167,15 +167,15 @@ class BalanceIT extends DockerProperties {
     void shouldHandleConcurrentWithdrawalsSafely() throws Exception {
         var wallet = UUID.randomUUID();
         var userId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID(), "tenant-alpha"));
 
         try (final var executor = Executors.newFixedThreadPool(2)) {
 
             var op1 = UUID.randomUUID();
             var op2 = UUID.randomUUID();
 
-            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op1)));
-            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op2)));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op1, "tenant-alpha")));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op2, "tenant-alpha")));
 
             executor.shutdown();
             executor.awaitTermination(3, TimeUnit.SECONDS);

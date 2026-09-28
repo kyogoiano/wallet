@@ -81,11 +81,11 @@ public class EdgeToCoreIntegrationTest extends DockerProperties {
         walletA = UUID.randomUUID();
         walletB = UUID.randomUUID();
 
-        createWalletUseCase.handle(new Wallet(walletA, BigDecimal.ONE, UUID.randomUUID(), UUID.randomUUID()));
-        createWalletUseCase.handle(new Wallet(walletB, BigDecimal.ONE, UUID.randomUUID(), UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(walletA, BigDecimal.ONE, UUID.randomUUID(), UUID.randomUUID(), "tenant-alpha"));
+        createWalletUseCase.handle(new Wallet(walletB, BigDecimal.ONE, UUID.randomUUID(), UUID.randomUUID(), "tenant-alpha"));
 
         // Seed initial balance in walletA: 200.00
-        depositFundsUseCase.handle(new Deposit(walletA, null, new BigDecimal("200.00"), UUID.randomUUID()));
+        depositFundsUseCase.handle(new Deposit(walletA, null, new BigDecimal("200.00"), UUID.randomUUID(), "tenant-alpha"));
     }
 
     private final HmacSignatureVerifier signatureVerifier = new HmacSignatureVerifier();

@@ -46,7 +46,10 @@ public class FraudCheckHelper {
     }
 
     public void performFraudCheck(@NonNull final FraudCheckable operation) {
-        final String tenantId = operation.tenantId() != null ? operation.tenantId() : "default";
+        final String tenantId = operation.tenantId();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for fraud check");
+        }
 
         // 1. Evaluate Fraud Gate V4 (P99 < 2ms fused risk profile from DragonflyDB hot cache)
         if (operation.sourceUserIdForFraudCheck() != null) {
@@ -61,7 +64,7 @@ public class FraudCheckHelper {
                     // 1. Persistent block in PostgreSQL accounts table (I-ACCOUNT-001)
                     accountDao.blockAccountByUserId(operation.sourceUserIdForFraudCheck(), gateResult.reason());
                     // 2. Dual-Store Sync in Redis/Dragonfly (I-ACCOUNT-002)
-                    fraudService.blockUser(operation.sourceUserIdForFraudCheck());
+                    fraudService.blockUser(operation.sourceUserIdForFraudCheck(), tenantId);
                 }
 
                 throw new FraudBlockedException(operation.operationId(), operation.sourceUserIdForFraudCheck());
@@ -89,7 +92,8 @@ public class FraudCheckHelper {
                 fraudContext.timestamp(),
                 fraudResponse.fraudDecision(),
                 fraudResponse.riskScore(),
-                fraudResponse.triggeredRules()
+                fraudResponse.triggeredRules(),
+                tenantId
         ));
 
         if (fraudResponse.fraudDecision().equals(FraudDecision.BLOCK)) {
@@ -100,7 +104,7 @@ public class FraudCheckHelper {
             accountDao.blockAccountByUserId(fraudContext.userId(), reason);
 
             // 2. Dual-Store Sync in Redis (I-ACCOUNT-002)
-            fraudService.blockUser(fraudContext.userId());
+            fraudService.blockUser(fraudContext.userId(), tenantId);
 
             throw new FraudBlockedException(operation.operationId(), fraudContext.userId());
         }

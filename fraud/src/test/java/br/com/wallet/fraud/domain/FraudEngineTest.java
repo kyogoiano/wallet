@@ -20,7 +20,7 @@ class FraudEngineTest {
         final FraudRule blockRule = ctx -> new RuleResult(RuleType.GLOBAL_VELOCITY, 80, true);
 
         final FraudEngine engine = new FraudEngine(List.of(allowRule, blockRule));
-        final FraudContext context = new FraudContext(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 5000, Instant.now());
+        final FraudContext context = new FraudContext(UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), 5000, Instant.now(), "tenant-alpha");
 
         final FraudResponse response = engine.evaluate(context);
 
@@ -36,7 +36,7 @@ class FraudEngineTest {
         final FraudRule allowRule2 = ctx -> new RuleResult(RuleType.GLOBAL_VELOCITY, 0, false);
 
         final FraudEngine engine = new FraudEngine(List.of(allowRule1, allowRule2));
-        final FraudContext context = new FraudContext(UUID.randomUUID(), null, UUID.randomUUID(), 1000, Instant.now());
+        final FraudContext context = new FraudContext(UUID.randomUUID(), null, UUID.randomUUID(), 1000, Instant.now(), "tenant-alpha");
 
         final FraudResponse response = engine.evaluate(context);
 

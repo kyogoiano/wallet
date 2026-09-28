@@ -1,14 +1,11 @@
 package br.com.wallet.integration.infrastructure;
 
 import br.com.wallet.core.context.FraudContext;
-import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.fraud.application.FraudService;
 import br.com.wallet.fraud.domain.FraudDecision;
 import br.com.wallet.fraud.domain.FraudResponse;
-import br.com.wallet.fraud.domain.VelocityResult;
 import br.com.wallet.fraud.fusion.api.FraudGate;
 import br.com.wallet.fraud.fusion.api.model.GateAuthorizationResult;
-import br.com.wallet.fraud.fusion.api.model.RiskSubject;
 import br.com.wallet.fraud.fusion.internal.persistence.RedisRiskProfileStore;
 import br.com.wallet.fraud.infrastructure.RedisVelocityStore;
 import br.com.wallet.ledger.api.TransferFundsUseCase;
@@ -35,14 +32,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
+import org.testcontainers.containers.GenericContainer;
 
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
-import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -57,6 +53,7 @@ import static org.mockito.Mockito.*;
 @Import(IntegrationTestBase.class)
 @DisplayName("Cache-Transaction Isolation & Non-Blocking Boundary Test (Test Triad 3: REQ-DF20-014, REQ-DF20-015, I-DF20-005, I-DF20-006)")
 public class CacheTransactionIsolationTest extends DockerProperties {
+    private static GenericContainer<?> v2Container;
 
     @Autowired
     private RedisCommands<String, String> redisCommands;
@@ -150,8 +147,10 @@ public class CacheTransactionIsolationTest extends DockerProperties {
         int initialThreadCount = Thread.activeCount();
 
         // Configure client with ultra-tight timeout (1 nanosecond) to reliably trigger timeout
-        RedisURI uri = RedisURI.create("redis://localhost:6379");
-        RedisClient timeoutClient = RedisClient.create(uri);
+
+        v2Container = IntegrationTestBase.createDragonflyV2Container();
+        v2Container.start();
+        RedisClient timeoutClient = RedisClient.create(RedisURI.create(v2Container.getHost(), v2Container.getMappedPort(6379)));
         timeoutClient.setOptions(ClientOptions.builder()
                 .autoReconnect(false)
                 .timeoutOptions(TimeoutOptions.builder().fixedTimeout(Duration.ofMillis(1)).build())

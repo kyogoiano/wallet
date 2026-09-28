@@ -48,7 +48,8 @@ public class DefaultRelationalGraphProjector implements RelationalGraphProjector
         @NonNull final UUID targetUserId,
         @NonNull final BigDecimal amount,
         @NonNull final UUID operationId,
-        @NonNull final Instant timestamp
+        @NonNull final Instant timestamp,
+        @NonNull final String tenantId
     ) {
         Objects.requireNonNull(sourceWalletId, "sourceWalletId cannot be null");
         Objects.requireNonNull(targetWalletId, "targetWalletId cannot be null");
@@ -57,8 +58,11 @@ public class DefaultRelationalGraphProjector implements RelationalGraphProjector
         Objects.requireNonNull(amount, "amount cannot be null");
         Objects.requireNonNull(operationId, "operationId cannot be null");
         Objects.requireNonNull(timestamp, "timestamp cannot be null");
+        if (tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for graph projection");
+        }
 
-        log.info("Projecting transfer event: {} -> {}, amount={}, opId={}", sourceWalletId, targetWalletId, amount, operationId);
+        log.info("Projecting transfer event: {} -> {}, amount={}, opId={}, tenantId={}", sourceWalletId, targetWalletId, amount, operationId, tenantId);
 
         // 1. Ensure entities exist
         store.upsertEntity(FraudEntity.create(sourceUserId, EntityType.USER, timestamp));
@@ -104,7 +108,7 @@ public class DefaultRelationalGraphProjector implements RelationalGraphProjector
         store.updateGraphRisk(sourceWalletId, graphScore, timestamp);
 
         // 6. Materialize hot cache in DragonflyDB
-        materializer.materializeGraphRisk(sourceUserId, graphScore, "default");
-        materializer.materializeGraphRisk(sourceWalletId, graphScore, "default");
+        materializer.materializeGraphRisk(sourceUserId, graphScore, tenantId);
+        materializer.materializeGraphRisk(sourceWalletId, graphScore, tenantId);
     }
 }

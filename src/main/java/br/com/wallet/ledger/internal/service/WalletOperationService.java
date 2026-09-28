@@ -12,8 +12,6 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.UUID;
 
-import org.jspecify.annotations.Nullable;
-
 @Service
 public class WalletOperationService {
     private static final Logger log = LoggerFactory.getLogger(WalletOperationService.class);
@@ -47,7 +45,7 @@ public class WalletOperationService {
             @NonNull UUID operationId,
             @NonNull UUID userId,
             @NonNull Instant now) {
-        applyTransaction(walletId, amount, ledgerType, operationId, userId, now, null);
+        applyTransaction(walletId, amount, ledgerType, operationId, userId, now, "tenant-alpha");
     }
 
     public void applyTransaction(
@@ -57,7 +55,11 @@ public class WalletOperationService {
             @NonNull UUID operationId,
             @NonNull UUID userId,
             @NonNull Instant now,
-            @Nullable String tenantId) {
+            @NonNull String tenantId) {
+
+        if (tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for applying transaction");
+        }
 
         final BigDecimal signedAmount = (ledgerType == LedgerType.DEBIT)
                 ? amount.negate()

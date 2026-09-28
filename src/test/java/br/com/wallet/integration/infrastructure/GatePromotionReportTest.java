@@ -3,7 +3,6 @@ package br.com.wallet.integration.infrastructure;
 import br.com.wallet.infrastructure.config.RedisScripts;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.DockerProperties;
-import br.com.wallet.support.DragonflyOutputNormalizer;
 import br.com.wallet.support.IntegrationTestBase;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
@@ -21,7 +20,6 @@ import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;

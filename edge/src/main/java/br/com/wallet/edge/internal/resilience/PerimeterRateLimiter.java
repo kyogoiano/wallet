@@ -93,7 +93,7 @@ public class PerimeterRateLimiter {
      */
     public boolean tryAcquire(@Nullable String key, int requiredTokens) {
         String effectiveKey = (key != null && !key.isBlank()) ? key : "unknown";
-        return tryAcquire(new RateLimitKey("default", effectiveKey), requiredTokens);
+        return tryAcquire(new RateLimitKey("tenant-alpha", effectiveKey), requiredTokens);
     }
 
     public int getRetryAfterSeconds() {

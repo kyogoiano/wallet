@@ -22,10 +22,18 @@ public class FraudService {
     }
 
     public void blockUser(final java.util.UUID userId) {
-        redisUserStore.setBlocked(userId, true);
+        blockUser(userId, "tenant-alpha");
+    }
+
+    public void blockUser(final java.util.UUID userId, final String tenantId) {
+        redisUserStore.setBlocked(userId, true, tenantId);
     }
 
     public void unblockUser(final java.util.UUID userId) {
-        redisUserStore.setBlocked(userId, false);
+        unblockUser(userId, "tenant-alpha");
+    }
+
+    public void unblockUser(final java.util.UUID userId, final String tenantId) {
+        redisUserStore.setBlocked(userId, false, tenantId);
     }
 }

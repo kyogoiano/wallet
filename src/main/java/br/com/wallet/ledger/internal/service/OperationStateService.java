@@ -20,23 +20,23 @@ public class OperationStateService implements OperationStateUseCase, OperationQu
     }
 
     @Override
-    public void markOperationCompleted(@NonNull final UUID operationId) {
-        walletOperationsDao.completeOperation(operationId);
-    }
-
-    @Override
-    public void markOperationCompleted(@NonNull final UUID operationId, final String tenantId) {
+    public void markOperationCompleted(@NonNull final UUID operationId, @NonNull final String tenantId) {
         walletOperationsDao.completeOperation(operationId, tenantId);
     }
 
     @Override
-    public void markOperationFailed(@NonNull final UUID operationId, final String errorMessage, final String failureType) {
-        walletOperationsDao.failOperation(operationId, errorMessage, failureType);
+    public void markOperationCompleted(@NonNull final UUID operationId) {
+        markOperationCompleted(operationId, "tenant-alpha");
     }
 
     @Override
-    public void markOperationFailed(@NonNull final UUID operationId, final String errorMessage, final String failureType, final String tenantId) {
+    public void markOperationFailed(@NonNull final UUID operationId, final String errorMessage, final String failureType, @NonNull final String tenantId) {
         walletOperationsDao.failOperation(operationId, errorMessage, failureType, tenantId);
+    }
+
+    @Override
+    public void markOperationFailed(@NonNull final UUID operationId, final String errorMessage, final String failureType) {
+        markOperationFailed(operationId, errorMessage, failureType, "tenant-alpha");
     }
 
     @Override

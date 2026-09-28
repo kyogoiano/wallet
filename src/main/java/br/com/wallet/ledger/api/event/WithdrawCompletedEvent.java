@@ -9,12 +9,20 @@ import java.util.UUID;
 public record WithdrawCompletedEvent(
         @NonNull UUID walletId,
         @NonNull BigDecimal amount,
-        @NonNull UUID operationId
+        @NonNull UUID operationId,
+        @NonNull String tenantId
 ) implements DomainEvent {
     public WithdrawCompletedEvent {
         Objects.requireNonNull(walletId, "walletId cannot be null");
         Objects.requireNonNull(amount, "amount cannot be null");
         Objects.requireNonNull(operationId, "operationId cannot be null");
+        if (tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for WithdrawCompletedEvent");
+        }
+    }
+
+    public WithdrawCompletedEvent(@NonNull UUID walletId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
+        this(walletId, amount, operationId, "tenant-alpha");
     }
 
     @Override

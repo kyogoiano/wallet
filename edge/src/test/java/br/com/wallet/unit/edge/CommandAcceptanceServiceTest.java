@@ -11,6 +11,7 @@ import br.com.wallet.edge.api.EdgeCommandPublisher;
 import br.com.wallet.edge.internal.resilience.BrokerCircuitBreaker;
 import br.com.wallet.edge.internal.resilience.IngressBulkhead;
 import br.com.wallet.edge.internal.resilience.PerimeterRateLimiter;
+import br.com.wallet.edge.api.RateLimitKey;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -21,7 +22,6 @@ import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
@@ -46,7 +46,7 @@ class CommandAcceptanceServiceTest {
         validator = new EdgeRequestValidator(64 * 1024); // 64KB limit
 
         // Defaults: pass rate limiter and bulkhead
-        when(rateLimiter.tryAcquire(anyString())).thenReturn(true);
+        when(rateLimiter.tryAcquire(any(RateLimitKey.class))).thenReturn(true);
         when(bulkhead.tryAcquire()).thenReturn(true);
         when(circuitBreaker.isCallPermitted()).thenReturn(true);
 
@@ -157,7 +157,7 @@ class CommandAcceptanceServiceTest {
         UUID opId = UUID.randomUUID();
         CommandEnvelope envelope = sampleEnvelope(opId, "{\"amount\": 50.00}");
 
-        when(rateLimiter.tryAcquire(anyString())).thenReturn(false);
+        when(rateLimiter.tryAcquire(any(RateLimitKey.class))).thenReturn(false);
         when(rateLimiter.getRetryAfterSeconds()).thenReturn(1);
 
         EdgeCommandResult result = service.acceptCommand(envelope).get(1, TimeUnit.SECONDS);

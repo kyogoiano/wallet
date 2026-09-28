@@ -33,7 +33,7 @@ class UserBlockRuleTest {
     @DisplayName("Should trigger when user is in blocked store")
     void shouldTriggerWhenUserIsBlocked() {
         final UUID userId = UUID.randomUUID();
-        final FraudContext context = new FraudContext(userId, null, UUID.randomUUID(), 10000, Instant.now());
+        final FraudContext context = new FraudContext(userId, null, UUID.randomUUID(), 10000, Instant.now(), "tenant-alpha");
 
         when(redisUserStore.isBlocked(eq(userId), any())).thenReturn(true);
 
@@ -48,7 +48,7 @@ class UserBlockRuleTest {
     @DisplayName("Should not trigger when user is not blocked")
     void shouldNotTriggerWhenUserIsNotBlocked() {
         final UUID userId = UUID.randomUUID();
-        final FraudContext context = new FraudContext(userId, null, UUID.randomUUID(), 10000, Instant.now());
+        final FraudContext context = new FraudContext(userId, null, UUID.randomUUID(), 10000, Instant.now(), "tenant-alpha");
 
         when(redisUserStore.isBlocked(eq(userId), any())).thenReturn(false);
 

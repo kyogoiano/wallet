@@ -51,16 +51,16 @@ public class ReplayWalletIT extends DockerProperties {
     void shouldReplayWalletBalanceCorrectly() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         var transfer50 = new Transfer(from, to,
-                new BigDecimal("50"), UUID.randomUUID());
+                new BigDecimal("50"), UUID.randomUUID(), "tenant-alpha");
         transferFundsUseCase.handle(transfer50);
         var transfer30 = new Transfer(from, to,
-                new BigDecimal("30"), UUID.randomUUID());
+                new BigDecimal("30"), UUID.randomUUID(), "tenant-alpha");
         transferFundsUseCase.handle(transfer30);
 
         var replayed = replayWalletUseCase.execute(from);
@@ -73,13 +73,13 @@ public class ReplayWalletIT extends DockerProperties {
 
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("150"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("150"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("40"), UUID.randomUUID()));
+                new BigDecimal("40"), UUID.randomUUID(), "tenant-alpha"));
 
         var replayed = replayWalletUseCase.execute(from);
         testDataHelper.assertBalance(from, replayed);
@@ -89,15 +89,15 @@ public class ReplayWalletIT extends DockerProperties {
     void replayShouldStillWorkEvenIfLedgerIsCorrupted() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         var opId = UUID.randomUUID();
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), opId));
+                new BigDecimal("50"), opId, "tenant-alpha"));
 
         // 💥 tamper
         testDataHelper.tamperAmount(from, 2L, new BigDecimal("999"), opId);

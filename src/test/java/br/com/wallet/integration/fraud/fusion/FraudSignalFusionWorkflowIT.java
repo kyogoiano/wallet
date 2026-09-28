@@ -103,7 +103,7 @@ public class FraudSignalFusionWorkflowIT extends DockerProperties {
         assertThat(completedJob.get().status()).isEqualTo(FusionJobStatus.COMPLETED);
 
         // 4. Verify hot state materialized in Dragonfly/Redis
-        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, entityId.toString());
+        RiskSubject subject = new RiskSubject(RiskSubjectType.USER, entityId.toString(), "tenant-alpha");
         Optional<RiskProfile> cachedProfileOpt = profileStore.getProfile(subject);
         assertThat(cachedProfileOpt).isPresent();
 

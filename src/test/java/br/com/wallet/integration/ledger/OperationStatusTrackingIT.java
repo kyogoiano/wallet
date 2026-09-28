@@ -53,13 +53,13 @@ class OperationStatusTrackingIT extends DockerProperties {
     void shouldTrackCompletedOperationStatusOnSuccessfulTransfer() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId, "tenant-alpha"));
 
         var status = operationQueryUseCase.getOperationStatus(opId);
         assertThat(status).isPresent();
@@ -72,20 +72,20 @@ class OperationStatusTrackingIT extends DockerProperties {
     void shouldTrackFailedOperationStatusWhenConsumerMarksFailed() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         UUID opId = UUID.randomUUID();
 
         // 1. Transaction fails with InsufficientFundsException
         assertThatThrownBy(() ->
-                transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId))
+                transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId, "tenant-alpha"))
         ).isInstanceOf(InsufficientFundsException.class);
 
         // 2. Consumer marks operation failed
-        operationStateUseCase.markOperationFailed(opId, "Insufficient funds", "BUSINESS");
+        operationStateUseCase.markOperationFailed(opId, "Insufficient funds", "BUSINESS", "tenant-alpha");
 
         // 3. Querying operation returns FAILED with diagnostics
         var status = operationQueryUseCase.getOperationStatus(opId);
@@ -100,7 +100,7 @@ class OperationStatusTrackingIT extends DockerProperties {
     void shouldTrackCompletedOperationStatusWhenMarkedCompletedViaUseCase() {
         UUID opId = UUID.randomUUID();
 
-        operationStateUseCase.markOperationCompleted(opId);
+        operationStateUseCase.markOperationCompleted(opId, "tenant-alpha");
 
         var status = operationQueryUseCase.getOperationStatus(opId);
         assertThat(status).isPresent();

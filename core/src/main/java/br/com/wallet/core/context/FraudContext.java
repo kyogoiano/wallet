@@ -1,5 +1,6 @@
 package br.com.wallet.core.context;
 
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import br.com.wallet.core.tracing.TraceContext;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -7,6 +8,7 @@ import org.jspecify.annotations.Nullable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 
 public record FraudContext(
@@ -15,17 +17,16 @@ public record FraudContext(
     @NonNull UUID operationId,
     long amountInCents,
     @NonNull Instant timestamp,
-    @Nullable String tenantId
+    @NonNull String tenantId
 ) implements TraceContext {
 
     public FraudContext {
-        if (tenantId == null) {
-            tenantId = "default";
+        Objects.requireNonNull(userId, "userId cannot be null");
+        Objects.requireNonNull(operationId, "operationId cannot be null");
+        Objects.requireNonNull(timestamp, "timestamp cannot be null");
+        if (tenantId.isBlank()) {
+            throw new TenantContextMissingException("Tenant identifier is required for FraudContext");
         }
-    }
-
-    public FraudContext(@NonNull UUID userId, @Nullable UUID targetUserId, @NonNull UUID operationId, long amountInCents, @NonNull Instant timestamp) {
-        this(userId, targetUserId, operationId, amountInCents, timestamp, "default");
     }
     @Override
     public UUID operationId() {

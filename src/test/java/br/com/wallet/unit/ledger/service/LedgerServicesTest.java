@@ -56,7 +56,7 @@ class LedgerServicesTest {
             final LedgerService service = new LedgerService(ledgerDao);
             final UUID walletId = UUID.randomUUID();
             final List<LedgerEntry> entries = List.of(
-                    new LedgerEntry(walletId, BigDecimal.valueOf(100.00), LedgerType.CREDIT, UUID.randomUUID(),  UUID.randomUUID(), 1L, "hash", "prevHash", Instant.now())
+                    new LedgerEntry(walletId, BigDecimal.valueOf(100.00), LedgerType.CREDIT, UUID.randomUUID(),  UUID.randomUUID(), 1L, "hash", "prevHash", Instant.now(), "tenant-alpha")
             );
             when(ledgerDao.getLedgerEntries(walletId, 50)).thenReturn(entries);
 
@@ -127,9 +127,9 @@ class LedgerServicesTest {
             final UUID walletId = UUID.randomUUID();
 
             final List<LedgerEntry> entries = List.of(
-                    new LedgerEntry(walletId, BigDecimal.valueOf(500.00), LedgerType.CREDIT, UUID.randomUUID(), UUID.randomUUID(), 1L, "h0", "h1", Instant.now()),
-                    new LedgerEntry(walletId, BigDecimal.valueOf(150.00), LedgerType.DEBIT, UUID.randomUUID(), UUID.randomUUID(), 2L, "h1", "h2", Instant.now()),
-                    new LedgerEntry(walletId, BigDecimal.valueOf(50.00), LedgerType.CREDIT, UUID.randomUUID(), UUID.randomUUID(), 3L, "h2", "h3", Instant.now())
+                    new LedgerEntry(walletId, BigDecimal.valueOf(500.00), LedgerType.CREDIT, UUID.randomUUID(), UUID.randomUUID(), 1L, "h0", "h1", Instant.now(), "tenant-alpha"),
+                    new LedgerEntry(walletId, BigDecimal.valueOf(150.00), LedgerType.DEBIT, UUID.randomUUID(), UUID.randomUUID(), 2L, "h1", "h2", Instant.now(), "tenant-alpha"),
+                    new LedgerEntry(walletId, BigDecimal.valueOf(50.00), LedgerType.CREDIT, UUID.randomUUID(), UUID.randomUUID(), 3L, "h2", "h3", Instant.now(), "tenant-alpha")
             );
             when(ledgerDao.getLedgerEntries(walletId)).thenReturn(entries);
 
@@ -151,7 +151,7 @@ class LedgerServicesTest {
 
             service.handle(walletId, userId);
 
-            verify(accountDao).insertAccount(walletId, userId);
+            verify(accountDao).insertAccount(walletId, userId, "tenant-alpha");
         }
     }
 }

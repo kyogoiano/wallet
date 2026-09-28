@@ -20,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.mock.env.MockEnvironment;
 import org.springframework.test.context.ActiveProfiles;
+import org.testcontainers.containers.GenericContainer;
 
 import java.time.Duration;
 import java.util.Map;
@@ -28,13 +29,15 @@ import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
 @DisplayName("Dragonfly 2.0 Compatibility Test (Gate 1 Verification: REQ-DF20-001, REQ-DF20-002, REQ-DF20-003, REQ-DF20-015)")
 public class DragonflyCompatibilityTest extends DockerProperties {
+
+
+    private static GenericContainer<?> v2Container;
 
     @Autowired
     private RedisClient redisClient;
@@ -44,6 +47,9 @@ public class DragonflyCompatibilityTest extends DockerProperties {
 
     @Autowired
     private RedisCommands<String, String> redisCommands;
+
+    @Autowired
+    private org.springframework.core.env.Environment springEnv;
 
     @Autowired
     private DatabaseCleaner cleaner;
@@ -69,8 +75,10 @@ public class DragonflyCompatibilityTest extends DockerProperties {
         MockEnvironment env = new MockEnvironment();
         env.setProperty("redis.socket.enabled", "true");
         env.setProperty("redis.socket.path", "/tmp/non_existent_redis_socket_" + UUID.randomUUID() + ".sock");
-        env.setProperty("spring.data.redis.host", "localhost");
-        env.setProperty("spring.data.redis.port", "6379");
+        String host = springEnv != null ? springEnv.getProperty("spring.data.redis.host", "localhost") : "localhost";
+        String port = springEnv != null ? springEnv.getProperty("spring.data.redis.port", "6379") : "6379";
+        env.setProperty("spring.data.redis.host", host);
+        env.setProperty("spring.data.redis.port", port);
 
         RedisURI socketUri = config.redisUri(env);
         RedisClient client = config.redisClient(socketUri, env);
@@ -152,8 +160,21 @@ public class DragonflyCompatibilityTest extends DockerProperties {
         int initialThreadCount = Thread.activeCount();
 
         // Create client with 1 millisecond timeout to guarantee simulated timeout
-        RedisURI uri = RedisURI.create("redis://localhost:6379");
-        RedisClient timeoutClient = RedisClient.create(uri);
+        String targetHost;
+        int targetPort;
+        if (IntegrationTestBase.REDIS != null && IntegrationTestBase.REDIS.isRunning()) {
+            targetHost = IntegrationTestBase.REDIS.getHost();
+            targetPort = IntegrationTestBase.REDIS.getMappedPort(6379);
+        } else if (IntegrationTestBase.isDockerAvailable()) {
+            v2Container = IntegrationTestBase.createDragonflyV2Container();
+            v2Container.start();
+            targetHost = v2Container.getHost();
+            targetPort = v2Container.getMappedPort(6379);
+        } else {
+            targetHost = springEnv != null ? springEnv.getProperty("spring.data.redis.host", "localhost") : "localhost";
+            targetPort = springEnv != null ? Integer.parseInt(springEnv.getProperty("spring.data.redis.port", "6379")) : 6379;
+        }
+        RedisClient timeoutClient = RedisClient.create(RedisURI.create(targetHost, targetPort));
         timeoutClient.setOptions(ClientOptions.builder()
                 .autoReconnect(false)
                 .timeoutOptions(TimeoutOptions.builder().fixedTimeout(Duration.ofNanos(1)).build())

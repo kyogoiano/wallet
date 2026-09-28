@@ -54,7 +54,10 @@ public class OperationsController implements OperationsApi {
         log.info("Transfer requested: from={}, to={}, amount={}",
                 command.from(), command.to(), command.amount());
         
-        var transfer = new Transfer(command.from(), command.to(), command.amount(), operationId);
+        String tenantId = command.tenantId() != null && !command.tenantId().isBlank()
+                ? command.tenantId()
+                : "tenant-alpha";
+        var transfer = new Transfer(command.from(), command.to(), command.amount(), operationId, tenantId);
 
         fraudCheckHelper.performFraudCheck(transfer);
 
@@ -69,7 +72,10 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final DepositCommand command) {
 
-        var deposit = new Deposit(command.walletId(), command.userId(), command.amount(), operationId);
+        String tenantId = command.tenantId() != null && !command.tenantId().isBlank()
+                ? command.tenantId()
+                : "tenant-alpha";
+        var deposit = new Deposit(command.walletId(), command.userId(), command.amount(), operationId, tenantId);
 
         fraudCheckHelper.performFraudCheck(deposit);
 
@@ -84,7 +90,10 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final WithdrawCommand command) {
 
-        final var withdraw = new Withdraw(command.walletId(), command.userId(), command.amount(), operationId);
+        String tenantId = command.tenantId() != null && !command.tenantId().isBlank()
+                ? command.tenantId()
+                : "tenant-alpha";
+        final var withdraw = new Withdraw(command.walletId(), command.userId(), command.amount(), operationId, tenantId);
 
         fraudCheckHelper.performFraudCheck(withdraw);
 

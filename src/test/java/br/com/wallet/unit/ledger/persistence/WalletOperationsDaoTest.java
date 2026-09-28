@@ -42,7 +42,7 @@ class WalletOperationsDaoTest {
 
         dao.failOperation(opId, "Insufficient funds", "BUSINESS");
 
-        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("Insufficient funds"), org.mockito.ArgumentMatchers.eq("BUSINESS"), org.mockito.ArgumentMatchers.eq("default"));
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("Insufficient funds"), org.mockito.ArgumentMatchers.eq("BUSINESS"), org.mockito.ArgumentMatchers.eq("tenant-alpha"));
     }
 
     @Test
@@ -52,6 +52,6 @@ class WalletOperationsDaoTest {
 
         dao.completeOperation(opId);
 
-        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("default"));
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("tenant-alpha"));
     }
 }

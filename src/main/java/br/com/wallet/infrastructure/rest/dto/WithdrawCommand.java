@@ -10,5 +10,10 @@ import java.util.UUID;
 public record WithdrawCommand(
         @NotNull UUID walletId,
         @Nullable UUID userId,
-        @NotNull @Positive BigDecimal amount
-) {}
+        @NotNull @Positive BigDecimal amount,
+        @Nullable String tenantId
+) {
+    public WithdrawCommand(@NotNull UUID walletId, @Nullable UUID userId, @NotNull @Positive BigDecimal amount) {
+        this(walletId, userId, amount, null);
+    }
+}

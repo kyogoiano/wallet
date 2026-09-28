@@ -25,7 +25,7 @@ public class InMemoryCredentialResolver implements CredentialResolver {
 
     public static final String DEFAULT_DEV_KEY_ID = "wallet-key-dev-1";
     public static final String DEFAULT_DEV_SECRET = "wallet-secret-dev-key-32-bytes!!";
-    public static final String DEFAULT_DEV_TENANT = "default";
+    public static final String DEFAULT_DEV_TENANT = "tenant-alpha";
     public static final String DEFAULT_DEV_PRINCIPAL = "default-principal";
 
     private final AtomicReference<CredentialSnapshot> snapshotRef;

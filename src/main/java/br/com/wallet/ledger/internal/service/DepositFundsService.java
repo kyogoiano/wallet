@@ -68,7 +68,7 @@ public class DepositFundsService implements DepositFundsUseCase {
         }
 
         // In-transaction tenant verification (I-SEC-005)
-        final String expectedTenant = deposit.tenantId() != null ? deposit.tenantId() : "default";
+        final String expectedTenant = deposit.tenantId();
         final String accountTenant = account.tenantId();
         if (!accountTenant.equals(expectedTenant)) {
             log.warn("Tenant mismatch in deposit: expected={}, accountTenant={}", expectedTenant, accountTenant);
@@ -84,7 +84,7 @@ public class DepositFundsService implements DepositFundsUseCase {
         this.execute(deposit, userId);
 
         final var event = new DepositCompletedEvent(
-                deposit.walletId(), deposit.amount(), deposit.operationId(), deposit.origin()
+                deposit.walletId(), deposit.amount(), deposit.operationId(), deposit.origin(), deposit.tenantId()
         );
 
         // internal events handled by spring with transactional warranties so if the infra fails we have failed transaction

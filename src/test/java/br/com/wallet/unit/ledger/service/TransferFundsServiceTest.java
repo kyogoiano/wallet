@@ -67,18 +67,18 @@ class TransferFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final BigDecimal amount = BigDecimal.valueOf(100.00);
 
-        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId);
+        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
-                fromWallet, new AccountBalance(fromUser, BigDecimal.valueOf(500.00)),
-                toWallet, new AccountBalance(toUser, BigDecimal.valueOf(200.00))
+                fromWallet, new AccountBalance(fromUser, BigDecimal.valueOf(500.00), "tenant-alpha"),
+                toWallet, new AccountBalance(toUser, BigDecimal.valueOf(200.00), "tenant-alpha")
         ));
 
         service.handle(transfer);
 
-        verify(core).applyTransaction(eq(fromWallet), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(fromUser), eq(clock.instant()), eq("default"));
-        verify(core).applyTransaction(eq(toWallet), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(toUser), eq(clock.instant()), eq("default"));
+        verify(core).applyTransaction(eq(fromWallet), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(fromUser), eq(clock.instant()), eq("tenant-alpha"));
+        verify(core).applyTransaction(eq(toWallet), eq(amount), eq(LedgerType.CREDIT), eq(opId), eq(toUser), eq(clock.instant()), eq("tenant-alpha"));
         verify(outboxDao).save(any(TransferCompletedEvent.class));
         verify(operationsDao).completeOperation(eq(opId), any());
     }
@@ -86,7 +86,7 @@ class TransferFundsServiceTest {
     @Test
     @DisplayName("Should reject transfer when amount is zero or negative")
     void shouldRejectZeroOrNegativeAmount() {
-        final Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.ZERO, UUID.randomUUID());
+        final Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.ZERO, UUID.randomUUID(), "tenant-alpha");
 
         assertThatThrownBy(() -> service.handle(transfer))
                 .isInstanceOf(IllegalArgumentException.class);
@@ -98,7 +98,7 @@ class TransferFundsServiceTest {
     @DisplayName("Should throw IdempotencyException if operation is already COMPLETED")
     void shouldHandleIdempotencyWhenAlreadyCompleted() {
         final UUID opId = UUID.randomUUID();
-        final Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId);
+        final Transfer transfer = new Transfer(UUID.randomUUID(), UUID.randomUUID(), BigDecimal.TEN, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(false);
         when(operationsDao.getStatus(opId)).thenReturn(OperationStatus.COMPLETED);
@@ -114,7 +114,7 @@ class TransferFundsServiceTest {
     void shouldRejectTransferToSameWallet() {
         final UUID walletId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
-        final Transfer transfer = new Transfer(walletId, walletId, BigDecimal.TEN, opId);
+        final Transfer transfer = new Transfer(walletId, walletId, BigDecimal.TEN, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
 
@@ -133,12 +133,12 @@ class TransferFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final BigDecimal amount = BigDecimal.valueOf(500.00);
 
-        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId);
+        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.getBalancesFromWallets(any())).thenReturn(Map.of(
-                fromWallet, new AccountBalance(fromUser, BigDecimal.valueOf(50.00)),
-                toWallet, new AccountBalance(toUser, BigDecimal.valueOf(200.00))
+                fromWallet, new AccountBalance(fromUser, BigDecimal.valueOf(50.00), "tenant-alpha"),
+                toWallet, new AccountBalance(toUser, BigDecimal.valueOf(200.00), "tenant-alpha")
         ));
 
         assertThatThrownBy(() -> service.handle(transfer))
@@ -155,7 +155,7 @@ class TransferFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final BigDecimal amount = BigDecimal.valueOf(50.00);
 
-        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId);
+        final Transfer transfer = new Transfer(fromWallet, toWallet, amount, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.getBalancesFromWallets(any()))

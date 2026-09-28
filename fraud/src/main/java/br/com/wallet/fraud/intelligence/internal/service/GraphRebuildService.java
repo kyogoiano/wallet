@@ -52,8 +52,14 @@ public class GraphRebuildService {
 
     @Transactional
     public RebuildSummary rebuildAll(@NonNull final Instant asOf) {
+        return rebuildAll(asOf, "tenant-alpha");
+    }
+
+    @Transactional
+    public RebuildSummary rebuildAll(@NonNull final Instant asOf, @NonNull final String tenantId) {
         Objects.requireNonNull(asOf, "asOf cannot be null");
-        log.info("Starting historical fraud graph rebuild as of {}", asOf);
+        Objects.requireNonNull(tenantId, "tenantId cannot be null");
+        log.info("Starting historical fraud graph rebuild as of {} for tenant {}", asOf, tenantId);
 
         // 1. Reset aggregate relationships table
         jdbc.update("DELETE FROM fraud_relationships");
@@ -100,7 +106,7 @@ public class GraphRebuildService {
             GraphRiskSignals signals = featureProvider.evaluateGraphSignals(entityId, asOf);
             double score = signals.calculateCompositeScore();
             store.updateGraphRisk(entityId, score, asOf);
-            materializer.materializeGraphRisk(entityId, score, "default");
+            materializer.materializeGraphRisk(entityId, score, tenantId);
         });
 
         log.info("Graph rebuild completed: {} events, {} entities recomputed", events.size(), touchedEntities.size());

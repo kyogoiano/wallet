@@ -77,12 +77,13 @@ public abstract class AbstractCommandsConsumer<T extends TraceContext> extends A
                     operationId, subject, deliveries);
 
         } catch (Exception e) {
+            String tenant = (command instanceof br.com.wallet.ledger.api.domain.FraudCheckable fc && fc.tenantId() != null) ? fc.tenantId() : "tenant-alpha";
             var retryDecision = RetryPolicy.decide(deliveries, e);
             switch (retryDecision) {
                 case DLQ -> {
                     log.error("Max delivery reached for operationId={}, sending to DLQ", operationId);
                     if (operationId != null && operationStateUseCase != null) {
-                        operationStateUseCase.markOperationFailed(operationId, e.getMessage(), ExceptionType.parseException(e).name());
+                        operationStateUseCase.markOperationFailed(operationId, e.getMessage(), ExceptionType.parseException(e).name(), tenant);
                     }
                     dlqPublisher.handleDlqMessage(dlqSubject, natsConnection, message, e);
                     message.ack();
@@ -91,7 +92,7 @@ public abstract class AbstractCommandsConsumer<T extends TraceContext> extends A
                 case ACK -> {
                     log.info("Non-retriable/Business condition for operationId={}, finishing with ACK. reason={}", operationId, e.getMessage());
                     if (operationId != null && operationStateUseCase != null) {
-                        operationStateUseCase.markOperationFailed(operationId, e.getMessage(), ExceptionType.parseException(e).name());
+                        operationStateUseCase.markOperationFailed(operationId, e.getMessage(), ExceptionType.parseException(e).name(), tenant);
                     }
                     message.ack();
                     return;

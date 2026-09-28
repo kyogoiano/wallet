@@ -1,5 +1,6 @@
 package br.com.wallet.ledger.api.domain;
 
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
 
@@ -26,26 +27,9 @@ public record Account(
         Objects.requireNonNull(userId, "userId cannot be null");
         Objects.requireNonNull(status, "status cannot be null");
         Objects.requireNonNull(createdAt, "createdAt cannot be null");
-        if (tenantId == null) {
-            tenantId = "default";
+        if (tenantId.isBlank()) {
+            throw new TenantContextMissingException("Tenant identifier is required for Account");
         }
-    }
-
-    public Account(
-            UUID id,
-            BigDecimal balance,
-            Long version,
-            UUID userId,
-            AccountStatus status,
-            Instant blockedAt,
-            String blockedReason,
-            Instant createdAt
-    ) {
-        this(id, balance, version, userId, status, blockedAt, blockedReason, createdAt, "default");
-    }
-
-    public Account(UUID id, BigDecimal balance, Long version, UUID userId, Instant createdAt) {
-        this(id, balance, version, userId, AccountStatus.ACTIVE, null, null, createdAt, "default");
     }
 
     public boolean isActive() {

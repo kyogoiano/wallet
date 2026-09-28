@@ -90,7 +90,7 @@ public class CommandAcceptanceService implements EdgeCommandIngress {
         }
 
         // 2. Perimeter Rate Limiting (REQ-EDG-004)
-        if (!rateLimiter.tryAcquire(command.clientIp())) {
+        if (!rateLimiter.tryAcquire(new br.com.wallet.edge.api.RateLimitKey(command.tenantId(), command.clientIp()))) {
             return CompletableFuture.completedFuture(
                     new EdgeCommandResult.RateLimited("Perimeter rate limit exceeded", rateLimiter.getRetryAfterSeconds())
             );

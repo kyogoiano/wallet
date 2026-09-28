@@ -48,20 +48,25 @@ public class RedisUserStore extends AsyncUserCache<Boolean> {
     }
 
     private String userKey(UUID userId, String suffix, String tenantId) {
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
-        return "fraud:" + effectiveTenant + ":user:" + userId + ":" + suffix;
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for RedisUserStore");
+        }
+        return "fraud:" + tenantId + ":user:" + userId + ":" + suffix;
     }
 
     private String userKey(UUID userId, String suffix) {
-        return userKey(userId, suffix, "default");
+        return userKey(userId, suffix, "tenant-alpha");
     }
 
     @Override
     CompletionStage<Boolean> isBlockedAsync(@NonNull final UUID userId) {
-        return isBlockedAsync(userId, "default");
+        return isBlockedAsync(userId, "tenant-alpha");
     }
 
     CompletionStage<Boolean> isBlockedAsync(@NonNull final UUID userId, final String tenantId) {
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for RedisUserStore");
+        }
         log.debug("Checking if user {} is blocked in tenant {} (from Redis)", userId, tenantId);
         return commands.exists(userKey(userId, "blocked", tenantId)).thenApply(count -> count == 1);
     }
@@ -72,31 +77,30 @@ public class RedisUserStore extends AsyncUserCache<Boolean> {
      * @return completion stage boolean, true if the user is blocked, false otherwise
      */
     public boolean isBlocked(@NonNull final UUID userId) {
-        return isBlocked(userId, "default");
+        return isBlocked(userId, "tenant-alpha");
     }
 
     public boolean isBlocked(@NonNull final UUID userId, final String tenantId) {
-        if (tenantId == null || "default".equals(tenantId)) {
-            return this.getCache().get(userId).join();
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for RedisUserStore");
         }
         return isBlockedAsync(userId, tenantId).toCompletableFuture().join();
     }
 
     public void setBlocked(@NonNull final UUID userId, final boolean blocked) {
-        setBlocked(userId, blocked, "default");
+        setBlocked(userId, blocked, "tenant-alpha");
     }
 
     public void setBlocked(@NonNull final UUID userId, final boolean blocked, final String tenantId) {
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
-        log.info("Setting user blocked status in Redis: userId={}, tenantId={}, blocked={}", userId, effectiveTenant, blocked);
-        String key = userKey(userId, "blocked", effectiveTenant);
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new br.com.wallet.core.exceptions.TenantContextMissingException("Tenant identifier is required for RedisUserStore");
+        }
+        log.info("Setting user blocked status in Redis: userId={}, tenantId={}, blocked={}", userId, tenantId, blocked);
+        String key = userKey(userId, "blocked", tenantId);
         if (blocked) {
             commands.set(key, "1", SetArgs.Builder.ex(600));
         } else {
             commands.del(key);
-        }
-        if ("default".equals(effectiveTenant)) {
-            getCache().put(userId, java.util.concurrent.CompletableFuture.completedFuture(blocked));
         }
     }
 }

@@ -60,15 +60,15 @@ class WithdrawFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final BigDecimal amount = BigDecimal.valueOf(50.00);
 
-        final Withdraw withdraw = new Withdraw(walletId, userId, amount, opId);
+        final Withdraw withdraw = new Withdraw(walletId, userId, amount, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId))
-                .thenReturn(Optional.of(new AccountBalance(userId, BigDecimal.valueOf(100.00))));
+                .thenReturn(Optional.of(new AccountBalance(userId, BigDecimal.valueOf(100.00), "tenant-alpha")));
 
         service.handle(withdraw);
 
-        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(userId), eq(clock.instant()), eq("default"));
+        verify(core).applyTransaction(eq(walletId), eq(amount), eq(LedgerType.DEBIT), eq(opId), eq(userId), eq(clock.instant()), eq("tenant-alpha"));
         verify(outboxDao).save(any(WithdrawCompletedEvent.class));
         verify(operationsDao).completeOperation(eq(opId), any());
     }
@@ -81,11 +81,11 @@ class WithdrawFundsServiceTest {
         final UUID opId = UUID.randomUUID();
         final BigDecimal amount = BigDecimal.valueOf(150.00);
 
-        final Withdraw withdraw = new Withdraw(walletId, userId, amount, opId);
+        final Withdraw withdraw = new Withdraw(walletId, userId, amount, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId))
-                .thenReturn(Optional.of(new AccountBalance(userId, BigDecimal.valueOf(50.00))));
+                .thenReturn(Optional.of(new AccountBalance(userId, BigDecimal.valueOf(50.00), "tenant-alpha")));
 
         assertThatThrownBy(() -> service.handle(withdraw))
                 .isInstanceOf(InsufficientFundsException.class);
@@ -101,11 +101,11 @@ class WithdrawFundsServiceTest {
         final UUID otherUserId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
 
-        final Withdraw withdraw = new Withdraw(walletId, otherUserId, BigDecimal.TEN, opId);
+        final Withdraw withdraw = new Withdraw(walletId, otherUserId, BigDecimal.TEN, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId))
-                .thenReturn(Optional.of(new AccountBalance(ownerUserId, BigDecimal.valueOf(100.00))));
+                .thenReturn(Optional.of(new AccountBalance(ownerUserId, BigDecimal.valueOf(100.00), "tenant-alpha")));
 
         assertThatThrownBy(() -> service.handle(withdraw))
                 .isInstanceOf(UserNotAllowedException.class);
@@ -116,7 +116,7 @@ class WithdrawFundsServiceTest {
     void shouldThrowWhenAccountNotFound() {
         final UUID walletId = UUID.randomUUID();
         final UUID opId = UUID.randomUUID();
-        final Withdraw withdraw = new Withdraw(walletId, UUID.randomUUID(), BigDecimal.TEN, opId);
+        final Withdraw withdraw = new Withdraw(walletId, UUID.randomUUID(), BigDecimal.TEN, opId, "tenant-alpha");
 
         when(operationsDao.startOperation(eq(opId), any())).thenReturn(true);
         when(accountDao.findWalletBalanceForUpdate(walletId)).thenReturn(Optional.empty());

@@ -73,7 +73,8 @@ public class FraudGraphConsumer extends AbstractEventConsumer<TransferCompletedE
             toUserId,
             event.amount(),
             event.operationId(),
-            Instant.now()
+            Instant.now(),
+            event.tenantId()
         );
     }
 

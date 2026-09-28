@@ -90,7 +90,7 @@ public class SavingsDepositSweepIT extends DockerProperties {
 
         // When: User deposits R$ 5,000.00
         depositFundsUseCase.handle(new Deposit(
-                primaryWalletId, userId, new BigDecimal("5000.00"), UUID.randomUUID(), OperationOrigin.USER
+                primaryWalletId, userId, new BigDecimal("5000.00"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ));
 
         await().atMost(Duration.ofSeconds(1)).pollInterval(Duration.ofMillis(50))

@@ -318,8 +318,8 @@ class NatsPublisherAuthorizationIT extends DockerProperties {
         UUID user2 = UUID.randomUUID();
         UUID opId = UUID.randomUUID();
 
-        seedAccount(fromWallet, user1, new BigDecimal("200.00"), "default");
-        seedAccount(toWallet, user2, BigDecimal.ZERO, "default");
+        seedAccount(fromWallet, user1, new BigDecimal("200.00"), "tenant-alpha");
+        seedAccount(toWallet, user2, BigDecimal.ZERO, "tenant-alpha");
 
         Headers headers = new Headers();
         headers.add("Nats-Msg-Id", opId.toString());

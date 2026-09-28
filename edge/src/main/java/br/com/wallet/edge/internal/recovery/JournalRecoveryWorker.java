@@ -6,6 +6,7 @@ import br.com.wallet.edge.internal.journal.CorruptedJournalException;
 import br.com.wallet.edge.internal.journal.segmented.JournalRecord;
 import br.com.wallet.edge.internal.journal.spi.DurableSpilloverJournal;
 import br.com.wallet.edge.api.EdgeCommandPublisher;
+import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.ApplicationArguments;
@@ -65,7 +66,7 @@ public class JournalRecoveryWorker implements ApplicationRunner {
     }
 
     @Override
-    public void run(ApplicationArguments args) {
+    public void run(@NonNull ApplicationArguments args) {
         log.info("Starting edge crash recovery and fair drain scan (I-EDGE-004)...");
         runRecoveryScan();
         log.info("Edge crash recovery scan completed with state: {}", healthIndicator.getCurrentState());
@@ -99,7 +100,7 @@ public class JournalRecoveryWorker implements ApplicationRunner {
                             new String(record.payload(), StandardCharsets.UTF_8),
                             record.timestamp(),
                             "recovery-worker",
-                            "default"
+                            "tenant-alpha"
                     );
 
                     // Replay to primary broker

@@ -103,7 +103,7 @@ public class TransferFundsService implements TransferFundsUseCase {
         this.execute(transfer);
 
         final TransferCompletedEvent event = new TransferCompletedEvent(
-                transfer.from(), transfer.to(), transfer.amount(), transfer.operationId(), transfer.origin()
+                transfer.from(), transfer.to(), transfer.amount(), transfer.operationId(), transfer.origin(), transfer.tenantId()
         );
         publisher.publishEvent(event);
 
@@ -130,7 +130,7 @@ public class TransferFundsService implements TransferFundsUseCase {
         final var toBalance = accountBalances.get(transfer.to());
 
         // In-transaction tenant verification (I-SEC-005)
-        final String expectedTenant = transfer.tenantId() != null ? transfer.tenantId() : "default";
+        final String expectedTenant = transfer.tenantId();
         final String fromTenant = fromBalance.tenantId();
         final String toTenant = toBalance.tenantId();
 

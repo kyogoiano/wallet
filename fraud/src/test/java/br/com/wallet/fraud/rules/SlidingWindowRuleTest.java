@@ -43,7 +43,7 @@ class SlidingWindowRuleTest {
         SlidingAmountWindow window = new SlidingAmountWindow(30); // 30 seconds window
         when(localStateStore.getWindow(userId)).thenReturn(window);
 
-        FraudContext ctx = new FraudContext(userId, null, operationId, 5000L, timestamp); // 50 cents
+        FraudContext ctx = new FraudContext(userId, null, operationId, 5000L, timestamp, "tenant-alpha"); // 50 cents
         RuleResult result = slidingWindowRule.evaluate(ctx);
 
         assertThat(result.triggered()).isFalse();
@@ -60,7 +60,7 @@ class SlidingWindowRuleTest {
         window.add(timestamp.minusSeconds(10).toEpochMilli(), 900000L); // 90.00
         when(localStateStore.getWindow(userId)).thenReturn(window);
 
-        FraudContext ctx = new FraudContext(userId, null, operationId, 150000L, timestamp); // 15.00
+        FraudContext ctx = new FraudContext(userId, null, operationId, 150000L, timestamp, "tenant-alpha"); // 15.00
         RuleResult result = slidingWindowRule.evaluate(ctx);
 
         assertThat(result.triggered()).isTrue();
@@ -76,19 +76,19 @@ class SlidingWindowRuleTest {
         when(localStateStore.getWindow(userId)).thenReturn(window);
 
         // First transaction: below limit
-        FraudContext ctx1 = new FraudContext(userId, null, operationId, 500000L, timestamp); // 5.00
+        FraudContext ctx1 = new FraudContext(userId, null, operationId, 500000L, timestamp, "tenant-alpha"); // 5.00
         RuleResult result1 = slidingWindowRule.evaluate(ctx1);
         assertThat(result1.triggered()).isFalse();
         assertThat(window.total()).isEqualTo(500000L);
 
         // Second transaction: still below limit
-        FraudContext ctx2 = new FraudContext(userId, null, UUID.randomUUID(), 300000L, timestamp.plusSeconds(5)); // 3.00
+        FraudContext ctx2 = new FraudContext(userId, null, UUID.randomUUID(), 300000L, timestamp.plusSeconds(5), "tenant-alpha"); // 3.00
         RuleResult result2 = slidingWindowRule.evaluate(ctx2);
         assertThat(result2.triggered()).isFalse();
         assertThat(window.total()).isEqualTo(800000L);
 
         // Third transaction: exceeds limit
-        FraudContext ctx3 = new FraudContext(userId, null, UUID.randomUUID(), 250000L, timestamp.plusSeconds(10)); // 2.50
+        FraudContext ctx3 = new FraudContext(userId, null, UUID.randomUUID(), 250000L, timestamp.plusSeconds(10), "tenant-alpha"); // 2.50
         RuleResult result3 = slidingWindowRule.evaluate(ctx3);
         assertThat(result3.triggered()).isTrue();
         assertThat(result3.scoreImpact()).isEqualTo(10);
@@ -102,7 +102,7 @@ class SlidingWindowRuleTest {
         when(localStateStore.getWindow(userId)).thenReturn(window);
 
         // Add amount that will expire
-        FraudContext ctx1 = new FraudContext(userId, null, operationId, 900000L, timestamp); // 9.00
+        FraudContext ctx1 = new FraudContext(userId, null, operationId, 900000L, timestamp, "tenant-alpha"); // 9.00
         slidingWindowRule.evaluate(ctx1);
         assertThat(window.total()).isEqualTo(900000L);
 
@@ -110,7 +110,7 @@ class SlidingWindowRuleTest {
         Thread.sleep(1500); // Sleep for 1.5 seconds
 
         // Add new amount, should not trigger as old amount expired
-        FraudContext ctx2 = new FraudContext(userId, null, UUID.randomUUID(), 150000L, timestamp.plusSeconds(2)); // 1.50
+        FraudContext ctx2 = new FraudContext(userId, null, UUID.randomUUID(), 150000L, timestamp.plusSeconds(2), "tenant-alpha"); // 1.50
         RuleResult result2 = slidingWindowRule.evaluate(ctx2);
         assertThat(result2.triggered()).isFalse();
         assertThat(window.total()).isEqualTo(150000L); // Only the new amount should be present

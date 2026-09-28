@@ -11,6 +11,9 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import br.com.wallet.ledger.api.domain.Account;
+import java.math.BigDecimal;
+import java.time.Instant;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -36,23 +39,25 @@ class AccountStateServiceTest {
     @Test
     @DisplayName("Should block account in DB and sync Redis")
     void shouldBlockAccountAndSyncRedis() {
-        when(accountDao.findUserId(walletId)).thenReturn(Optional.of(userId));
+        Account account = new Account(walletId, BigDecimal.ZERO, 1L, userId, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
+        when(accountDao.findAccount(walletId)).thenReturn(Optional.of(account));
 
         accountStateService.blockAccount(walletId, "Administrative block for investigation");
 
         verify(accountDao).blockAccount(walletId, "Administrative block for investigation");
-        verify(fraudService).blockUser(userId);
+        verify(fraudService).blockUser(userId, "tenant-alpha");
     }
 
     @Test
     @DisplayName("Should unblock account in DB and clear Redis")
     void shouldUnblockAccountAndClearRedis() {
-        when(accountDao.findUserId(walletId)).thenReturn(Optional.of(userId));
+        Account account = new Account(walletId, BigDecimal.ZERO, 1L, userId, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
+        when(accountDao.findAccount(walletId)).thenReturn(Optional.of(account));
 
         accountStateService.unblockAccount(walletId);
 
         verify(accountDao).unblockAccount(walletId);
-        verify(fraudService).unblockUser(userId);
+        verify(fraudService).unblockUser(userId, "tenant-alpha");
     }
 
     @Test

@@ -1,6 +1,7 @@
 package br.com.wallet.ledger.api.context;
 
 import br.com.wallet.core.context.OperationOrigin;
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import br.com.wallet.core.tracing.TraceContext;
 import br.com.wallet.ledger.api.domain.FraudCheckable;
 import org.jspecify.annotations.NonNull;
@@ -17,7 +18,7 @@ public record Deposit(
         @NonNull BigDecimal amount,
         @NonNull UUID operationId,
         OperationOrigin origin,
-        @Nullable String tenantId
+        @NonNull String tenantId
 ) implements TraceContext, FraudCheckable {
 
     public Deposit {
@@ -27,17 +28,13 @@ public record Deposit(
         if (origin == null) {
             origin = OperationOrigin.USER;
         }
-        if (tenantId == null) {
-            tenantId = "default";
+        if (tenantId.isBlank()) {
+            throw new TenantContextMissingException("Tenant identifier is required for Deposit");
         }
     }
 
-    public Deposit(@NonNull UUID walletId, @Nullable UUID userId, @NonNull BigDecimal amount, @NonNull UUID operationId, OperationOrigin origin) {
-        this(walletId, userId, amount, operationId, origin, "default");
-    }
-
-    public Deposit(@NonNull UUID walletId, @Nullable UUID userId, @NonNull BigDecimal amount, @NonNull UUID operationId) {
-        this(walletId, userId, amount, operationId, OperationOrigin.USER, "default");
+    public Deposit(@NonNull UUID walletId, @Nullable UUID userId, @NonNull BigDecimal amount, @NonNull UUID operationId, @NonNull String tenantId) {
+        this(walletId, userId, amount, operationId, OperationOrigin.USER, tenantId);
     }
 
     @Override
@@ -55,7 +52,7 @@ public record Deposit(
         return Map.of(
                 "wallet.id", walletId.toString(),
                 "operation.origin", origin.name(),
-                "tenant.id", tenantId != null ? tenantId : "default"
+                "tenant.id", tenantId
         );
     }
 

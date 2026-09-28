@@ -12,7 +12,10 @@ import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
+import br.com.wallet.edge.api.AuthenticatedPrincipal;
+import br.com.wallet.edge.internal.security.HmacAuthenticationFilter;
 import java.net.URI;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
@@ -33,6 +36,8 @@ class EdgeOperationsControllerTest {
         controller = new EdgeOperationsController(ingress);
         request = mock(HttpServletRequest.class);
         when(request.getRemoteAddr()).thenReturn("10.0.0.1");
+        AuthenticatedPrincipal principal = new AuthenticatedPrincipal("user-1", "tenant-alpha", "key-1", Set.of());
+        when(request.getAttribute(HmacAuthenticationFilter.AUTHENTICATED_PRINCIPAL_ATTR)).thenReturn(principal);
     }
 
     @Test

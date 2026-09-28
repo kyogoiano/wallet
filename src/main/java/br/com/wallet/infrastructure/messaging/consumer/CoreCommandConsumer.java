@@ -99,7 +99,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
                             operationId,
                             se.getMessage(),
                             "FORBIDDEN_TENANT_ACCESS",
-                            opTenant != null ? opTenant : "default"
+                            opTenant != null ? opTenant : "tenant-alpha"
                     );
                 }
             }
@@ -133,7 +133,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
             if (operationId != null) {
                 statusBroadcaster.publishStatus(operationId, "COMPLETED", "Command executed successfully");
                 if (operationStateUseCase != null) {
-                    operationStateUseCase.markOperationCompleted(operationId, tenantId);
+                    operationStateUseCase.markOperationCompleted(operationId, tenantId != null ? tenantId : "tenant-alpha");
                 }
             }
             message.ack();

@@ -44,9 +44,14 @@ public class CreateWalletService implements CreateWalletUseCase {
     @Traceable("wallet.create")
     @Override
     public void handle(@NonNull UUID walletId, @NotNull UUID userId) {
-        accountDao.insertAccount(walletId, userId);
+        handle(walletId, userId, "tenant-alpha");
     }
 
+    @Traceable("wallet.createWithTenant")
+    @Override
+    public void handle(@NonNull UUID walletId, @NotNull UUID userId, @NonNull String tenantId) {
+        accountDao.insertAccount(walletId, userId, tenantId);
+    }
 
     /**
      * This only works with positive amounts
@@ -56,9 +61,9 @@ public class CreateWalletService implements CreateWalletUseCase {
     @Transactional
     @Override
     public void handle(@NonNull final Wallet wallet) {
-        walletOperationsDao.startOperation(wallet.operationId());
+        walletOperationsDao.startOperation(wallet.operationId(), wallet.tenantId());
         execute(wallet);
-        walletOperationsDao.completeOperation(wallet.operationId());
+        walletOperationsDao.completeOperation(wallet.operationId(), wallet.tenantId());
         log.info("Wallet created with id {}", wallet.id());
     }
 
@@ -67,7 +72,7 @@ public class CreateWalletService implements CreateWalletUseCase {
      * @param wallet wallet object to be created, where initial balance > 0
      */
     private void execute(@NonNull final Wallet wallet) {
-        accountDao.insertAccount(wallet.id(), wallet.userId());
+        accountDao.insertAccount(wallet.id(), wallet.userId(), wallet.tenantId());
         log.info("Creating wallet with id {}, now we will apply a new transaction to include the initial balance {}", wallet.id(), wallet.initialBalance());
         core.applyTransaction(
                 wallet.id(),
@@ -75,10 +80,11 @@ public class CreateWalletService implements CreateWalletUseCase {
                 LedgerType.CREDIT,
                 wallet.operationId(),
                 wallet.userId(),
-                clock.instant()
+                clock.instant(),
+                wallet.tenantId()
         );
         outboxDao.save(
-                new DepositCompletedEvent(wallet.id(), wallet.initialBalance(), wallet.operationId())
+                new DepositCompletedEvent(wallet.id(), wallet.initialBalance(), wallet.operationId(), br.com.wallet.core.context.OperationOrigin.USER, wallet.tenantId())
         );
     }
 }

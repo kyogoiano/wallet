@@ -27,11 +27,11 @@ public class FraudProjectionEnricher {
      * @param fraudEvent fraud Event data
      */
     public void processReviewEvent(@NonNull final FraudEvent fraudEvent) {
-        processReviewEvent(fraudEvent, "default");
+        processReviewEvent(fraudEvent, fraudEvent.tenantId());
     }
 
     public void processReviewEvent(@NonNull final FraudEvent fraudEvent, String tenantId) {
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "tenant-alpha";
         var result = commands.<List<Long>>eval(
                 RedisScripts.REVIEW_COUNT_PROTECTED_SCRIPT,
                 ScriptOutputType.MULTI,
@@ -72,11 +72,11 @@ public class FraudProjectionEnricher {
     }
 
     public void processBlockEvent(@NonNull final FraudEvent fraudEvent) {
-        processBlockEvent(fraudEvent, "default");
+        processBlockEvent(fraudEvent, fraudEvent.tenantId());
     }
 
     public void processBlockEvent(@NonNull final FraudEvent fraudEvent, String tenantId) {
-        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "default";
+        String effectiveTenant = (tenantId != null && !tenantId.isBlank()) ? tenantId : "tenant-alpha";
         var result = commands.<List<Long>>eval(
                 RedisScripts.BLOCK_PROTECTED_SCRIPT,
                 ScriptOutputType.MULTI,

@@ -1,5 +1,6 @@
 package br.com.wallet.edge.api;
 
+import br.com.wallet.core.exceptions.TenantContextMissingException;
 import java.util.Objects;
 import java.util.UUID;
 
@@ -22,7 +23,9 @@ public record CommandEnvelope(
         Objects.requireNonNull(type, "type must not be null");
         Objects.requireNonNull(payloadJson, "payloadJson must not be null");
         if (clientIp == null) clientIp = "127.0.0.1";
-        if (tenantId == null) tenantId = "default";
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new TenantContextMissingException("Tenant identifier is required for CommandEnvelope");
+        }
         if (principalId == null) principalId = "unknown";
         if (keyId == null) keyId = "unknown";
     }
@@ -45,11 +48,11 @@ public record CommandEnvelope(
             long timestamp,
             String clientIp
     ) {
-        this(operationId, type, payloadJson, timestamp, clientIp, "default", "unknown", "unknown");
+        this(operationId, type, payloadJson, timestamp, clientIp, "tenant-alpha", "unknown", "unknown");
     }
 
     public static CommandEnvelope create(UUID operationId, CommandType type, String payloadJson, String clientIp) {
-        return new CommandEnvelope(operationId, type, payloadJson, System.currentTimeMillis(), clientIp, "default", "unknown", "unknown");
+        return new CommandEnvelope(operationId, type, payloadJson, System.currentTimeMillis(), clientIp, "tenant-alpha", "unknown", "unknown");
     }
 
     public static CommandEnvelope create(UUID operationId, CommandType type, String payloadJson, String clientIp, String tenantId) {

@@ -114,7 +114,8 @@ public class GoalRestIT extends DockerProperties {
                 walletB,
                 userId,
                 new BigDecimal("20000.00"),
-                UUID.randomUUID()
+                UUID.randomUUID(),
+                "tenant-alpha"
         ));
 
         // 4. Calculate live strategy (Deficit = 80,000; Months: 28; Required: 2857.14; Safe Capacity: 4000)

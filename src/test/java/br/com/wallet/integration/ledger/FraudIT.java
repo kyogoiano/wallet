@@ -69,9 +69,9 @@ class FraudIT extends DockerProperties {
     @DisplayName("Should block transfer operation if fraud service returns BLOCK decision")
     void shouldBlockTransferOperationOnFraudDecisionBlock() {
         // Given
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         when(fraudService.check(any(FraudContext.class))).thenReturn(new FraudResponse(FraudDecision.ALLOW, 0, List.of()));
-        createWalletUseCase.handle(to,   toUserId);
+        createWalletUseCase.handle(to,   toUserId, "tenant-alpha");
         when(fraudService.check(any(FraudContext.class))).thenReturn(new FraudResponse(FraudDecision.ALLOW, 0, List.of()));
         UUID operationId = UUID.randomUUID();
 
@@ -104,7 +104,7 @@ class FraudIT extends DockerProperties {
     @DisplayName("Should block deposit operation if fraud service returns BLOCK decision")
     void shouldBlockDepositOperationOnFraudDecisionBlock() {
         // Given
-        var wallet = new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID());
+        var wallet = new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha");
         createWalletUseCase.handle(wallet);
         UUID operationId = UUID.randomUUID();
 
@@ -136,7 +136,7 @@ class FraudIT extends DockerProperties {
     @DisplayName("Should block withdraw operation if fraud service returns BLOCK decision")
     void shouldBlockWithdrawOperationOnFraudDecisionBlock() {
         // Given
-        var wallet = new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID());
+        var wallet = new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha");
         createWalletUseCase.handle(wallet);
         UUID operationId = UUID.randomUUID();
 
@@ -168,8 +168,8 @@ class FraudIT extends DockerProperties {
     @DisplayName("Should allow operation if fraud service returns ALLOW decision")
     void shouldAllowOperationOnFraudDecisionAllow() {
         // Given
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID()));
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("200"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         UUID operationId = UUID.randomUUID();
 

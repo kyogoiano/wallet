@@ -36,9 +36,20 @@ public class SavingsRuleEngine {
             @NonNull final BigDecimal depositAmount,
             @NonNull final BigDecimal currentBalance
     ) {
+        return evaluateDeposit(plan, depositAmount, currentBalance, "tenant-alpha");
+    }
+
+    @NonNull
+    public List<IntendedSweepAction> evaluateDeposit(
+            @NonNull final SavingsPlan plan,
+            @NonNull final BigDecimal depositAmount,
+            @NonNull final BigDecimal currentBalance,
+            @NonNull final String tenantId
+    ) {
         Objects.requireNonNull(plan, "plan cannot be null");
         Objects.requireNonNull(depositAmount, "depositAmount cannot be null");
         Objects.requireNonNull(currentBalance, "currentBalance cannot be null");
+        Objects.requireNonNull(tenantId, "tenantId cannot be null");
 
         if (!plan.isActive()) {
             return List.of();
@@ -63,7 +74,7 @@ public class SavingsRuleEngine {
             if (actualSweep.compareTo(BigDecimal.ZERO) > 0) {
                 actions.add(new IntendedSweepAction(
                         plan.id(), rule.id(), SavingsRuleType.PERCENTAGE,
-                        plan.sourceWalletId(), plan.targetWalletId(), actualSweep
+                        plan.sourceWalletId(), plan.targetWalletId(), actualSweep, tenantId
                 ));
                 runningBalance = runningBalance.subtract(actualSweep);
             }
@@ -84,7 +95,7 @@ public class SavingsRuleEngine {
             if (actualSweep.compareTo(BigDecimal.ZERO) > 0) {
                 actions.add(new IntendedSweepAction(
                         plan.id(), rule.id(), SavingsRuleType.THRESHOLD,
-                        plan.sourceWalletId(), plan.targetWalletId(), actualSweep
+                        plan.sourceWalletId(), plan.targetWalletId(), actualSweep, tenantId
                 ));
             }
         }
@@ -98,9 +109,20 @@ public class SavingsRuleEngine {
             @NonNull final BigDecimal transferAmount,
             @NonNull final BigDecimal currentBalance
     ) {
+        return evaluateTransfer(plan, transferAmount, currentBalance, "tenant-alpha");
+    }
+
+    @NonNull
+    public List<IntendedSweepAction> evaluateTransfer(
+            @NonNull final SavingsPlan plan,
+            @NonNull final BigDecimal transferAmount,
+            @NonNull final BigDecimal currentBalance,
+            @NonNull final String tenantId
+    ) {
         Objects.requireNonNull(plan, "plan cannot be null");
         Objects.requireNonNull(transferAmount, "transferAmount cannot be null");
         Objects.requireNonNull(currentBalance, "currentBalance cannot be null");
+        Objects.requireNonNull(tenantId, "tenantId cannot be null");
 
         if (!plan.isActive()) {
             return List.of();
@@ -126,7 +148,7 @@ public class SavingsRuleEngine {
 
         return List.of(new IntendedSweepAction(
                 plan.id(), rule.id(), SavingsRuleType.ROUND_UP,
-                plan.sourceWalletId(), plan.targetWalletId(), actualSweep
+                plan.sourceWalletId(), plan.targetWalletId(), actualSweep, tenantId
         ));
     }
 }

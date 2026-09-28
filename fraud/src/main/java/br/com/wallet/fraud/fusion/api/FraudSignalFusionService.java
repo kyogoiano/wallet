@@ -60,7 +60,27 @@ public class FraudSignalFusionService {
 
     @NonNull
     public RiskFusionResult evaluateEntity(@NonNull final UUID entityId) {
+        FraudEntity entity = relationshipStore.findEntityById(entityId).orElse(null);
+        String tenantId = null;
+        if (entity != null && entity.metadata() != null) {
+            Object t = entity.metadata().get("tenantId");
+            if (t == null) {
+                t = entity.metadata().get("tenant_id");
+            }
+            if (t != null) {
+                tenantId = t.toString();
+            }
+        }
+        if (tenantId == null || tenantId.isBlank()) {
+            tenantId = "tenant-alpha";
+        }
+        return evaluateEntity(entityId, tenantId);
+    }
+
+    @NonNull
+    public RiskFusionResult evaluateEntity(@NonNull final UUID entityId, @NonNull final String tenantId) {
         Objects.requireNonNull(entityId, "entityId cannot be null");
+        Objects.requireNonNull(tenantId, "tenantId cannot be null");
 
         FraudEntity entity = relationshipStore.findEntityById(entityId)
             .orElseGet(() -> FraudEntity.create(entityId, EntityType.USER, Instant.now()));
@@ -90,7 +110,7 @@ public class FraudSignalFusionService {
 
         // 4. Materialize hot state risk profile
         RiskSubjectType subjectType = mapEntityType(entity.entityType());
-        RiskSubject subject = new RiskSubject(subjectType, entityId.toString());
+        RiskSubject subject = new RiskSubject(subjectType, entityId.toString(), tenantId);
         double mlScore = mlResult instanceof MlRiskResult.Available available ? available.score() : 0.0;
         boolean degraded = mlResult instanceof MlRiskResult.Unavailable;
 

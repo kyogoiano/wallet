@@ -3,9 +3,6 @@ package br.com.wallet.support;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 
-import static br.com.wallet.support.IntegrationTestBase.NATS_CONTAINER;
-import static br.com.wallet.support.IntegrationTestBase.REDIS;
-
 public abstract class DockerProperties {
 
     @DynamicPropertySource

@@ -63,7 +63,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
         this.execute(withdraw);
 
         outboxDao.save(
-                new WithdrawCompletedEvent(withdraw.walletId(), withdraw.amount(), withdraw.operationId())
+                new WithdrawCompletedEvent(withdraw.walletId(), withdraw.amount(), withdraw.operationId(), withdraw.tenantId())
         );
 
         operationsDao.completeOperation(withdraw.operationId(), withdraw.tenantId());
@@ -75,7 +75,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
                 .orElseThrow(AccountNotFoundException::new);
 
         // In-transaction tenant verification (I-SEC-005)
-        final String expectedTenant = withdraw.tenantId() != null ? withdraw.tenantId() : "default";
+        final String expectedTenant = withdraw.tenantId();
         final String accountTenant = userBalance.tenantId();
         if (!accountTenant.equals(expectedTenant)) {
             log.warn("Tenant mismatch in withdraw: expected={}, accountTenant={}", expectedTenant, accountTenant);

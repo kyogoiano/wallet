@@ -72,14 +72,14 @@ class OutboxIT extends DockerProperties {
     void shouldProcessOutboxEvents() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
         UUID opId = UUID.randomUUID();
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), opId));
+                new BigDecimal("50"), opId, "tenant-alpha"));
 
         outboxRelay.process();
 
@@ -96,13 +96,13 @@ class OutboxIT extends DockerProperties {
     void shouldNotMarkEventAsProcessedOnFailure() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), opId));
+                new BigDecimal("50"), opId, "tenant-alpha"));
 
         failingEventPublisher.failNext(4); // the wallet creation with initial balance is also an event (that deposits)
 
@@ -119,15 +119,15 @@ class OutboxIT extends DockerProperties {
     void shouldRetryProcessingLater() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         UUID opId = UUID.randomUUID();
 
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), opId));
+                new BigDecimal("50"), opId, "tenant-alpha"));
 
         // first try fails ( after wallet creation with balance -> transfer error!)
         failingEventPublisher.failNext(2);
@@ -154,13 +154,13 @@ class OutboxIT extends DockerProperties {
     void shouldHandleInvalidPayloadGracefully() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), opId));
+                new BigDecimal("50"), opId, "tenant-alpha"));
 
         UUID eventId = testDataHelper.getOutboxIdByOperation(opId);
 
@@ -176,13 +176,13 @@ class OutboxIT extends DockerProperties {
     void shouldNotReprocessAlreadyProcessedEvent() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
         UUID opId = UUID.randomUUID();
         transferFundsUseCase.handle(new Transfer(from, to,
-                new BigDecimal("50"), opId));
+                new BigDecimal("50"), opId, "tenant-alpha"));
 
         outboxRelay.process();
         outboxRelay.process(); // second time
@@ -197,13 +197,13 @@ class OutboxIT extends DockerProperties {
 
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
         UUID opId = UUID.randomUUID();
         log.info("opId={}", opId);
-        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId, "tenant-alpha"));
 
         failingEventPublisher.failNext(5);
 
@@ -223,13 +223,13 @@ class OutboxIT extends DockerProperties {
     void shouldNotProcessBeforeRetryTime() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId, "tenant-alpha"));
 
         failingEventPublisher.failNext(4);
         outboxRelay.process();
@@ -247,14 +247,14 @@ class OutboxIT extends DockerProperties {
     void shouldNotDuplicateOutboxEventsForSameOperation() {
         var from = UUID.randomUUID();
         var fromUserId = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID(), "tenant-alpha"));
         var to = UUID.randomUUID();
         var toUserId = UUID.randomUUID();
-        createWalletUseCase.handle(to, toUserId);
+        createWalletUseCase.handle(to, toUserId, "tenant-alpha");
 
         UUID opId = UUID.randomUUID();
 
-        Transfer transfer = new Transfer(from, to, new BigDecimal("50"), opId);
+        Transfer transfer = new Transfer(from, to, new BigDecimal("50"), opId, "tenant-alpha");
         transferFundsUseCase.handle(transfer);
 
         assertThatThrownBy(() -> transferFundsUseCase.handle(transfer)).isInstanceOf(IdempotencyException.class);

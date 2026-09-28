@@ -58,8 +58,8 @@ class FraudGraphConsumerTest {
         UUID operationId = UUID.randomUUID();
         BigDecimal amount = new BigDecimal("250.00");
 
-        Account sourceAccount = new Account(walletFrom, BigDecimal.valueOf(1000), 1L, userFrom, AccountStatus.ACTIVE, null, null, Instant.now());
-        Account targetAccount = new Account(walletTo, BigDecimal.valueOf(500), 1L, userTo, AccountStatus.ACTIVE, null, null, Instant.now());
+        Account sourceAccount = new Account(walletFrom, BigDecimal.valueOf(1000), 1L, userFrom, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
+        Account targetAccount = new Account(walletTo, BigDecimal.valueOf(500), 1L, userTo, AccountStatus.ACTIVE, null, null, Instant.now(), "tenant-alpha");
 
         when(accountUseCase.find(walletFrom)).thenReturn(sourceAccount);
         when(accountUseCase.find(walletTo)).thenReturn(targetAccount);
@@ -79,7 +79,8 @@ class FraudGraphConsumerTest {
             eq(userTo),
             eq(amount),
             eq(operationId),
-            any(Instant.class)
+            any(Instant.class),
+            eq("tenant-alpha")
         );
     }
 
@@ -107,7 +108,8 @@ class FraudGraphConsumerTest {
             eq(walletTo),
             eq(amount),
             eq(operationId),
-            any(Instant.class)
+            any(Instant.class),
+            eq("tenant-alpha")
         );
     }
 }

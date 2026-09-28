@@ -334,7 +334,7 @@ class CoreCommandConsumerTest {
         Headers headers = new Headers();
         headers.add("operation_id", opId.toString());
         headers.add("type", "TRANSFER");
-        headers.add("tenant_id", "default");
+        headers.add("tenant_id", "tenant-alpha");
         headers.add("principal_id", "test-principal");
         headers.add("key_id", "key-1");
         headers.add("publisher_id", "unauthorized-external-actor");
@@ -344,7 +344,7 @@ class CoreCommandConsumerTest {
         consumer.processMessage(message);
 
         verify(statusBroadcaster).publishStatus(eq(opId), eq("FAILED"), contains("Unauthorized publisher"));
-        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Unauthorized publisher"), eq("FORBIDDEN_TENANT_ACCESS"), eq("default"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Unauthorized publisher"), eq("FORBIDDEN_TENANT_ACCESS"), eq("tenant-alpha"));
         verify(message).ack();
         verify(transferFundsUseCase, never()).handle(any());
     }
@@ -356,7 +356,7 @@ class CoreCommandConsumerTest {
         Headers headers = new Headers();
         headers.add("operation_id", opId.toString());
         headers.add("type", "TRANSFER");
-        headers.add("tenant_id", "default");
+        headers.add("tenant_id", "tenant-alpha");
         headers.add("principal_id", "test-principal");
         headers.add("key_id", "key-1");
         // missing publisher_id
@@ -366,7 +366,7 @@ class CoreCommandConsumerTest {
         consumer.processMessage(message);
 
         verify(statusBroadcaster).publishStatus(eq(opId), eq("FAILED"), contains("Unauthorized publisher"));
-        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Unauthorized publisher"), eq("FORBIDDEN_TENANT_ACCESS"), eq("default"));
+        verify(operationStateUseCase).markOperationFailed(eq(opId), contains("Unauthorized publisher"), eq("FORBIDDEN_TENANT_ACCESS"), eq("tenant-alpha"));
         verify(message).ack();
         verify(transferFundsUseCase, never()).handle(any());
     }

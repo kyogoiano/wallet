@@ -14,6 +14,12 @@ import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.client.RestTestClient;
 import org.springframework.web.context.WebApplicationContext;
 
+import br.com.wallet.edge.api.CredentialMaterial;
+import br.com.wallet.edge.internal.security.HmacAuthenticationFilter;
+import br.com.wallet.edge.internal.security.HmacCanonicalizer;
+import br.com.wallet.edge.internal.security.HmacSignatureVerifier;
+import br.com.wallet.edge.internal.security.InMemoryCredentialResolver;
+
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -48,7 +54,13 @@ class EdgeStandaloneIT {
                     .thenReturn(java.util.concurrent.CompletableFuture.completedFuture(ack));
         }
         if (restTestClient == null) {
-            restTestClient = RestTestClient.bindToApplicationContext(applicationContext).build();
+            restTestClient = RestTestClient.bindToApplicationContext(applicationContext)
+                    .configureServer(builder -> {
+                        if (applicationContext.containsBean("hmacAuthenticationFilter")) {
+                            builder.addFilters(applicationContext.getBean(HmacAuthenticationFilter.class));
+                        }
+                    })
+                    .build();
         }
     }
 
@@ -70,6 +82,10 @@ class EdgeStandaloneIT {
         }
     }
 
+    private final HmacSignatureVerifier signatureVerifier = new HmacSignatureVerifier();
+    private final CredentialMaterial credentialMaterial =
+            new CredentialMaterial(InMemoryCredentialResolver.DEFAULT_DEV_SECRET.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+
     @Test
     @DisplayName("REQ-PRC-001 & I-EDGE-001: Standalone Edge must accept commands returning HTTP 202 ACCEPTED")
     void shouldAcceptTransferCommandStandalone() {
@@ -82,10 +98,25 @@ class EdgeStandaloneIT {
                 }
                 """.formatted(UUID.randomUUID(), UUID.randomUUID());
 
+        String timestamp = String.valueOf(System.currentTimeMillis());
+        byte[] bodyBytes = requestJson.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        String canonical = HmacCanonicalizer.buildCanonicalRequest(
+                "POST",
+                "/operations/transfers",
+                null,
+                InMemoryCredentialResolver.DEFAULT_DEV_KEY_ID,
+                timestamp,
+                opId.toString(),
+                bodyBytes
+        );
+        String signature = signatureVerifier.computeSignatureHex(canonical, credentialMaterial);
+
         restTestClient.post()
                 .uri("/operations/transfers")
-                .header("Idempotency-Key", opId.toString())
-                .header("X-Tenant-Id", "tenant-alpha")
+                .header(br.com.wallet.core.security.SecurityHeaders.IDEMPOTENCY_KEY, opId.toString())
+                .header(br.com.wallet.core.security.SecurityHeaders.X_KEY_ID, InMemoryCredentialResolver.DEFAULT_DEV_KEY_ID)
+                .header(br.com.wallet.core.security.SecurityHeaders.X_TIMESTAMP, timestamp)
+                .header(br.com.wallet.core.security.SecurityHeaders.X_SIGNATURE, signature)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(requestJson)
                 .exchange()

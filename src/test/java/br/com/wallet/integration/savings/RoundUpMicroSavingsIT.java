@@ -78,7 +78,7 @@ public class RoundUpMicroSavingsIT extends DockerProperties {
 
         // Seed initial balance in primary wallet: R$ 500.00 (system seed)
         depositFundsUseCase.handle(new Deposit(
-                primaryWalletId, userId, new BigDecimal("500.00"), UUID.randomUUID(), OperationOrigin.SYSTEM
+                primaryWalletId, userId, new BigDecimal("500.00"), UUID.randomUUID(), OperationOrigin.SYSTEM, "tenant-alpha"
         ));
     }
 
@@ -95,7 +95,7 @@ public class RoundUpMicroSavingsIT extends DockerProperties {
 
         // When: User spends R$ 47.30 to merchant
         transferFundsUseCase.handle(new Transfer(
-                primaryWalletId, merchantWalletId, new BigDecimal("47.30"), UUID.randomUUID(), OperationOrigin.USER
+                primaryWalletId, merchantWalletId, new BigDecimal("47.30"), UUID.randomUUID(), OperationOrigin.USER, "tenant-alpha"
         ));
         await().atMost(Duration.ofSeconds(1)).pollInterval(Duration.ofMillis(50))
                 .untilAsserted(() -> {

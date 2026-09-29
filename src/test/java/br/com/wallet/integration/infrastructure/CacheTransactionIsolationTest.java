@@ -144,6 +144,7 @@ public class CacheTransactionIsolationTest extends DockerProperties {
     @Test
     @DisplayName("Triad 3 - Repeated Emergency Timeout Boundedness: Zero thread leak and zero DB blocking (REQ-DF20-015, I-DF20-005)")
     void shouldBoundRepeatedTimeoutsWithZeroThreadLeakage() {
+        org.junit.jupiter.api.Assumptions.assumeTrue(IntegrationTestBase.isDockerAvailable(), "Docker is required for container lifecycle test");
         int initialThreadCount = Thread.activeCount();
 
         // Configure client with ultra-tight timeout (1 nanosecond) to reliably trigger timeout

@@ -199,4 +199,105 @@ class HmacAuthenticationFilterTest {
         assertThat(filterChainCalled).isTrue();
         assertThat(response.getStatus()).isEqualTo(200);
     }
+
+    @Test
+    @DisplayName("TASK-10.11: Should reject duplicate nonce with 401 DUPLICATE_NONCE")
+    void shouldRejectDuplicateNonce() throws ServletException, IOException {
+        br.com.wallet.security.replay.NonceTracker mockTracker = org.mockito.Mockito.mock(br.com.wallet.security.replay.NonceTracker.class);
+        org.mockito.Mockito.when(mockTracker.reserve(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new br.com.wallet.security.replay.NonceReservation.Rejected(br.com.wallet.security.replay.ReplayRejectionReason.DUPLICATE_NONCE));
+
+        HmacAuthenticationFilter filterWithNonce = new HmacAuthenticationFilter(resolver, verifier, mockTracker, clock);
+
+        String timestamp = String.valueOf(fixedNow.toEpochMilli());
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        String canonicalRequest = HmacCanonicalizer.buildCanonicalRequest(
+                "POST", "/operations/transfer", null, KEY_ID, timestamp, "op-1", body
+        );
+        String signature = verifier.computeSignatureHex(canonicalRequest, new CredentialMaterial(SECRET));
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/operations/transfer");
+        request.addHeader(SecurityHeaders.X_KEY_ID, KEY_ID);
+        request.addHeader(SecurityHeaders.X_TIMESTAMP, timestamp);
+        request.addHeader(SecurityHeaders.IDEMPOTENCY_KEY, "op-1");
+        request.addHeader(SecurityHeaders.X_SIGNATURE, signature);
+        request.setContent(body);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean filterChainCalled = new AtomicBoolean(false);
+
+        filterWithNonce.doFilter(request, response, (req, res) -> filterChainCalled.set(true));
+
+        assertThat(filterChainCalled).isFalse();
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("DUPLICATE_NONCE");
+    }
+
+    @Test
+    @DisplayName("TASK-10.11: Should fail closed with 503 REPLAY_STORAGE_UNAVAILABLE when nonce storage fails")
+    void shouldFailClosedWhenNonceStorageUnavailable() throws ServletException, IOException {
+        br.com.wallet.security.replay.NonceTracker mockTracker = org.mockito.Mockito.mock(br.com.wallet.security.replay.NonceTracker.class);
+        org.mockito.Mockito.when(mockTracker.reserve(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new br.com.wallet.security.replay.NonceReservation.Unavailable(br.com.wallet.security.replay.ReplayAvailabilityReason.STORAGE_UNAVAILABLE));
+
+        HmacAuthenticationFilter filterWithNonce = new HmacAuthenticationFilter(resolver, verifier, mockTracker, clock);
+
+        String timestamp = String.valueOf(fixedNow.toEpochMilli());
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        String canonicalRequest = HmacCanonicalizer.buildCanonicalRequest(
+                "POST", "/operations/transfer", null, KEY_ID, timestamp, "op-1", body
+        );
+        String signature = verifier.computeSignatureHex(canonicalRequest, new CredentialMaterial(SECRET));
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/operations/transfer");
+        request.addHeader(SecurityHeaders.X_KEY_ID, KEY_ID);
+        request.addHeader(SecurityHeaders.X_TIMESTAMP, timestamp);
+        request.addHeader(SecurityHeaders.IDEMPOTENCY_KEY, "op-1");
+        request.addHeader(SecurityHeaders.X_SIGNATURE, signature);
+        request.setContent(body);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean filterChainCalled = new AtomicBoolean(false);
+
+        filterWithNonce.doFilter(request, response, (req, res) -> filterChainCalled.set(true));
+
+        assertThat(filterChainCalled).isFalse();
+        assertThat(response.getStatus()).isEqualTo(503);
+        assertThat(response.getContentAsString()).contains("REPLAY_STORAGE_UNAVAILABLE");
+    }
+
+    @Test
+    @DisplayName("TASK-10.11: Should admit valid nonce and attach ReplayKey to request attribute")
+    void shouldAdmitValidNonceAndAttachAttribute() throws ServletException, IOException {
+        br.com.wallet.security.replay.NonceTracker mockTracker = org.mockito.Mockito.mock(br.com.wallet.security.replay.NonceTracker.class);
+        org.mockito.Mockito.when(mockTracker.reserve(org.mockito.ArgumentMatchers.any()))
+                .thenReturn(new br.com.wallet.security.replay.NonceReservation.Admitted());
+
+        HmacAuthenticationFilter filterWithNonce = new HmacAuthenticationFilter(resolver, verifier, mockTracker, clock);
+
+        String timestamp = String.valueOf(fixedNow.toEpochMilli());
+        byte[] body = "{}".getBytes(StandardCharsets.UTF_8);
+        String canonicalRequest = HmacCanonicalizer.buildCanonicalRequest(
+                "POST", "/operations/transfer", null, KEY_ID, timestamp, "op-1", body
+        );
+        String signature = verifier.computeSignatureHex(canonicalRequest, new CredentialMaterial(SECRET));
+
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/operations/transfer");
+        request.addHeader(SecurityHeaders.X_KEY_ID, KEY_ID);
+        request.addHeader(SecurityHeaders.X_TIMESTAMP, timestamp);
+        request.addHeader(SecurityHeaders.IDEMPOTENCY_KEY, "op-1");
+        request.addHeader(SecurityHeaders.X_SIGNATURE, signature);
+        request.setContent(body);
+
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        AtomicBoolean filterChainCalled = new AtomicBoolean(false);
+
+        filterWithNonce.doFilter(request, response, (req, res) -> {
+            filterChainCalled.set(true);
+            assertThat(req.getAttribute(HmacAuthenticationFilter.REPLAY_KEY_ATTR)).isNotNull();
+        });
+
+        assertThat(filterChainCalled).isTrue();
+        assertThat(response.getStatus()).isEqualTo(200);
+    }
 }

@@ -36,10 +36,24 @@ public class NatsEdgeCommandPublisher implements EdgeCommandPublisher {
 
     private final Connection connection;
     private final ObjectMapper objectMapper;
+    private final br.com.wallet.security.envelope.EnvelopeEncryptor envelopeEncryptor;
+    private final br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient;
 
     public NatsEdgeCommandPublisher(Connection connection, ObjectMapper objectMapper) {
+        this(connection, objectMapper, null, null);
+    }
+
+    @org.springframework.beans.factory.annotation.Autowired
+    public NatsEdgeCommandPublisher(
+            Connection connection,
+            ObjectMapper objectMapper,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) br.com.wallet.security.envelope.EnvelopeEncryptor envelopeEncryptor,
+            @org.springframework.beans.factory.annotation.Autowired(required = false) br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient
+    ) {
         this.connection = connection;
         this.objectMapper = objectMapper;
+        this.envelopeEncryptor = envelopeEncryptor;
+        this.keyManagementClient = keyManagementClient;
     }
 
     @Override
@@ -58,6 +72,27 @@ public class NatsEdgeCommandPublisher implements EdgeCommandPublisher {
             headers.add("principal_id", command.principalId());
             headers.add("key_id", command.keyId());
             headers.add("publisher_id", "edge-gateway");
+
+            if (envelopeEncryptor != null && keyManagementClient != null) {
+                br.com.wallet.security.envelope.TenantId tenantId = new br.com.wallet.security.envelope.TenantId(command.tenantId());
+                String keyIdStr = (command.keyId() != null && !command.keyId().isBlank() && !"unknown".equals(command.keyId()))
+                        ? command.keyId() : "default-key";
+                br.com.wallet.security.envelope.KeyId keyId = new br.com.wallet.security.envelope.KeyId(keyIdStr);
+                br.com.wallet.security.keymanagement.KeyContext context = br.com.wallet.security.keymanagement.KeyContext.forTenant(tenantId);
+
+                try (br.com.wallet.security.keymanagement.GeneratedDataKey dataKey = keyManagementClient.generateDataKey(tenantId, keyId, context)) {
+                    br.com.wallet.security.envelope.CryptoEnvelope envelope = envelopeEncryptor.encrypt(
+                            enrichedPayload,
+                            tenantId,
+                            new br.com.wallet.security.envelope.OperationId(command.operationId()),
+                            keyId,
+                            dataKey
+                    );
+                    enrichedPayload = br.com.wallet.security.envelope.EnvelopeCodec.encode(envelope);
+                    headers.add("content_type", "application/x-wallet-crypto-envelope");
+                    headers.add("envelope_version", envelope.version().code());
+                }
+            }
 
             NatsMessage message = NatsMessage.builder()
                     .subject(subject)

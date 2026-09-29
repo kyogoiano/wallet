@@ -72,6 +72,7 @@ To protect the orchestrator's context window from pollution, delegate work acros
 - [`perimeter-security`](file:///.agents/skills/perimeter-security/SKILL.md) — HMAC-SHA256 request signing, zero-DB credential resolution, tenant rate limiting, and Core transactional validation.
 - [`onprem-infrastructure`](file:///.agents/skills/onprem-infrastructure/SKILL.md) — Rancher, SUSE Virtualization (Harvester HCI), vCluster, and HCI add-on orchestration for on-premises Wallet appliances.
 - [`typed-decision-algebra`](file:///.agents/skills/typed-decision-algebra/SKILL.md) — Native Java typed decision algebra, generic question-outcome binding, anti-coercion composition, machine-verifiable evidence hashing, and Five-Gate semantic evaluation protocol.
+- [`financial-cryptographic-security`](file:///.agents/skills/financial-cryptographic-security/SKILL.md) — Application-layer envelope encryption, AEAD with canonical AAD, secure key material lifecycle, replay protection algebra, zero-plaintext journals, telemetry non-emission, and Spring Modulith cryptographic isolation.
 
 
 ### Workflows ([`.agents/workflows/`](file:///.agents/workflows/))

@@ -30,6 +30,11 @@ public final class SecurityHeaders {
     public static final String X_SIGNATURE = "X-Signature";
 
     /**
+     * Optional client nonce header for two-phase replay protection (I-ENV-004).
+     */
+    public static final String X_NONCE = "X-Nonce";
+
+    /**
      * Unique client idempotency key header identifying the financial operation.
      */
     public static final String IDEMPOTENCY_KEY = "Idempotency-Key";

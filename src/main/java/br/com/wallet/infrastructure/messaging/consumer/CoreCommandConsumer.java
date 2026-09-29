@@ -47,6 +47,8 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
     private final OperationStatusBroadcaster statusBroadcaster;
     private final DlqPublisher dlqPublisher;
     private final OperationStateUseCase operationStateUseCase;
+    private final br.com.wallet.security.envelope.EnvelopeDecryptor envelopeDecryptor;
+    private final br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient;
 
     public CoreCommandConsumer(
             @Autowired final Connection natsConnection,
@@ -59,6 +61,24 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
             @Autowired final DlqPublisher dlqPublisher,
             @Autowired(required = false) final OperationStateUseCase operationStateUseCase
     ) {
+        this(natsConnection, objectMapper, transferFundsUseCase, depositFundsUseCase, withdrawFundsUseCase,
+                fraudCheckHelper, statusBroadcaster, dlqPublisher, operationStateUseCase, null, null);
+    }
+
+    @Autowired
+    public CoreCommandConsumer(
+            @Autowired final Connection natsConnection,
+            @Autowired final ObjectMapper objectMapper,
+            @Autowired final TransferFundsUseCase transferFundsUseCase,
+            @Autowired final DepositFundsUseCase depositFundsUseCase,
+            @Autowired final WithdrawFundsUseCase withdrawFundsUseCase,
+            @Autowired final FraudCheckHelper fraudCheckHelper,
+            @Autowired final OperationStatusBroadcaster statusBroadcaster,
+            @Autowired final DlqPublisher dlqPublisher,
+            @Autowired(required = false) final OperationStateUseCase operationStateUseCase,
+            @Autowired(required = false) final br.com.wallet.security.envelope.EnvelopeDecryptor envelopeDecryptor,
+            @Autowired(required = false) final br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient
+    ) {
         super(SUBJECT, natsConnection);
         this.objectMapper = objectMapper;
         this.transferFundsUseCase = transferFundsUseCase;
@@ -68,6 +88,8 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
         this.statusBroadcaster = statusBroadcaster;
         this.dlqPublisher = dlqPublisher;
         this.operationStateUseCase = operationStateUseCase;
+        this.envelopeDecryptor = envelopeDecryptor;
+        this.keyManagementClient = keyManagementClient;
     }
 
     @Override
@@ -113,8 +135,34 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
 
         final Object command;
         try {
-            JsonNode node = parseJsonNode(message.getData(), operationId, tenantId);
+            byte[] payloadBytes = message.getData();
+            if (isCryptoEnvelope(message)) {
+                if (envelopeDecryptor == null || keyManagementClient == null) {
+                    throw new IllegalStateException("CryptoEnvelope received but no EnvelopeDecryptor / KeyManagementClient configured");
+                }
+                br.com.wallet.security.envelope.CryptoEnvelope envelope =
+                        br.com.wallet.security.envelope.EnvelopeCodec.decode(message.getData());
+
+                try (br.com.wallet.security.keymanagement.SensitiveKeyMaterial plaintextDek = keyManagementClient.decryptDataKey(
+                        envelope.tenantId(),
+                        envelope.keyId(),
+                        envelope.wrappedDek(),
+                        br.com.wallet.security.keymanagement.KeyContext.forTenant(envelope.tenantId()))) {
+
+                    payloadBytes = envelopeDecryptor.decrypt(envelope, plaintextDek);
+                }
+            }
+
+            JsonNode node = parseJsonNode(payloadBytes, operationId, tenantId);
             command = deserializeCommand(node, type);
+        } catch (br.com.wallet.security.failure.CryptographicIntegrityException cie) {
+            log.error("Cryptographic tamper detected for opId: {}", operationId, cie);
+            handlePoisonMessage(message, type, operationId, cie);
+            return;
+        } catch (br.com.wallet.security.failure.KeyManagementUnavailableException kmue) {
+            log.warn("KMS unavailable during unwrap for opId: {}", operationId, kmue);
+            message.nakWithDelay(Duration.ofSeconds(2));
+            return;
         } catch (Exception e) {
             log.error("Poison message detected while deserializing command: opId={}, type={}, subject={}",
                     operationId, type, message.getSubject(), e);
@@ -262,6 +310,22 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
             case DEPOSIT -> "commands.dlq.deposit";
             case WITHDRAW -> "commands.dlq.withdraw";
         };
+    }
+
+    private boolean isCryptoEnvelope(Message message) {
+        String contentType = extractHeader(message, "content_type");
+        if ("application/x-wallet-crypto-envelope".equals(contentType)) {
+            return true;
+        }
+        byte[] data = message.getData();
+        if (data != null && data.length >= 4) {
+            int magic = ((data[0] & 0xFF) << 24) |
+                        ((data[1] & 0xFF) << 16) |
+                        ((data[2] & 0xFF) << 8)  |
+                        (data[3] & 0xFF);
+            return magic == br.com.wallet.security.envelope.EnvelopeCodec.MAGIC;
+        }
+        return false;
     }
 
     private static final java.util.Set<String> AUTHORIZED_PUBLISHERS = java.util.Set.of("edge-gateway");

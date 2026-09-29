@@ -1,0 +1,825 @@
+Yes. I reviewed the proposed **ARCH/PLAN direction**, and I think the Modulith idea is now strong enough to become part of the architecture rather than an implementation afterthought.
+
+The PLAN is already explicitly targeting `br.com.wallet.security`, `:edge`, `:core`, and the root infrastructure, with the governing skills currently being `perimeter-security`, `capability-driven-development`, and `spec-driven-development`.
+
+My recommendation is **approve the direction, but revise several architectural details before TASKS**.
+
+## 1. The overall boundary is good
+
+The proposed flow is clean:
+
+```text
+                    ┌──────────────────────┐
+                    │       CLIENT         │
+                    └──────────┬───────────┘
+                               │
+                         HMAC authentication
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │         EDGE         │
+                    │                      │
+                    │ HMAC → Nonce → GCM   │
+                    │          │           │
+                    │          ▼           │
+                    │     CryptoEnvelope   │
+                    │          │           │
+                    │      journal/NATS    │
+                    └──────────┬───────────┘
+                               │
+                         opaque payload
+                               │
+                               ▼
+                    ┌──────────────────────┐
+                    │         CORE         │
+                    │                      │
+                    │ deserialize          │
+                    │ decrypt + authenticate│
+                    │ validate command     │
+                    │          │           │
+                    │          ▼           │
+                    │    BEGIN TX          │
+                    │          │           │
+                    │       ledger         │
+                    └──────────────────────┘
+```
+
+The important part is that the PLAN now explicitly keeps decryption/KMS work **before** the DB transaction.
+
+That should become a hard architectural invariant.
+
+---
+
+# 2. But I would change where the adapters live
+
+This is the biggest issue I see in the current Modulith design.
+
+The PLAN currently has:
+
+```text
+br.com.wallet.security
+├── replay
+│   └── internal/
+│       └── DragonflyNonceTracker
+```
+
+and:
+
+```text
+keymanagement
+└── internal/
+    └── adapters/
+        ├── AWS...
+        └── GCP...
+```
+
+while simultaneously saying:
+
+> `:edge` and `:core` import only provider-neutral contracts.
+
+The **contracts** should live in `security`.
+
+The **providers should not**.
+
+I'd make the dependency graph:
+
+```text
+                     ┌─────────────────────┐
+                     │ br.com.wallet       │
+                     │ .security           │
+                     │                     │
+                     │ EnvelopeEncryptor   │
+                     │ EnvelopeDecryptor   │
+                     │ KeyManagementClient │
+                     │ NonceTracker        │
+                     └──────────┬──────────┘
+                                ▲
+                  ┌─────────────┴─────────────┐
+                  │                           │
+          ┌───────┴────────┐        ┌─────────┴─────────┐
+          │ :edge          │        │ :core             │
+          │                │        │                   │
+          │ encrypt        │        │ decrypt           │
+          └────────────────┘        └───────────────────┘
+
+                     adapters / infrastructure
+                              ▲
+              ┌───────────────┴────────────────┐
+              │                                │
+       DragonflyNonceTracker             CloudKmsClient
+```
+
+In other words:
+
+> **Security owns the security contracts; infrastructure owns technology adapters.**
+
+This becomes especially important because your architecture already treats Dragonfly as an infrastructure dependency rather than a domain authority.
+
+---
+
+# 3. Spring Modulith cannot replace Gradle module boundaries
+
+This is another distinction I'd explicitly capture.
+
+You have:
+
+```text
+:edge
+:core
+root/infrastructure
+```
+
+plus:
+
+```text
+br.com.wallet.security
+```
+
+Spring Modulith can verify package/module relationships **inside the application/module graph**.
+
+It does not magically turn independent Gradle projects into compile-time isolated modules.
+
+Therefore I would use **two enforcement layers**:
+
+### Layer 1 — Gradle dependency architecture
+
+```text
+:ledger
+   └── cannot depend on :security
+
+:security-api/domain
+   └── cannot depend on :edge/:core/:ledger
+
+:edge
+   └── depends on security API
+
+:core
+   └── depends on security API
+
+:infrastructure
+   └── implements security ports
+```
+
+### Layer 2 — Spring Modulith
+
+```text
+br.com.wallet.security
+    ├── envelope
+    ├── keymanagement
+    ├── replay
+    ├── telemetry
+    └── failure
+```
+
+Then:
+
+```java
+ApplicationModules
+    .of(WalletApplication.class)
+    .verify();
+```
+
+The PLAN already proposes the latter.
+
+I'd make the architecture test explicitly cover **both levels**.
+
+---
+
+# 4. `CryptoEnvelope` has a serious Java issue
+
+This is probably the most important implementation-level correction.
+
+The proposed record contains:
+
+```java
+byte[] iv;
+byte[] wrappedDek;
+byte[] ciphertext;
+```
+
+A Java record does **not** make arrays immutable.
+
+So this:
+
+```java
+CryptoEnvelope envelope = ...;
+
+envelope.ciphertext()[0] = ...
+```
+
+can mutate the supposedly immutable envelope.
+
+That's unacceptable for a cryptographic value object.
+
+The constructor should defensively copy:
+
+```java
+this.iv = iv.clone();
+this.wrappedDek = wrappedDek.clone();
+this.ciphertext = ciphertext.clone();
+```
+
+But even better, I'd consider a dedicated immutable binary value:
+
+```java
+public record CryptoBytes(byte[] value) {
+
+    public CryptoBytes {
+        value = value.clone();
+    }
+
+    @Override
+    public byte[] value() {
+        return value.clone();
+    }
+}
+```
+
+Then:
+
+```java
+public record CryptoEnvelope(
+    EnvelopeVersion version,
+    TenantId tenantId,
+    OperationId operationId,
+    KeyId keyId,
+    EncryptionAlgorithm algorithm,
+    CryptoBytes iv,
+    CryptoBytes wrappedDek,
+    CryptoBytes ciphertext
+) {}
+```
+
+That gives us **cryptographic value-object semantics** rather than raw strings and mutable byte arrays.
+
+This fits very well with your existing typed-algebra direction in 000.8.1.
+
+---
+
+# 5. `GeneratedDataKey` has the same problem — and a security one
+
+Currently:
+
+```java
+public record GeneratedDataKey(
+    byte[] plaintextDek,
+    byte[] wrappedDek
+) {}
+```
+
+This is too raw.
+
+The plaintext DEK is the most sensitive object in the entire design.
+
+I'd introduce:
+
+```java
+final class SensitiveKeyMaterial implements AutoCloseable {
+
+    private byte[] material;
+
+    ...
+
+    @Override
+    public void close() {
+        Arrays.fill(material, (byte) 0);
+    }
+}
+```
+
+The exact JVM memory-zeroization guarantees need to be documented carefully—Java cannot promise perfect elimination from all copies—but the API should at least make **lifecycle ownership explicit**.
+
+Then:
+
+```java
+public record GeneratedDataKey(
+    SensitiveKeyMaterial plaintextDek,
+    WrappedDataKey wrappedDek
+) {}
+```
+
+This also gives us a place to define:
+
+* ownership
+* lifetime
+* destruction
+* cache eligibility
+* rotation
+* accidental serialization prohibition
+
+I would make this part of 000.10 rather than leaving it to implementation.
+
+---
+
+# 6. AAD canonicalization should not use `String.format("|")`
+
+The current implementation is:
+
+```java
+String.format("%s|%s|%s|%s|%s", ...)
+```
+
+That's too fragile for a financial security protocol.
+
+For example, what happens if an identifier contains:
+
+```text
+foo|bar
+```
+
+You now have an ambiguous encoding.
+
+I'd define a canonical binary structure:
+
+```text
+WALLET-ENV-AAD-V1
+field-length
+field-value
+field-length
+field-value
+...
+```
+
+or canonical JSON with explicit versioning and strict canonicalization.
+
+Even simpler:
+
+```text
+AAD-V1
+versionLength | version
+tenantLength  | tenant
+operationLength | operation
+keyIdLength | keyId
+algorithmLength | algorithm
+```
+
+The important invariant is:
+
+> **AAD must have exactly one canonical serialization.**
+
+This deserves a dedicated test suite.
+
+---
+
+# 7. I would type the envelope much more aggressively
+
+Right now the plan has:
+
+```java
+String version
+String tenantId
+String operationId
+String keyId
+String algorithm
+```
+
+We've already learned from 000.8.1 that typed domain contracts give us substantial protection.
+
+So I'd prefer:
+
+```java
+public record CryptoEnvelope(
+    EnvelopeVersion version,
+    TenantId tenantId,
+    OperationId operationId,
+    KeyId keyId,
+    EncryptionAlgorithm algorithm,
+    GcmIv iv,
+    WrappedDataKey wrappedDek,
+    Ciphertext ciphertext
+) {}
+```
+
+Then invalid states become harder to represent.
+
+This is exactly where your **capability-driven-development** approach can complement the security architecture.
+
+---
+
+# 8. The nonce model is correct, but `NonceAdmission` can be stronger
+
+Currently:
+
+```java
+public record NonceAdmission(
+    boolean admitted,
+    String reason
+)
+```
+
+I'd avoid a boolean + nullable reason.
+
+Use an algebra:
+
+```java
+sealed interface NonceAdmission {
+
+    record Accepted() implements NonceAdmission {}
+
+    record Rejected(
+        ReplayRejectionReason reason
+    ) implements NonceAdmission {}
+
+    record Unavailable(
+        ReplayAvailabilityReason reason
+    ) implements NonceAdmission {}
+}
+```
+
+Because these are materially different:
+
+```text
+duplicate nonce
+      ≠
+Dragonfly unavailable
+      ≠
+invalid nonce syntax
+```
+
+This becomes especially important because your security policy is fail-closed.
+
+---
+
+# 9. KMS cache semantics need another pass
+
+The PLAN says:
+
+> bounded rotating DEK cache with 10m TTL and 100,000 invocations.
+
+But there is an architectural ambiguity:
+
+### Are we caching:
+
+```text
+KEK
+```
+
+or:
+
+```text
+plaintext DEK
+```
+
+or:
+
+```text
+GeneratedDataKey
+```
+
+?
+
+Those have radically different security implications.
+
+If plaintext DEKs are cached, then we need explicit:
+
+* maximum number of cached keys
+* maximum plaintext lifetime
+* eviction behavior
+* zeroization attempt
+* tenant isolation
+* key rotation behavior
+* whether cached DEK can encrypt multiple envelopes
+* IV uniqueness guarantees
+
+And the term:
+
+> "tenant DEKs"
+
+should probably become:
+
+> **bounded plaintext DEK cache**
+
+if that is actually what we mean.
+
+---
+
+# 10. `InMemoryKeyManagementClient` should not use deterministic production-like KEKs
+
+The plan says:
+
+> deterministic AES-256 KEKs.
+
+That's fine for deterministic tests.
+
+But the architecture should explicitly prohibit this from being mistaken for an appliance production KMS.
+
+I'd split:
+
+```text
+InMemoryKeyManagementClient
+    └── deterministic test mode
+```
+
+from:
+
+```text
+LocalApplianceKeyManagementClient
+    └── real cryptographically random root key
+```
+
+if appliance mode is actually expected to provide meaningful security.
+
+Otherwise we risk having a "secure local mode" that isn't actually equivalent to the production security model.
+
+---
+
+# 11. The journal format should not duplicate envelope semantics
+
+The journal currently repeats:
+
+```text
+version
+tenantId
+opId
+keyId
+IV
+wrapped DEK
+ciphertext
+```
+
+while `CryptoEnvelope` already contains these.
+
+That creates two serialization contracts.
+
+I'd strongly prefer:
+
+```text
+JournalRecord
+ ├── record metadata
+ └── length-prefixed CryptoEnvelope bytes
+```
+
+rather than:
+
+```text
+JournalRecord
+ ├── duplicate envelope metadata
+ ├── duplicate IV
+ ├── duplicate wrapped DEK
+ └── duplicate ciphertext
+```
+
+Otherwise we need to prove:
+
+```text
+journal.tenantId == envelope.tenantId
+journal.operationId == envelope.operationId
+journal.keyId == envelope.keyId
+...
+```
+
+The fewer redundant security fields, the better.
+
+---
+
+# 12. The telemetry approach is good
+
+This part is particularly good:
+
+> **Non-emission at source**, rather than relying only on a sanitizer.
+
+I'd preserve the layered model:
+
+```text
+Layer 1 — don't produce sensitive telemetry
+        ↓
+Layer 2 — sanitize known boundaries
+        ↓
+Layer 3 — integration tests inspect emitted telemetry
+```
+
+And I'd add:
+
+```text
+HTTP access logs
+NATS diagnostics
+DLQ metadata
+exception causes
+structured logging
+OTel attributes
+MDC
+```
+
+to the test surface.
+
+---
+
+# 13. Performance: don't make 10µs/50µs a hard invariant yet
+
+The plan currently has:
+
+```text
+AES-GCM P99 <= 10µs
+total Edge crypto P99 <= 50µs
+```
+
+as targets.
+
+I'd mark these as:
+
+```text
+BENCHMARK TARGET
+```
+
+not security invariants.
+
+And the benchmark needs:
+
+```text
+payload sizes:
+  256 B
+  1 KB
+  2 KB
+  8 KB
+  64 KB
+
+P50
+P95
+P99
+throughput
+allocation rate
+GC impact
+CPU
+```
+
+Otherwise the `50µs` number becomes a premature optimization constraint.
+
+---
+
+# 14. The test strategy is very good — add two tests
+
+The current test matrix is already strong, including Modulith verification.
+
+I'd add:
+
+### `CryptoEnvelopeImmutabilityTest`
+
+Prove that:
+
+```text
+input arrays mutated after construction
+       ↓
+envelope unchanged
+
+arrays returned from accessors mutated
+       ↓
+envelope unchanged
+```
+
+### `CanonicalAadTest`
+
+Property-style tests:
+
+```text
+same envelope → same AAD
+different tenant → different AAD
+different operationId → different AAD
+different keyId → different AAD
+field containing delimiter → unambiguous
+```
+
+These are very valuable security tests.
+
+---
+
+# And yes — I think this deserves a new Skill
+
+I'd actually **not overload `perimeter-security`**.
+
+000.9.3 is perimeter/authentication:
+
+```text
+HMAC
+tenant identity
+credentials
+rate limiting
+trusted Edge
+```
+
+000.10 is a different capability:
+
+```text
+cryptographic envelope
+key lifecycle
+AEAD
+secure material handling
+replay
+telemetry leakage
+cryptographic failure taxonomy
+```
+
+I'd introduce:
+
+# `financial-cryptographic-security`
+
+Something like:
+
+```text
+.agents/skills/financial-cryptographic-security/
+├── SKILL.md
+├── references/
+│   ├── envelope-patterns.md
+│   ├── key-management.md
+│   ├── replay-protection.md
+│   ├── telemetry-security.md
+│   └── java-crypto-pitfalls.md
+└── templates/
+    ├── crypto-review.md
+    └── crypto-test-triad.md
+```
+
+### Skill purpose
+
+> Design, review and implement cryptographic protections for financial command processing without introducing cryptographic dependencies into the authoritative ledger.
+
+And the skill should enforce rules such as:
+
+```text
+[MUST]
+- AEAD, never unauthenticated encryption
+- unique GCM IV per key
+- canonical AAD
+- tenant + operation binding
+- plaintext DEK lifetime minimized
+- KEK never leaves KMS boundary
+- cryptographic processing before DB transaction
+- no sensitive telemetry emission
+- immutable cryptographic value objects
+- provider-neutral security ports
+- infrastructure adapters isolated
+- security failures classified explicitly
+- architecture verified automatically
+
+[MUST NOT]
+- log plaintext
+- log keys/DEKs
+- put crypto SDKs in ledger
+- perform KMS I/O inside financial transaction
+- reuse GCM IVs
+- treat replay nonce as GCM IV
+- silently downgrade encryption
+- use boolean/null crypto result algebra
+- serialize mutable byte[] directly as domain values
+```
+
+### And one particularly useful skill behavior
+
+I would make the skill automatically perform a **Crypto Boundary Review** whenever it is invoked:
+
+```text
+1. Identify trust boundaries
+2. Identify key boundaries
+3. Identify plaintext lifetime
+4. Identify nonce/IV lifecycle
+5. Verify AAD coverage
+6. Verify transaction boundary
+7. Verify telemetry boundary
+8. Verify provider isolation
+9. Verify cryptographic value immutability
+10. Verify failure taxonomy
+11. Verify architecture tests
+12. Verify benchmark methodology
+```
+
+That would make it reusable for **000.10 and future security specs**, rather than being tied to this implementation.
+
+---
+
+## Final architectural verdict
+
+I'd classify the current PLAN as:
+
+**🟢 Directionally ready, but not TASK-ready.**
+
+The **architecture is sound**, particularly:
+
+* Edge encrypts
+* journal stores ciphertext
+* NATS transports ciphertext
+* Core authenticates/decrypts before DB transaction
+* ledger has zero security dependency
+* security contracts are centralized
+* Modulith verification is explicit
+* telemetry uses non-emission as the primary defense
+
+The changes I'd make before TASKS are primarily **hardening of the architecture**, not redesign:
+
+| Area               | Action                                                         |
+| ------------------ | -------------------------------------------------------------- |
+| Modulith           | Keep; make it a formal architecture boundary                   |
+| Provider adapters  | Move out of security module into infrastructure                |
+| `CryptoEnvelope`   | Make truly immutable                                           |
+| `GeneratedDataKey` | Introduce sensitive-key lifecycle abstraction                  |
+| AAD                | Replace delimiter-based `String.format` canonicalization       |
+| Domain types       | Replace security-critical `String`/`byte[]` with value objects |
+| Nonce result       | Replace boolean/null algebra                                   |
+| DEK cache          | Specify exact semantics and zeroization/lifetime               |
+| In-memory KMS      | Separate deterministic test mode from real appliance mode      |
+| Journal            | Store serialized envelope rather than duplicating its fields   |
+| Performance        | Benchmark targets, not hard security invariants                |
+| Tests              | Add immutability + canonical-AAD tests                         |
+| Skill              | Create `financial-cryptographic-security`                      |
+
+One other important point: **the skill itself should become part of the SDD traceability**, not just a convenience file. PLAN-000.10 already has a `Governing Skills` section.  We can make the new skill explicitly govern the crypto-specific review/implementation tasks while `spec-driven-development` continues to govern the overall SPEC → ARCH → PLAN → TASKS workflow.
+
+I would therefore do **one more ARCH/PLAN revision**, then derive `TASKS-000.10` and the new skill together.

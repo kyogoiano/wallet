@@ -119,6 +119,7 @@ dependencies {
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${openApiVersion}")
 	implementation("io.nats:jnats:${jnatsVersion}")
 	implementation("io.lettuce:lettuce-core:${lettuceVersion}")
+	implementation("com.github.ben-manes.caffeine:caffeine:3.2.4")
 	implementation("io.netty:netty-transport-native-epoll")
 	implementation("io.netty:netty-transport-native-epoll:${nettyVersion}:linux-x86_64")
 

@@ -124,12 +124,16 @@ gantt
     SPEC-000.4 Observability OTel       :done, p00_6, 2026-08-29, 2d
     SPEC-000.5 Relational Graph         :done, p00_7, 2026-09-01, 3d
     SPEC-000.6 Temporal Decay           :done, p00_8, 2026-09-03, 3d
+    SPEC-000.7 Fraud Embeddings pgvector:done, p00_9, 2026-09-05, 2d
     SPEC-000.8 Signal Fusion & Micro-ML :done, p00_10, 2026-09-07, 3d
+    SPEC-000.8.1 Typed Decision Algebra :done, p00_10_1, 2026-09-22, 2d
     SPEC-000.9 Reactive Edge Ingress    :done, p00_11, 2026-09-09, 3d
     SPEC-000.9.1 Edge/Core Runtimes     :done, p00_11_1, 2026-09-10, 2d
     SPEC-000.9.2 Container Topology     :done, p00_11_2, after p00_11_1, 3d
-    SPEC-000.9.3 HMAC-Signed Ingress    :active, p00_11_3, after p00_11_2, 3d
-    SPEC-000.10 Financial Security      :p00_12, after p00_11_3, 3d
+    SPEC-000.9.3 HMAC-Signed Ingress    :done, p00_11_3, 2026-09-21, 2d
+    SPEC-000.9.4 Dragonfly 2.0 & Audit  :done, p00_11_4, 2026-09-23, 2d
+    DF Decommission & Tenant Ratify     :done, p00_11_5, 2026-09-28, 2d
+    SPEC-000.10 Financial Security      :p00_12, after p00_11_5, 3d
     SPEC-000.11 Tiered DLQ & Recovery   :p00_13, after p00_12, 3d
     section Phase 1 Programmable Money
     SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
@@ -381,25 +385,30 @@ gantt
 
 ### 🔹 Phase 000.9.3: HMAC-Signed Ingress & Multi-Tenant Security Boundary
 **Spec Identifier**: [`SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries`](file:///.spec/SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md)  
-**Status**: 🟢 **Ratified**  
+**Status**: 🟢 **Completed & Verified**  
 **Core Abstraction**: `Cryptographic HMAC Ingress, Zero-DB Credential Resolution, Tenant Rate Limiting & Core Transactional Isolation`
 
 - **Intent**: Eliminate untrusted client headers (`X-Tenant-Id`) by enforcing mandatory HMAC-SHA-256 signature verification at Edge using standard JDK 27 cryptography (`I-SEC-002`), resolving credentials and deriving `tenantId` in memory without database queries (`I-SEC-003`, `I-SEC-004`), isolating tenant traffic via partitioned `(tenantId, principalId)` token buckets (`I-SEC-007`), propagating verified identity across NATS JetStream within `CommandEnvelope`, and enforcing account tenant equality in Core inside the atomic `SELECT FOR UPDATE` transaction boundary (`I-SEC-005`).
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md`](file:///.spec/SPEC-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md) (Ratified)
   - [`.spec/architecture/ARCH-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md`](file:///.spec/architecture/ARCH-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md) (Ratified)
-  - `plans/PLAN-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
-  - `tasks/TASKS-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
-  - `summaries/SUMMARY-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md` (Pending)
+  - [`plans/PLAN-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md`](file:///.spec/plans/PLAN-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md) (Approved)
+  - [`tasks/TASKS-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md`](file:///.spec/tasks/TASKS-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md) (Completed)
+  - [`summaries/SUMMARY-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md`](file:///.spec/summaries/SUMMARY-000.9.3-hmac-signed-ingress-and-tenant-boundaries.md) (Verified)
 
 ---
 
-### 🔹 Phase 000.9.4: DragonflyDB 2.0 Migration & Codebase-Wide State Audit
+### 🔹 Phase 000.9.4: DragonflyDB 2.0 Migration, State Audit & 1.40 Decommissioning
 **Spec Identifier**: [`SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit`](file:///.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md)  
-**Status**: 🟢 **Completed & Ratified**  
-**Core Abstraction**: `Dragonfly 2.0 Infrastructure, 3-Gate Upgrade Verification, Dual-Version Behavioral Oracle & DF20-AUDIT State Inventory`
+**Status**: 🟢 **Completed, Verified & Ratified**  
+**Core Abstraction**: `Dragonfly 2.0 Infrastructure, 3-Gate Upgrade Verification, DF20-AUDIT State Inventory & Legacy Decommissioning`
 
 - **Intent**: Upgrade from DragonflyDB 1.40 to 2.0 (released Sept 17, 2026: ~54% higher throughput, 35% lower latency, 30–40% lower memory). Strictly forbids a "blind upgrade". Enforces a 3-Gate verification protocol (Compatibility, Behavioral Correctness, Performance) with zero performance regression (`I-DF20-002`), continuous sorted-set sliding window consistency (`I-DF20-003`), dual-version behavioral parity oracle (`DragonflyBehavioralCompatibilityIT`), bounded emergency timeouts ($\le 20\text{ms}$) with zero DB thread blocking, and a comprehensive codebase state audit (`DF20-AUDIT`).
+- **Decommissioning & Strict Multi-Tenancy Ratification**:
+  - Fully decommissioned Dragonfly 1.40.1: removed legacy containers and images, standardizing uniformly on Dragonfly 2.0.0.
+  - Eradicated all `DEFAULT 'default'` fallbacks and null values from database schemas (`accounts`, `ledger`, `wallet_operations`).
+  - Enforced strict non-null, non-blank `tenantId` invariants across all domain models, DAOs, contexts (`RiskSubject`, `FraudContext`), and Redis key spaces.
+  - Validated 100% green test passes across all suites (`:core:test`, `:edge:test`, `:fraud:test`, and root unit tests).
 - **Spec Kit Artifacts**:
   - [`.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/SPEC-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Ratified)
   - [`.spec/architecture/ARCH-000.9.4-dragonfly-2.0-and-state-audit.md`](file:///.spec/architecture/ARCH-000.9.4-dragonfly-2.0-and-state-audit.md) (Ratified)

@@ -1,6 +1,5 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
-import br.com.wallet.edge.api.CommandType;
 import br.com.wallet.edge.api.OperationStatusBroadcaster;
 import br.com.wallet.infrastructure.messaging.publisher.DlqPublisher;
 import br.com.wallet.ledger.api.DepositFundsUseCase;
@@ -18,7 +17,6 @@ import br.com.wallet.security.envelope.OperationId;
 import br.com.wallet.security.envelope.TenantId;
 import br.com.wallet.security.failure.KeyManagementUnavailableException;
 import br.com.wallet.security.keymanagement.GeneratedDataKey;
-import br.com.wallet.security.keymanagement.KeyContext;
 import br.com.wallet.security.keymanagement.KeyManagementClient;
 import br.com.wallet.security.keymanagement.SensitiveKeyMaterial;
 import io.nats.client.Connection;
@@ -30,6 +28,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.mockito.junit.jupiter.MockitoSettings;
 import tools.jackson.databind.ObjectMapper;
 
 import java.nio.charset.StandardCharsets;
@@ -38,16 +37,13 @@ import java.time.Duration;
 import java.util.UUID;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
-import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
-@org.mockito.junit.jupiter.MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
+@MockitoSettings(strictness = org.mockito.quality.Strictness.LENIENT)
 @DisplayName("TASK-10.14: Core Pre-Gate Decrypt-Before-Transaction Test (REQ-SEC-022, I-ENV-003)")
 class CoreDecryptBeforeTransactionTest {
 

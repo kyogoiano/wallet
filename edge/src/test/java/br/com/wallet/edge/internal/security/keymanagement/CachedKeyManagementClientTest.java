@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @DisplayName("TASK-10.8: CachedKeyManagementClient Bounded Plaintext DEK Cache Test in Edge (REQ-SEC-026, I-ENV-005, I-ENV-006)")
 class CachedKeyManagementClientTest {
@@ -85,14 +86,25 @@ class CachedKeyManagementClientTest {
     @Test
     @DisplayName("Assert eviction causes cached plaintext DEK to be zeroized")
     void shouldZeroizePlaintextDekOnEviction() {
-        CachedKeyManagementClient client = new CachedKeyManagementClient(delegate, Duration.ofMillis(50), 100);
+        CachedKeyManagementClient client = new CachedKeyManagementClient(delegate, Duration.ofMinutes(10), 100);
         GeneratedDataKey key = client.generateDataKey(tenantId, keyId, context);
         assertThat(delegate.getGenerateCount()).isEqualTo(1);
+
+        CachedKeyManagementClient.DekCacheEntry cachedEntry = client.getEntryForTesting(tenantId, keyId);
+        assertThat(cachedEntry).isNotNull();
+        assertThat(cachedEntry.plaintextDek().isDestroyed()).isFalse();
 
         // Invalidate cache explicitly
         client.invalidateAll();
 
         // The cached entry was zeroized by Caffeine removal listener
         assertThat(client.getActiveCachedEntriesCount()).isEqualTo(0);
+        assertThat(cachedEntry.plaintextDek().isDestroyed()).isTrue();
+        assertThatThrownBy(() -> cachedEntry.plaintextDek().getEncoded())
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("Key material destroyed");
+
+        // Clean up caller's copy
+        key.close();
     }
 }

@@ -4,6 +4,10 @@ import br.com.wallet.edge.api.CommandEnvelope;
 import br.com.wallet.edge.api.CommandType;
 import br.com.wallet.edge.api.EdgeCommandPublisher;
 import br.com.wallet.edge.internal.ingress.ConditionalOnEdgeIngress;
+import br.com.wallet.security.envelope.*;
+import br.com.wallet.security.keymanagement.GeneratedDataKey;
+import br.com.wallet.security.keymanagement.KeyContext;
+import br.com.wallet.security.keymanagement.KeyManagementClient;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.PublishOptions;
@@ -11,6 +15,7 @@ import io.nats.client.impl.Headers;
 import io.nats.client.impl.NatsMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnBean;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
@@ -36,19 +41,19 @@ public class NatsEdgeCommandPublisher implements EdgeCommandPublisher {
 
     private final Connection connection;
     private final ObjectMapper objectMapper;
-    private final br.com.wallet.security.envelope.EnvelopeEncryptor envelopeEncryptor;
-    private final br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient;
+    private final EnvelopeEncryptor envelopeEncryptor;
+    private final KeyManagementClient keyManagementClient;
 
     public NatsEdgeCommandPublisher(Connection connection, ObjectMapper objectMapper) {
         this(connection, objectMapper, null, null);
     }
 
-    @org.springframework.beans.factory.annotation.Autowired
+    @Autowired
     public NatsEdgeCommandPublisher(
             Connection connection,
             ObjectMapper objectMapper,
-            @org.springframework.beans.factory.annotation.Autowired(required = false) br.com.wallet.security.envelope.EnvelopeEncryptor envelopeEncryptor,
-            @org.springframework.beans.factory.annotation.Autowired(required = false) br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient
+            @Autowired(required = false) EnvelopeEncryptor envelopeEncryptor,
+            @Autowired(required = false) KeyManagementClient keyManagementClient
     ) {
         this.connection = connection;
         this.objectMapper = objectMapper;
@@ -74,21 +79,21 @@ public class NatsEdgeCommandPublisher implements EdgeCommandPublisher {
             headers.add("publisher_id", "edge-gateway");
 
             if (envelopeEncryptor != null && keyManagementClient != null) {
-                br.com.wallet.security.envelope.TenantId tenantId = new br.com.wallet.security.envelope.TenantId(command.tenantId());
+                TenantId tenantId = new TenantId(command.tenantId());
                 String keyIdStr = (command.keyId() != null && !command.keyId().isBlank() && !"unknown".equals(command.keyId()))
                         ? command.keyId() : "default-key";
-                br.com.wallet.security.envelope.KeyId keyId = new br.com.wallet.security.envelope.KeyId(keyIdStr);
-                br.com.wallet.security.keymanagement.KeyContext context = br.com.wallet.security.keymanagement.KeyContext.forTenant(tenantId);
+                KeyId keyId = new KeyId(keyIdStr);
+                KeyContext context = KeyContext.forTenant(tenantId);
 
-                try (br.com.wallet.security.keymanagement.GeneratedDataKey dataKey = keyManagementClient.generateDataKey(tenantId, keyId, context)) {
-                    br.com.wallet.security.envelope.CryptoEnvelope envelope = envelopeEncryptor.encrypt(
+                try (final GeneratedDataKey dataKey = keyManagementClient.generateDataKey(tenantId, keyId, context)) {
+                    CryptoEnvelope envelope = envelopeEncryptor.encrypt(
                             enrichedPayload,
                             tenantId,
-                            new br.com.wallet.security.envelope.OperationId(command.operationId()),
+                            new OperationId(command.operationId()),
                             keyId,
                             dataKey
                     );
-                    enrichedPayload = br.com.wallet.security.envelope.EnvelopeCodec.encode(envelope);
+                    enrichedPayload = EnvelopeCodec.encode(envelope);
                     headers.add("content_type", "application/x-wallet-crypto-envelope");
                     headers.add("envelope_version", envelope.version().code());
                 }

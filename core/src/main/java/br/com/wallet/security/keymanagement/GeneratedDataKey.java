@@ -1,6 +1,7 @@
 package br.com.wallet.security.keymanagement;
 
 import br.com.wallet.security.envelope.CryptoBytes;
+import org.jspecify.annotations.NonNull;
 
 import java.util.Objects;
 
@@ -26,7 +27,7 @@ public record GeneratedDataKey(
     }
 
     @Override
-    public String toString() {
+    public @NonNull String toString() {
         return "GeneratedDataKey[plaintext=" + plaintextDek + ", wrapped=" + wrappedDek + "]";
     }
 }

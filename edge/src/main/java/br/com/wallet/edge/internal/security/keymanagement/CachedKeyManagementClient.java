@@ -132,4 +132,8 @@ public final class CachedKeyManagementClient implements KeyManagementClient {
         cache.cleanUp();
         return cache.estimatedSize();
     }
+
+    DekCacheEntry getEntryForTesting(TenantId tenantId, KeyId keyId) {
+        return cache.getIfPresent(new DekCacheKey(tenantId, keyId));
+    }
 }

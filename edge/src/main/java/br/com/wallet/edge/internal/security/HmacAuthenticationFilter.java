@@ -4,6 +4,8 @@ import br.com.wallet.core.security.SecurityHeaders;
 import br.com.wallet.edge.api.AuthenticatedPrincipal;
 import br.com.wallet.edge.api.CredentialResolver;
 import br.com.wallet.edge.api.ResolvedCredential;
+import br.com.wallet.security.envelope.TenantId;
+import br.com.wallet.security.replay.*;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,7 +16,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
@@ -38,7 +39,7 @@ public class HmacAuthenticationFilter extends OncePerRequestFilter {
 
     private final CredentialResolver credentialResolver;
     private final HmacSignatureVerifier signatureVerifier;
-    private final br.com.wallet.security.replay.NonceTracker nonceTracker;
+    private final NonceTracker nonceTracker;
     private final Clock clock;
 
     public HmacAuthenticationFilter(
@@ -59,7 +60,7 @@ public class HmacAuthenticationFilter extends OncePerRequestFilter {
     public HmacAuthenticationFilter(
             CredentialResolver credentialResolver,
             HmacSignatureVerifier signatureVerifier,
-            br.com.wallet.security.replay.NonceTracker nonceTracker
+            NonceTracker nonceTracker
     ) {
         this(credentialResolver, signatureVerifier, nonceTracker, Clock.systemUTC());
     }
@@ -68,7 +69,7 @@ public class HmacAuthenticationFilter extends OncePerRequestFilter {
     public HmacAuthenticationFilter(
             CredentialResolver credentialResolver,
             HmacSignatureVerifier signatureVerifier,
-            @Autowired(required = false) br.com.wallet.security.replay.NonceTracker nonceTracker,
+            @Autowired(required = false) NonceTracker nonceTracker,
             @Autowired(required = false) Clock clock
     ) {
         this.credentialResolver = credentialResolver;
@@ -164,24 +165,28 @@ public class HmacAuthenticationFilter extends OncePerRequestFilter {
                 nonce = timestampStr;
             }
 
-            br.com.wallet.security.replay.ReplayKey replayKey = new br.com.wallet.security.replay.ReplayKey(
-                    new br.com.wallet.security.envelope.TenantId(principal.tenantId()),
-                    new br.com.wallet.security.replay.PrincipalId(principal.principalId()),
+            ReplayKey replayKey = new ReplayKey(
+                    new TenantId(principal.tenantId()),
+                    new PrincipalId(principal.principalId()),
                     nonce
             );
 
-            br.com.wallet.security.replay.NonceReservation reservation = nonceTracker.reserve(replayKey);
-            if (reservation instanceof br.com.wallet.security.replay.NonceReservation.Rejected rejected) {
-                log.warn("Nonce reservation rejected for key {}: {}", replayKey.toStorageKey(), rejected.reason());
+            NonceReservation reservation = nonceTracker.reserve(replayKey);
+            if (reservation instanceof NonceReservation.Rejected(
+                    ReplayRejectionReason reason
+            )) {
+                log.warn("Nonce reservation rejected for key {}: {}", replayKey.toStorageKey(), reason);
                 sendError(response, HttpServletResponse.SC_UNAUTHORIZED, "DUPLICATE_NONCE",
-                        "Nonce replay detected: " + rejected.reason());
+                        "Nonce replay detected: " + reason);
                 return;
-            } else if (reservation instanceof br.com.wallet.security.replay.NonceReservation.Unavailable unavailable) {
-                log.error("Nonce reservation unavailable for key {}: {}", replayKey.toStorageKey(), unavailable.reason());
+            } else if (reservation instanceof NonceReservation.Unavailable(
+                    ReplayAvailabilityReason reason
+            )) {
+                log.error("Nonce reservation unavailable for key {}: {}", replayKey.toStorageKey(), reason);
                 sendError(response, HttpServletResponse.SC_SERVICE_UNAVAILABLE, "REPLAY_STORAGE_UNAVAILABLE",
-                        "Replay protection storage is temporarily unavailable: " + unavailable.reason());
+                        "Replay protection storage is temporarily unavailable: " + reason);
                 return;
-            } else if (reservation instanceof br.com.wallet.security.replay.NonceReservation.Admitted) {
+            } else if (reservation instanceof NonceReservation.Admitted) {
                 cachedRequest.setAttribute(REPLAY_KEY_ATTR, replayKey);
             }
         }

@@ -85,6 +85,15 @@ subprojects {
 
 	tasks.withType(Test).configureEach {
 		jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
+		finalizedBy 'jacocoTestReport'
+	}
+
+	tasks.named('jacocoTestReport', JacocoReport) {
+		reports {
+			xml.required = true
+			html.required = true
+			csv.required = false
+		}
 	}
 
 	dependencies {
@@ -167,7 +176,20 @@ tasks.register('slmTest', Test) {
 }
 
 jacocoTestReport {
-	dependsOn test
+	dependsOn tasks.named('test')
+	dependsOn subprojects.collect { it.tasks.withType(Test) }
+
+	additionalSourceDirs.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	sourceDirectories.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	classDirectories.from(files(sourceSets.main.output, subprojects.collect { it.sourceSets.main.output }))
+	executionData.from(files({
+		def execFiles = [layout.buildDirectory.file('jacoco/test.exec').get().asFile]
+		subprojects.each { sp ->
+			execFiles.add(sp.layout.buildDirectory.file('jacoco/test.exec').get().asFile)
+		}
+		execFiles.findAll { it.exists() }
+	}))
+
 	reports {
 		xml.required = true
 		html.required = true
@@ -175,7 +197,42 @@ jacocoTestReport {
 	}
 }
 
+tasks.register('jacocoRootReport', JacocoReport) {
+	description = 'Generates aggregated JaCoCo coverage report across all projects (root, edge, core, fraud)'
+	group = 'verification'
+	dependsOn tasks.named('test')
+	dependsOn subprojects.collect { it.tasks.withType(Test) }
+
+	additionalSourceDirs.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	sourceDirectories.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	classDirectories.from(files(sourceSets.main.output, subprojects.collect { it.sourceSets.main.output }))
+	executionData.from(files({
+		def execFiles = [layout.buildDirectory.file('jacoco/test.exec').get().asFile]
+		subprojects.each { sp ->
+			execFiles.add(sp.layout.buildDirectory.file('jacoco/test.exec').get().asFile)
+		}
+		execFiles.findAll { it.exists() }
+	}))
+
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+		html.outputLocation = layout.buildDirectory.dir('reports/jacoco/aggregate/html')
+		xml.outputLocation = layout.buildDirectory.file('reports/jacoco/aggregate/jacocoTestReport.xml')
+	}
+}
+
 jacocoTestCoverageVerification {
+	dependsOn jacocoTestReport
+	classDirectories.from(files(sourceSets.main.output, subprojects.collect { it.sourceSets.main.output }))
+	executionData.from(files({
+		def execFiles = [layout.buildDirectory.file('jacoco/test.exec').get().asFile]
+		subprojects.each { sp ->
+			execFiles.add(sp.layout.buildDirectory.file('jacoco/test.exec').get().asFile)
+		}
+		execFiles.findAll { it.exists() }
+	}))
 	violationRules {
 		rule {
 			limit {

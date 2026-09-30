@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS accounts (
     CONSTRAINT chk_account_status CHECK (status IN ('ACTIVE', 'BLOCKED', 'SUSPENDED', 'FROZEN'))
 );
 
+ALTER TABLE accounts ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_accounts_status ON accounts(status) WHERE status != 'ACTIVE';
 CREATE INDEX IF NOT EXISTS idx_accounts_user_status ON accounts(user_id, status);
 CREATE INDEX IF NOT EXISTS idx_accounts_tenant_id ON accounts(tenant_id, id);
@@ -53,8 +55,10 @@ CREATE TABLE IF NOT EXISTS ledger (
         CHECK (
             (sequence = 1 AND previous_hash IS NULL) OR
             (sequence > 1 AND previous_hash IS NOT NULL)
-        )
+            )
 );
+
+ALTER TABLE ledger ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
 
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_ledger_wallet_time
@@ -108,32 +112,35 @@ CREATE TABLE IF NOT EXISTS wallet_operations (
     failure_type VARCHAR(32) NULL,
     tenant_id VARCHAR(64) NOT NULL,
     CONSTRAINT wallet_operations_status_chk
-    CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
+        CHECK (status IN ('FAILED', 'COMPLETED', 'PROCESSING'))
+    -- TODO: include payload for debugging
+    -- For high-write event workloads, increase max_wal_size and wal_buffers to reduce checkpoint frequency and improve throughput.
 );
 
+ALTER TABLE wallet_operations ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64) NOT NULL;
+ALTER TABLE wallet_operations ADD COLUMN IF NOT EXISTS failure_type VARCHAR(32) NULL;
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_wallet_operations_tenant_id
     ON wallet_operations (tenant_id, operation_id);
 
-
 CREATE TABLE IF NOT EXISTS dlq_operations (
-    id UUID,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    operation_id UUID NOT NULL,
-    user_id UUID,
-    subject VARCHAR(20) NOT NULL,
-    status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
-    error TEXT,
-    payload JSONB NOT NULL,
-    retry_count INT NOT NULL DEFAULT 0,
-    next_retry_at TIMESTAMPTZ,
-    processed_at TIMESTAMPTZ,
-    failure_type TEXT NOT NULL,
-    event_type VARCHAR(50) NOT NULL
-        CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
-    CONSTRAINT dlq_status_chk
-        CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED', 'EXHAUSTED', 'DISCARDED')),
-    CONSTRAINT dlq_operations_pkey PRIMARY KEY (id, created_at)
+  id UUID,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  operation_id UUID NOT NULL,
+  user_id UUID,
+  subject VARCHAR(20) NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
+  error TEXT,
+  payload JSONB NOT NULL,
+  retry_count INT NOT NULL DEFAULT 0,
+  next_retry_at TIMESTAMPTZ,
+  processed_at TIMESTAMPTZ,
+  failure_type TEXT NOT NULL,
+  event_type VARCHAR(50) NOT NULL
+      CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
+  CONSTRAINT dlq_status_chk
+      CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED', 'EXHAUSTED', 'DISCARDED')),
+  CONSTRAINT dlq_operations_pkey PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_dlq_retry
@@ -147,6 +154,7 @@ CREATE INDEX IF NOT EXISTS idx_dlq_exhausted
 CREATE INDEX IF NOT EXISTS idx_dlq_processing
     ON dlq_operations (status, created_at)
     WHERE status = 'PROCESSING';
+
 
 CREATE INDEX IF NOT EXISTS idx_dlq_pending
     ON dlq_operations (id, status)
@@ -219,14 +227,51 @@ CREATE TABLE IF NOT EXISTS savings_execution_history (
 );
 
 CREATE INDEX IF NOT EXISTS idx_savings_hist_source_op ON savings_execution_history(source_operation_id);
-CREATE INDEX IF NOT EXISTS idx_savings_hist_plan ON savings_execution_history(plan_id, created_at DESC);
+-- =========================================================================
+-- Initial Seed Data for Local Development & Testing Environments
+-- =========================================================================
+
+-- 1. Seed Accounts (Main, Savings, Merchant, Blocked)
+INSERT INTO accounts (id, balance, version, user_id, status, last_sequence, created_at)
+VALUES 
+    ('0a35fb14-75ee-4125-943b-500893c30d33', 10000.00, 0, 'a1111111-1111-1111-1111-111111111111', 'ACTIVE', 0, NOW()),
+    ('1b46fc25-86ff-5236-a54c-611904d41e44', 0.00,     0, 'a1111111-1111-1111-1111-111111111111', 'ACTIVE', 0, NOW()),
+    ('2c57ad36-97aa-6347-b65d-722015e52f55', 5000.00,  0, 'b2222222-2222-2222-2222-222222222222', 'ACTIVE', 0, NOW()),
+    ('3d68be47-08bb-7458-c76e-833126f63a66', 1000.00,  0, 'c3333333-3333-3333-3333-333333333333', 'BLOCKED', 0, NOW())
+ON CONFLICT (id) DO NOTHING;
+
+UPDATE accounts 
+SET blocked_at = NOW(), blocked_reason = 'Seeded blocked account for security testing'
+WHERE id = '3d68be47-08bb-7458-c76e-833126f63a66' AND blocked_at IS NULL;
+
+-- 2. Seed Initial Savings Plans
+INSERT INTO savings_plans (id, source_wallet_id, target_wallet_id, minimum_retained_balance, status, created_at, updated_at)
+VALUES 
+    ('d1111111-1111-1111-1111-111111111111', '0a35fb14-75ee-4125-943b-500893c30d33', '1b46fc25-86ff-5236-a54c-611904d41e44', 100.00, 'ACTIVE', NOW(), NOW()),
+    ('d2222222-2222-2222-2222-222222222222', '2c57ad36-97aa-6347-b65d-722015e52f55', '1b46fc25-86ff-5236-a54c-611904d41e44', 500.00, 'ACTIVE', NOW(), NOW()),
+    ('d3333333-3333-3333-3333-333333333333', '0a35fb14-75ee-4125-943b-500893c30d33', '2c57ad36-97aa-6347-b65d-722015e52f55', 1000.00, 'PAUSED', NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- 3. Seed Initial Savings Rules (Round-Up, Percentage, Threshold)
+INSERT INTO savings_rules (id, plan_id, rule_type, step_amount, percentage_rate, ceiling_threshold, is_active, created_at)
+VALUES 
+    -- Rules for Plan 1 (Main -> Savings)
+    ('a1111111-2222-3333-4444-555555555551', 'd1111111-1111-1111-1111-111111111111', 'ROUND_UP', 5.00, NULL, NULL, TRUE, NOW()),
+    ('a1111111-2222-3333-4444-555555555552', 'd1111111-1111-1111-1111-111111111111', 'PERCENTAGE', NULL, 10.0000, NULL, TRUE, NOW()),
+    ('a1111111-2222-3333-4444-555555555553', 'd1111111-1111-1111-1111-111111111111', 'THRESHOLD', NULL, NULL, 5000.00, TRUE, NOW()),
+    -- Rules for Plan 2 (Secondary -> Savings)
+    ('b1111111-2222-3333-4444-555555555551', 'd2222222-2222-2222-2222-222222222222', 'ROUND_UP', 10.00, NULL, NULL, TRUE, NOW()),
+    ('b1111111-2222-3333-4444-555555555552', 'd2222222-2222-2222-2222-222222222222', 'PERCENTAGE', NULL, 5.0000, NULL, TRUE, NOW()),
+    -- Rules for Plan 3 (Main -> Secondary, Paused)
+    ('c1111111-2222-3333-4444-555555555551', 'd3333333-3333-3333-3333-333333333333', 'THRESHOLD', NULL, NULL, 8000.00, TRUE, NOW())
+ON CONFLICT (id) DO NOTHING;
 
 -- =========================================================================
 -- Financial Goals Capability Module Tables (SPEC-002 / PLAN-002)
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS goals (
-                                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     wallet_id UUID NOT NULL REFERENCES accounts(id),
     target_wallet_id UUID NULL REFERENCES accounts(id),
@@ -239,20 +284,20 @@ CREATE TABLE IF NOT EXISTS goals (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT chk_goal_priority CHECK (priority IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
     CONSTRAINT chk_goal_status CHECK (status IN ('ACTIVE', 'PAUSED', 'ACHIEVED', 'CANCELLED'))
-    );
+);
 
 CREATE INDEX IF NOT EXISTS idx_goals_user ON goals(user_id);
 CREATE INDEX IF NOT EXISTS idx_goals_wallet_status ON goals(wallet_id, status);
 
 CREATE TABLE IF NOT EXISTS cashflow_profiles (
-                                                 id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL,
     wallet_id UUID NOT NULL UNIQUE REFERENCES accounts(id),
     monthly_income NUMERIC(19, 2) NOT NULL DEFAULT 0.00 CHECK (monthly_income >= 0),
     monthly_committed_expenses NUMERIC(19, 2) NOT NULL DEFAULT 0.00 CHECK (monthly_committed_expenses >= 0),
     minimum_safety_buffer NUMERIC(19, 2) NOT NULL DEFAULT 0.00 CHECK (minimum_safety_buffer >= 0),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+);
 
 CREATE INDEX IF NOT EXISTS idx_cashflow_wallet ON cashflow_profiles(wallet_id);
 
@@ -261,8 +306,8 @@ CREATE INDEX IF NOT EXISTS idx_cashflow_wallet ON cashflow_profiles(wallet_id);
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS fraud_entities (
-                                              id UUID PRIMARY KEY,
-                                              entity_type VARCHAR(32) NOT NULL,
+    id UUID PRIMARY KEY,
+    entity_type VARCHAR(32) NOT NULL,
     direct_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     graph_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
     behavioral_risk DOUBLE PRECISION NOT NULL DEFAULT 0.0,
@@ -273,36 +318,37 @@ CREATE TABLE IF NOT EXISTS fraud_entities (
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     metadata JSONB
-    );
+);
 
 CREATE INDEX IF NOT EXISTS idx_fraud_entities_type ON fraud_entities(entity_type);
+CREATE INDEX IF NOT EXISTS idx_fraud_entities_propagated ON fraud_entities(propagated_risk DESC) WHERE propagated_risk > 0.0;
 
 CREATE TABLE IF NOT EXISTS fraud_relationships (
-                                                   source_id UUID NOT NULL,
-                                                   target_id UUID NOT NULL,
-                                                   relationship_type VARCHAR(32) NOT NULL,
+    source_id UUID NOT NULL,
+    target_id UUID NOT NULL,
+    relationship_type VARCHAR(32) NOT NULL,
     first_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     tx_count BIGINT NOT NULL DEFAULT 1,
     total_amount NUMERIC(19, 4) NOT NULL DEFAULT 0.0000,
     metadata JSONB,
     PRIMARY KEY (source_id, target_id, relationship_type)
-    );
+);
 
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_source ON fraud_relationships (source_id, relationship_type);
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_target ON fraud_relationships (target_id, relationship_type);
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_last_seen ON fraud_relationships (last_seen_at);
 
 CREATE TABLE IF NOT EXISTS fraud_relationship_events (
-                                                         id UUID PRIMARY KEY,
-                                                         source_id UUID NOT NULL,
-                                                         target_id UUID NOT NULL,
-                                                         relationship_type VARCHAR(32) NOT NULL,
+    id UUID PRIMARY KEY,
+    source_id UUID NOT NULL,
+    target_id UUID NOT NULL,
+    relationship_type VARCHAR(32) NOT NULL,
     occurred_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     operation_id UUID,
     amount NUMERIC(19, 4),
     metadata JSONB
-    );
+);
 
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_src_time ON fraud_relationship_events (source_id, occurred_at);
 CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_tgt_time ON fraud_relationship_events (target_id, occurred_at);
@@ -313,9 +359,9 @@ CREATE INDEX IF NOT EXISTS idx_fraud_rel_events_type_time ON fraud_relationship_
 -- =========================================================================
 
 CREATE TABLE IF NOT EXISTS fraud_propagation_jobs (
-                                                      id UUID PRIMARY KEY,
-                                                      entity_id UUID NOT NULL,
-                                                      status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
     as_of TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     worker_token UUID,
     lease_until TIMESTAMPTZ,
@@ -327,20 +373,20 @@ CREATE TABLE IF NOT EXISTS fraud_propagation_jobs (
     model_version VARCHAR(32) NOT NULL DEFAULT 'v1',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+);
 
 -- Partial unique index guaranteeing active job uniqueness (History 23)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_fraud_prop_active_unique
-    ON fraud_propagation_jobs (entity_id, model_version)
-    WHERE status IN ('PENDING', 'RUNNING', 'RETRY_WAIT');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fraud_prop_active_unique 
+ON fraud_propagation_jobs (entity_id, model_version) 
+WHERE status IN ('PENDING', 'RUNNING', 'RETRY_WAIT');
 
 -- Index for high-speed worker polling with SKIP LOCKED
-CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_claim
-    ON fraud_propagation_jobs (available_at, created_at)
-    WHERE status IN ('PENDING', 'RETRY_WAIT');
+CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_claim 
+ON fraud_propagation_jobs (available_at, created_at) 
+WHERE status IN ('PENDING', 'RETRY_WAIT');
 
-CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_entity
-    ON fraud_propagation_jobs (entity_id, status);
+CREATE INDEX IF NOT EXISTS idx_fraud_prop_jobs_entity 
+ON fraud_propagation_jobs (entity_id, status);
 
 -- =========================================================================
 -- Behavioral Embeddings, Archetype Centroids & Async Queue (SPEC-000.7 / PLAN-000.7)
@@ -356,7 +402,7 @@ CREATE TABLE IF NOT EXISTS fraud_entity_features (
     transaction_count BIGINT NOT NULL DEFAULT 0,
     transaction_volume NUMERIC(19, 4) NOT NULL DEFAULT 0.0000,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+);
 
 CREATE TABLE IF NOT EXISTS fraud_archetype_centroids (
     archetype_id VARCHAR(64) PRIMARY KEY,
@@ -364,7 +410,7 @@ CREATE TABLE IF NOT EXISTS fraud_archetype_centroids (
     centroid_vector vector(16) NOT NULL,
     risk_weight NUMERIC(3, 2) NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+);
 
 CREATE TABLE IF NOT EXISTS fraud_embedding_jobs (
     id UUID PRIMARY KEY,
@@ -382,20 +428,20 @@ CREATE TABLE IF NOT EXISTS fraud_embedding_jobs (
     last_error TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-    );
+);
 
 -- Active job deduplication index (Histories 23 & 28)
-CREATE UNIQUE INDEX IF NOT EXISTS idx_fraud_emb_active_unique
-    ON fraud_embedding_jobs (entity_id, model_version)
-    WHERE status IN ('PENDING', 'RUNNING', 'RETRY_WAIT');
+CREATE UNIQUE INDEX IF NOT EXISTS idx_fraud_emb_active_unique 
+ON fraud_embedding_jobs (entity_id, model_version) 
+WHERE status IN ('PENDING', 'RUNNING', 'RETRY_WAIT');
 
 -- High-speed worker polling with SKIP LOCKED
-CREATE INDEX IF NOT EXISTS idx_fraud_emb_jobs_claim
-    ON fraud_embedding_jobs (available_at, created_at)
-    WHERE status IN ('PENDING', 'RETRY_WAIT');
+CREATE INDEX IF NOT EXISTS idx_fraud_emb_jobs_claim 
+ON fraud_embedding_jobs (available_at, created_at) 
+WHERE status IN ('PENDING', 'RETRY_WAIT');
 
-CREATE INDEX IF NOT EXISTS idx_fraud_emb_jobs_entity
-    ON fraud_embedding_jobs (entity_id, status);
+CREATE INDEX IF NOT EXISTS idx_fraud_emb_jobs_entity 
+ON fraud_embedding_jobs (entity_id, status);
 
 -- Seed Calibrated Fraud Archetypes (L2-normalized unit vectors)
 INSERT INTO fraud_archetype_centroids (archetype_id, description, centroid_vector, risk_weight)
@@ -408,7 +454,7 @@ VALUES
      '[0.1826, 0.2922, 0.2922, 0.2191, 0.1826, 0.1096, 0.2191, 0.3104, 0.2556, 0.0730, 0.1461, 0.3287, 0.3470, 0.3287, 0.1826, 0.3104]', 0.90)
 ON CONFLICT (archetype_id) DO NOTHING;
 
--- Seed Fraud Entities & Intelligence Graph Data (SPEC-000.5)
+-- 4. Seed Fraud Entities & Intelligence Graph Data (SPEC-000.5)
 INSERT INTO fraud_entities (id, entity_type, direct_risk, graph_risk, behavioral_risk, propagated_risk, final_risk, created_at, updated_at)
 VALUES
     ('a1111111-1111-1111-1111-111111111111', 'USER',   0.0, 0.0, 0.0, 0.0, 0.0, NOW(), NOW()),
@@ -494,3 +540,5 @@ CREATE TABLE IF NOT EXISTS fraud_analyst_reviews (
 
 CREATE INDEX IF NOT EXISTS idx_fraud_reviews_checkpoint 
     ON fraud_analyst_reviews (checkpoint_id);
+
+--TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

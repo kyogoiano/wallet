@@ -1,6 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+for jdk_candidate in "$HOME/jdks/valhalla" "$HOME/snap/antigravity-cli/common/jdks/valhalla" "/home/leandro/snap/antigravity-cli/common/jdks/valhalla"; do
+    if [ -d "$jdk_candidate" ] && [ -x "$jdk_candidate/bin/java" ]; then
+        if [ -z "${JAVA_HOME:-}" ] || ! "${JAVA_HOME}/bin/java" -version >/dev/null 2>&1; then
+            export JAVA_HOME="$jdk_candidate"
+            export PATH="$JAVA_HOME/bin:$PATH"
+            break
+        fi
+    fi
+done
+
+EXTRA_GRADLE_ARGS=()
+for gh_candidate in "$HOME/gradle_home" "$HOME/snap/antigravity-cli/common/gradle_home" "/home/leandro/snap/antigravity-cli/common/gradle_home"; do
+    if [ -d "$gh_candidate" ]; then
+        EXTRA_GRADLE_ARGS+=("--gradle-user-home=$gh_candidate")
+        export GRADLE_OPTS="${GRADLE_OPTS:-} -Dgradle.user.home=$gh_candidate"
+        break
+    fi
+done
+
 echo "========================================================================="
 echo "🚀 Wallet Service — Automated Build, Schema & Test Verification Pipeline"
 echo "========================================================================="
@@ -22,8 +41,14 @@ python3 -c '
 import os, re
 
 root_dir = "."
+bases = [
+    "src/main/java", "src/test/java",
+    "core/src/main/java", "core/src/test/java",
+    "fraud/src/main/java", "fraud/src/test/java",
+    "edge/src/main/java", "edge/src/test/java"
+]
 errors = []
-for base in ["src/main/java", "core/src/main/java", "fraud/src/main/java", "src/test/java"]:
+for base in bases:
     if not os.path.exists(base):
         continue
     for root, dirs, files in os.walk(base):
@@ -49,7 +74,7 @@ else:
 
 # 3. Execute Gradle compilation and tests
 echo "▶ Executing Gradle compilation and test suites..."
-./gradlew test jacocoTestReport --info
+./gradlew ${EXTRA_GRADLE_ARGS[@]+"${EXTRA_GRADLE_ARGS[@]}"} test jacocoTestReport jacocoRootReport --info
 
 echo "========================================================================="
 echo "🎉 ALL TESTS PASSED & COVERAGE REPORT GENERATED!"

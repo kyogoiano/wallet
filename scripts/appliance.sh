@@ -184,6 +184,7 @@ case "$ACTION" in
     test-tx)
         print_banner
         OP_ID="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+        NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
         WALLET_ID="a0000000-0000-0000-0000-000000000001"
         USER_ID="b0000000-0000-0000-0000-000000000001"
         KEY_ID="wallet-key-dev-1"
@@ -191,6 +192,7 @@ case "$ACTION" in
 
         echo "▶ Sending live Deposit Transaction through Edge Ingress (Port 8080)..."
         echo "  Operation ID : $OP_ID"
+        echo "  Nonce        : $NONCE"
         echo "  Amount       : 150.00 USD"
         echo "  Key ID       : $KEY_ID"
         echo ""
@@ -204,6 +206,7 @@ case "$ACTION" in
         RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST http://localhost:8080/operations/deposits \
             -H "Content-Type: application/json" \
             -H "Idempotency-Key: $OP_ID" \
+            -H "X-Nonce: $NONCE" \
             -H "X-Key-Id: $KEY_ID" \
             -H "X-Timestamp: $TIMESTAMP" \
             -H "X-Signature: $SIGNATURE" \
@@ -220,6 +223,26 @@ case "$ACTION" in
             echo "   Inspect logs in VictoriaLogs at: http://localhost:9428/select/vmui/ (Search: $OP_ID)"
             echo "   Inspect traces in VictoriaTraces at: http://localhost:10428/select/vmui/ (Search: $OP_ID)"
             echo "   Inspect the container state in Portainer at: https://localhost:9443"
+
+            echo ""
+            echo "▶ Verifying Replay Protection (Replaying same X-Nonce: $NONCE)..."
+            REPLAY_RESPONSE=$(curl -s -w "\nHTTP_STATUS:%{http_code}" -X POST http://localhost:8080/operations/deposits \
+                -H "Content-Type: application/json" \
+                -H "Idempotency-Key: $OP_ID" \
+                -H "X-Nonce: $NONCE" \
+                -H "X-Key-Id: $KEY_ID" \
+                -H "X-Timestamp: $TIMESTAMP" \
+                -H "X-Signature: $SIGNATURE" \
+                -d "$PAYLOAD")
+            REPLAY_BODY=$(echo "$REPLAY_RESPONSE" | sed -e '$d')
+            REPLAY_STATUS=$(echo "$REPLAY_RESPONSE" | tail -n1 | cut -d: -f2)
+            echo "Replay Status Code : $REPLAY_STATUS"
+            echo "Replay Response    : $REPLAY_BODY"
+            if [ "$REPLAY_STATUS" == "401" ]; then
+                echo "✅ Replay Protection Verified: Duplicate nonce correctly rejected (HTTP 401 DUPLICATE_NONCE)!"
+            else
+                echo "⚠️ Replay test did not return HTTP 401 (got $REPLAY_STATUS)."
+            fi
         else
             echo "⚠️ Unexpected status $STATUS. Check logs with '$0 logs edge' or '$0 logs core'."
         fi

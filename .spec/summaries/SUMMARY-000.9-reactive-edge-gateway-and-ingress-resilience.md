@@ -135,10 +135,10 @@ Phase 000.9 establishes the high-availability, high-throughput **Reactive Edge G
 Ensure test accounts exist with initial balance before submitting transfers:
 ```bash
 docker exec -i wallet-postgres psql -U wallet -d wallet <<'EOF'
-INSERT INTO accounts (id, balance, user_id, status, version, last_sequence, created_at)
+INSERT INTO accounts (id, balance, user_id, status, version, last_sequence, created_at, tenant_id)
 VALUES 
-  ('11111111-1111-1111-1111-111111111111', 200.00, '99999999-9999-9999-9999-999999999991', 'ACTIVE', 0, 0, NOW()),
-  ('22222222-2222-2222-2222-222222222222', 0.00, '99999999-9999-9999-9999-999999999992', 'ACTIVE', 0, 0, NOW())
+  ('11111111-1111-1111-1111-111111111111', 200.00, '99999999-9999-9999-9999-999999999991', 'ACTIVE', 0, 0, NOW(), 'tenant-alpha'),
+  ('22222222-2222-2222-2222-222222222222', 0.00, '99999999-9999-9999-9999-999999999992', 'ACTIVE', 0, 0, NOW(), 'tenant-alpha')
 ON CONFLICT (id) DO UPDATE SET balance = EXCLUDED.balance, status = 'ACTIVE';
 EOF
 ```

@@ -171,10 +171,10 @@ Before executing monetary commands, seed active source and target accounts with 
 ```bash
 # Execute SQL seed fixture in PostgreSQL
 docker exec -i wallet-postgres psql -U wallet -d wallet << 'EOF'
-INSERT INTO accounts (id, balance, user_id, status, version, last_sequence, created_at)
+INSERT INTO accounts (id, balance, user_id, status, version, last_sequence, created_at, tenant_id)
 VALUES 
-  ('b1000000-0000-0000-0000-000000000001', 200.00, '99999999-9999-9999-9999-999999999991', 'ACTIVE', 0, 0, NOW()),
-  ('b2000000-0000-0000-0000-000000000002', 0.00,   '99999999-9999-9999-9999-999999999992', 'ACTIVE', 0, 0, NOW())
+  ('b1000000-0000-0000-0000-000000000001', 200.00, '99999999-9999-9999-9999-999999999991', 'ACTIVE', 0, 0, NOW(), 'tenant-alpha'),
+  ('b2000000-0000-0000-0000-000000000002', 0.00,   '99999999-9999-9999-9999-999999999992', 'ACTIVE', 0, 0, NOW(), 'tenant-alpha')
 ON CONFLICT (id) DO UPDATE SET 
   balance = EXCLUDED.balance, 
   status = 'ACTIVE';

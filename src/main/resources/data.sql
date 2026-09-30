@@ -2,13 +2,14 @@
 -- Initial Seed Data for Local Development & Testing Environments
 -- =========================================================================
 
--- 1. Seed Accounts (Main, Savings, Secondary/Merchant, Blocked)
+-- 1. Seed Accounts (Main, Savings, Secondary/Merchant, Blocked, Appliance Dev)
 INSERT INTO accounts (id, balance, version, user_id, status, last_sequence, created_at, tenant_id)
 VALUES 
     ('0a35fb14-75ee-4125-943b-500893c30d33', 10000.00, 0, 'a1111111-1111-1111-1111-111111111111', 'ACTIVE', 0, NOW(), 'tenant-alpha'),
     ('1b46fc25-86ff-5236-a54c-611904d41e44', 0.00,     0, 'a1111111-1111-1111-1111-111111111111', 'ACTIVE', 0, NOW(), 'tenant-alpha'),
     ('2c57ad36-97aa-6347-b65d-722015e52f55', 5000.00,  0, 'b2222222-2222-2222-2222-222222222222', 'ACTIVE', 0, NOW(), 'tenant-alpha'),
-    ('3d68be47-08bb-7458-c76e-833126f63a66', 1000.00,  0, 'c3333333-3333-3333-3333-333333333333', 'BLOCKED', 0, NOW(), 'tenant-alpha')
+    ('3d68be47-08bb-7458-c76e-833126f63a66', 1000.00,  0, 'c3333333-3333-3333-3333-333333333333', 'BLOCKED', 0, NOW(), 'tenant-alpha'),
+    ('a0000000-0000-0000-0000-000000000001', 1000.00,  0, 'b0000000-0000-0000-0000-000000000001', 'ACTIVE', 0, NOW(), 'tenant-alpha')
 ON CONFLICT (id) DO NOTHING;
 
 UPDATE accounts 

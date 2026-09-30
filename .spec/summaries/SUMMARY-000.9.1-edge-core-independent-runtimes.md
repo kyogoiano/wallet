@@ -194,16 +194,25 @@ docker exec -i wallet-postgres psql -U wallet -d wallet -c \
 ### 3.4 Verify Network & Route Segregation (`I-PORT-001`)
 
 ```bash
-# 1. Edge Gateway exposes public command acceptance on port 8080 -> HTTP 202 ACCEPTED
+# 1. Edge Gateway exposes public command acceptance on port 8080 (HMAC-SHA256 Authenticated) -> HTTP 202 ACCEPTED
+OP_ID="a0000000-0000-0000-0000-000000000001"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+PAYLOAD='{"sourceAccountId":"b1000000-0000-0000-0000-000000000001","targetAccountId":"b2000000-0000-0000-0000-000000000002","amount":150.00}'
+BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -i -X POST http://localhost:8080/operations/transfers \
-  -H "Idempotency-Key: a0000000-0000-0000-0000-000000000002" \
-  -H "X-Tenant-Id: tenant-alpha" \
   -H "Content-Type: application/json" \
-  -d '{
-    "sourceAccountId": "b1000000-0000-0000-0000-000000000001",
-    "targetAccountId": "b2000000-0000-0000-0000-000000000002",
-    "amount": 150.00
-  }'
+  -H "Idempotency-Key: $OP_ID" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -d "$PAYLOAD"
 
 # Expected Response:
 # HTTP/1.1 202 Accepted
@@ -223,10 +232,23 @@ curl -i -X POST http://localhost:8081/operations/transfers \
 ### 3.5 Verify Real-Time SSE Stream Fan-Out (`REQ-PRC-008`, `I-EDGE-007`)
 
 ```bash
-# Listen to live Server-Sent Events on Edge Gateway
+# Listen to live Server-Sent Events on Edge Gateway (HMAC-SHA256 Authenticated)
+OP_ID="a0000000-0000-0000-0000-000000000001"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+EMPTY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+CANONICAL=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "$OP_ID" "$KEY_ID" "$TIMESTAMP" "$EMPTY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -N -H "Accept: text/event-stream" \
-     -H "X-Tenant-Id: tenant-alpha" \
-     http://localhost:8080/operations/a0000000-0000-0000-0000-000000000001/stream
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -H "X-Nonce: $NONCE" \
+  http://localhost:8080/operations/$OP_ID/stream
 
 # Expected Output upon Core transaction settlement:
 # event: status
@@ -268,18 +290,40 @@ docker exec -i wallet-postgres psql -U wallet -d wallet -c \
 
 ```bash
 # Connect late after the live event was already published and completed:
+OP_ID="a0000000-0000-0000-0000-000000000001"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+EMPTY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+CANONICAL=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "$OP_ID" "$KEY_ID" "$TIMESTAMP" "$EMPTY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -N -H "Accept: text/event-stream" \
-     -H "X-Tenant-Id: tenant-alpha" \
-     http://localhost:8080/operations/a0000000-0000-0000-0000-000000000001/stream
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -H "X-Nonce: $NONCE" \
+  http://localhost:8080/operations/$OP_ID/stream
 
 # Expected Output: Immediately receives durable terminal status via NATS Request-Reply bootstrap:
 # event: status
 # data: {"operationId":"a0000000-0000-0000-0000-000000000001","status":"COMPLETED","completedAt":"...","message":"State: COMPLETED"}
 
-# Query status when Core is offline or query times out:
+# Query status when Core is offline or query times out (unknown operation ID):
+UNKNOWN_OP_ID="ffffffff-ffff-ffff-ffff-ffffffffffff"
+NONCE_2="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+TIMESTAMP_2=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+CANONICAL_2=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "$UNKNOWN_OP_ID" "$KEY_ID" "$TIMESTAMP_2" "$EMPTY_HASH")
+SIGNATURE_2=$(printf "%s" "$CANONICAL_2" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -N -H "Accept: text/event-stream" \
-     -H "X-Tenant-Id: tenant-alpha" \
-     http://localhost:8080/operations/ffffffff-ffff-ffff-ffff-ffffffffffff/stream
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP_2" \
+  -H "X-Signature: $SIGNATURE_2" \
+  -H "X-Nonce: $NONCE_2" \
+  http://localhost:8080/operations/$UNKNOWN_OP_ID/stream
 
 # Expected Output: Client immediately receives degraded notification without hanging indefinitely:
 # event: degraded
@@ -297,16 +341,25 @@ curl -i http://localhost:8080/actuator/health/readiness
 # {"status":"UP","components":{"edgeReadiness":{"status":"UP","details":{"edgeState":"READY"}},"readinessState":{"status":"UP"}}}
 
 # 2. Business Failure Isolation Verification:
-# Submit a transfer targeting a non-existent wallet:
+# Submit a transfer targeting a non-existent wallet (HMAC-SHA256 Authenticated):
+FAIL_OP_ID="a0000000-0000-0000-0000-000000000002"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+FAIL_PAYLOAD='{"sourceAccountId":"b1000000-0000-0000-0000-000000000001","targetAccountId":"00000000-0000-0000-0000-000000000000","amount":10.00}'
+BODY_HASH=$(printf "%s" "$FAIL_PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$FAIL_OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -i -X POST http://localhost:8080/operations/transfers \
-  -H "Idempotency-Key: a0000000-0000-0000-0000-000000000002" \
-  -Hcurl "X-Tenant-Id: tenant-alpha" \
   -H "Content-Type: application/json" \
-  -d '{
-    "sourceAccountId": "b1000000-0000-0000-0000-000000000001",
-    "targetAccountId": "00000000-0000-0000-0000-000000000000",
-    "amount": 10.00
-  }'
+  -H "Idempotency-Key: $FAIL_OP_ID" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -d "$FAIL_PAYLOAD"
 
 # Expected: Command accepted (202), Core fails with status=FAILED:
 # Core logs: Command [TRANSFER] opId=... failed with IllegalArgumentException: At least one Wallet not found.

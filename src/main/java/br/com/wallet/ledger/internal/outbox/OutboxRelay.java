@@ -36,7 +36,7 @@ public class OutboxRelay {
     }
 
 
-    @Scheduled(fixedDelayString = "${wallet.outbox.relay.fixed-delay:10000}", initialDelayString = "${wallet.outbox.relay.initial-delay:1000}")
+    @Scheduled(fixedDelayString = "${wallet.outbox.relay.fixed-delay:10000}", initialDelayString = "${wallet.outbox.relay.initial-delay:10000}")
     @Traceable("outbox.process")
     @Transactional
     public void process() {

@@ -144,18 +144,26 @@ EOF
 ```
 
 ### 3.1. Financial Transfer Ingress (`202 ACCEPTED`)
-Submit a transfer through the Reactive Edge Gateway:
+Submit a transfer through the Reactive Edge Gateway using HMAC-SHA-256 signature (`WALLET-HMAC-V1`):
 ```bash
+OP_ID="a0000000-0000-0000-0000-000000000001"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+PAYLOAD='{"sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":150.00,"currency":"BRL"}'
+BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: a0000000-0000-0000-0000-000000000001" \
-  -H "X-Tenant-Id: tenant-authorized" \
-  -d '{
-    "sourceAccountId": "11111111-1111-1111-1111-111111111111",
-    "targetAccountId": "22222222-2222-2222-2222-222222222222",
-    "amount": 150.00,
-    "currency": "BRL"
-  }'
+  -H "Idempotency-Key: $OP_ID" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -d "$PAYLOAD"
 ```
 **Expected Response**:
 ```http
@@ -175,10 +183,10 @@ Content-Type: application/json
 
 ### 3.2. Frontend Real-Time SSE Stream Subscription (`REQ-EDG-019`, `TASK-5.10`, `TASK-5.11`)
 
-The Reactive Edge Gateway protects the SSE push stream (`GET /operations/{operationId}/stream`) via [`OperationStatusAuthorizationFilter`](file:///edge/src/main/java/br/com/wallet/edge/internal/ingress/OperationStatusAuthorizationFilter.java), requiring a valid `X-Tenant-Id` header:
+The Reactive Edge Gateway protects the SSE push stream (`GET /operations/{operationId}/stream`) via [`HmacAuthenticationFilter`](file:///edge/src/main/java/br/com/wallet/edge/internal/security/HmacAuthenticationFilter.java) and [`OperationStatusAuthorizationFilter`](file:///edge/src/main/java/br/com/wallet/edge/internal/ingress/OperationStatusAuthorizationFilter.java):
 
-#### A. Unauthorized Stream Attempt (Missing `X-Tenant-Id` Header)
-Connecting to the stream without the authentication header is rejected immediately with `HTTP 401 Unauthorized`:
+#### A. Unauthorized Stream Attempt (Missing HMAC Security Headers)
+Connecting to the stream without HMAC credentials is rejected immediately with `HTTP 401 Unauthorized`:
 ```bash
 curl -i -N -H "Accept: text/event-stream" \
   http://localhost:8080/operations/a0000000-0000-0000-0000-000000000001/stream
@@ -188,30 +196,45 @@ curl -i -N -H "Accept: text/event-stream" \
 HTTP/1.1 401 Unauthorized
 Content-Type: application/json
 
-{"code":"UNAUTHORIZED","message":"Missing required authentication header 'X-Tenant-Id'"}
+{"code":"MISSING_CREDENTIALS","message":"Missing required HMAC security headers (X-Key-Id, X-Timestamp, X-Signature)"}
 ```
 
-#### B. Forbidden Stream Attempt (Mismatched Tenant)
-Attempting to observe an operation with an unauthorized tenant credentials returns `HTTP 403 Forbidden`:
+#### B. Invalid Signature Stream Attempt
+Connecting to the stream with a corrupted or forged HMAC signature returns `HTTP 401 Unauthorized`:
 ```bash
 curl -i -N -H "Accept: text/event-stream" \
-  -H "X-Tenant-Id: unauthorized-tenant" \
-  http://localhost:8080/operations/a0000000-0000-0000-0000-000000000002/stream
+  -H "X-Key-Id: wallet-key-dev-1" \
+  -H "X-Timestamp: $(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")" \
+  -H "X-Signature: badsignature00000000000000000000000000000000000000000000000000000000" \
+  http://localhost:8080/operations/a0000000-0000-0000-0000-000000000001/stream
 ```
 **Expected Response**:
 ```http
-HTTP/1.1 403 Forbidden
+HTTP/1.1 401 Unauthorized
 Content-Type: application/json
 
-{"code":"FORBIDDEN","message":"Access denied: operation does not belong to the authorized tenant"}
+{"error":"UNAUTHORIZED","code":"INVALID_SIGNATURE","message":"HMAC signature verification failed"}
 ```
 
 #### C. Authorized Real-Time Stream Subscription
-Connecting with an authorized tenant streams state transitions in real time without polling:
+Connecting with valid HMAC credentials streams state transitions in real time without polling:
 ```bash
+OP_ID="a0000000-0000-0000-0000-000000000001"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+EMPTY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+
+CANONICAL=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "$OP_ID" "$KEY_ID" "$TIMESTAMP" "$EMPTY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -N -H "Accept: text/event-stream" \
-  -H "X-Tenant-Id: tenant-authorized" \
-  http://localhost:8080/operations/a0000000-0000-0000-0000-000000000002/stream
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -H "X-Nonce: $NONCE" \
+  http://localhost:8080/operations/$OP_ID/stream
 ```
 **Expected Stream Output**:
 ```text
@@ -246,16 +269,24 @@ curl -s http://localhost:8080/actuator/health/readiness
 ### 3.5. Idempotency Conflict Gate (`409 Conflict`)
 Submit a conflicting payload reusing the **same** `operationId` from step 3.1 (`a0000000-0000-0000-0000-000000000001`) with a different amount (`999.00` instead of `150.00`):
 ```bash
+OP_ID="a0000000-0000-0000-0000-000000000001"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+CONFLICT_PAYLOAD='{"sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":999.00,"currency":"BRL"}'
+BODY_HASH=$(printf "%s" "$CONFLICT_PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: a0000000-0000-0000-0000-000000000001" \
-  -H "X-Tenant-Id: tenant-authorized" \
-  -d '{
-    "sourceAccountId": "11111111-1111-1111-1111-111111111111",
-    "targetAccountId": "22222222-2222-2222-2222-222222222222",
-    "amount": 999.00,
-    "currency": "BRL"
-  }'
+  -H "Idempotency-Key: $OP_ID" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -d "$CONFLICT_PAYLOAD"
 ```
 **Expected Response (`HTTP 409 Conflict`)**:
 ```http
@@ -273,24 +304,41 @@ When a transfer exceeding the account balance is submitted under a **new** `oper
 
 1. Submit transfer exceeding available balance:
 ```bash
+FAIL_OP_ID="a0000000-0000-0000-0000-000000000002"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+FAIL_PAYLOAD='{"sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":99999.00,"currency":"BRL"}'
+BODY_HASH=$(printf "%s" "$FAIL_PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$FAIL_OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
-  -H "Idempotency-Key: a0000000-0000-0000-0000-000000000002" \
-  -H "X-Tenant-Id: tenant-authorized" \
-  -d '{
-    "sourceAccountId": "11111111-1111-1111-1111-111111111111",
-    "targetAccountId": "22222222-2222-2222-2222-222222222222",
-    "amount": 99999.00,
-    "currency": "BRL"
-  }'
+  -H "Idempotency-Key: $FAIL_OP_ID" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $TIMESTAMP" \
+  -H "X-Signature: $SIGNATURE" \
+  -d "$FAIL_PAYLOAD"
 ```
 **Ingress Response**: `HTTP 202 Accepted` (`"status": "PROCESSING"`).
 
 2. Observe terminal rejection on the real-time SSE stream:
 ```bash
+STREAM_TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+STREAM_NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+EMPTY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+STREAM_CANONICAL=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "$FAIL_OP_ID" "$KEY_ID" "$STREAM_TIMESTAMP" "$EMPTY_HASH")
+STREAM_SIGNATURE=$(printf "%s" "$STREAM_CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -N -H "Accept: text/event-stream" \
-  -H "X-Tenant-Id: tenant-authorized" \
-  http://localhost:8080/operations/a0000000-0000-0000-0000-000000000002/stream
+  -H "X-Key-Id: $KEY_ID" \
+  -H "X-Timestamp: $STREAM_TIMESTAMP" \
+  -H "X-Signature: $STREAM_SIGNATURE" \
+  -H "X-Nonce: $STREAM_NONCE" \
+  http://localhost:8080/operations/$FAIL_OP_ID/stream
 ```
 **Expected Terminal Event**:
 ```text
@@ -304,7 +352,7 @@ Using the integration test fixture (`EdgeToCoreIntegrationTest`):
    - Wallet A: `11111111-1111-1111-1111-111111111111`, Initial Balance: `200.00` (+ `1.00` initial reserve = `201.00`)
    - Wallet B: `22222222-2222-2222-2222-222222222222`, Initial Balance: `0.00` (+ `1.00` initial reserve = `1.00`)
 2. **Execute Transfer**:
-   - `POST /operations/transfers` with `amount: 75.00`, `Idempotency-Key: a0000000-0000-0000-0000-000000000001`, and `X-Tenant-Id: tenant-authorized`
+   - `POST /operations/transfers` with HMAC-SHA256 signature (`wallet-key-dev-1`), `amount: 75.00`, and `Idempotency-Key: a0000000-0000-0000-0000-000000000001`
    - Ingress returns `202 ACCEPTED` (with `Location: /operations/a0000000-0000-0000-0000-000000000001`)
    - NATS publishes to `commands.wallet.transfer` with `Nats-Msg-Id: a0000000-0000-0000-0000-000000000001`
    - `CoreCommandConsumer` executes `TransferFundsUseCase`
@@ -313,7 +361,7 @@ Using the integration test fixture (`EdgeToCoreIntegrationTest`):
    - Wallet A Balance: `126.00` (`201.00 - 75.00`)
    - Wallet B Balance: `76.00` (`1.00 + 75.00`)
 4. **SSE Reconnect Stream**:
-   - `GET /operations/a0000000-0000-0000-0000-000000000001/stream` with `-H "X-Tenant-Id: tenant-authorized"` immediately bootstraps `COMPLETED` from durable state without hanging (`I-EDGE-007`).
+   - `GET /operations/a0000000-0000-0000-0000-000000000001/stream` with valid HMAC signature headers immediately bootstraps `COMPLETED` from durable state without hanging (`I-EDGE-007`).
 
 ---
 

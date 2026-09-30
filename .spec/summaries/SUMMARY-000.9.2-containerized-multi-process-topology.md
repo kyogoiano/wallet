@@ -151,17 +151,25 @@ kubectl get hpa -n wallet-prod
 
 ### 3.6 Ingress Validation & State Inspection
 ```bash
-# 1. Post a Transfer Command to Edge Gateway (Port 8080)
-OPERATION_ID=$(uuidgen)
+# 1. Post a Transfer Command to Edge Gateway (Port 8080) with HMAC-SHA-256 Signature
+OP_ID="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+PAYLOAD='{"sourceAccountId":"0a35fb14-75ee-4125-943b-500893c30d33","targetAccountId":"1b46fc25-86ff-5236-a54c-611904d41e44","amount":250.00}'
+BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
-  -H "X-Tenant-Id: tenant-corp" \
-  -H "Idempotency-Key: ${OPERATION_ID}" \
-  -d '{
-    "sourceAccountId": "a1000000-0000-0000-0000-000000000001",
-    "targetAccountId": "b2000000-0000-0000-0000-000000000002",
-    "amount": 250.00
-  }'
+  -H "Idempotency-Key: ${OP_ID}" \
+  -H "X-Nonce: ${NONCE}" \
+  -H "X-Key-Id: ${KEY_ID}" \
+  -H "X-Timestamp: ${TIMESTAMP}" \
+  -H "X-Signature: ${SIGNATURE}" \
+  -d "$PAYLOAD"
 # Expected: HTTP/1.1 202 Accepted, Location: /operations/<operationId>
 
 # 2. Assert Edge Readiness Probe
@@ -169,7 +177,7 @@ curl -i http://localhost:8080/actuator/health/readiness
 # Expected: HTTP/1.1 200 OK {"status":"UP"}
 
 # 3. Assert Core Headless Port 8081 Rejects Ingress
-curl -i http://localhost:8081/transfers
+curl -i http://localhost:8081/operations/transfers
 # Expected: HTTP/1.1 404 Not Found
 ```
 

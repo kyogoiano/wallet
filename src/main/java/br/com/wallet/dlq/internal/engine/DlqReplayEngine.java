@@ -40,17 +40,17 @@ public class DlqReplayEngine {
         this.connection = Objects.requireNonNull(connection, "connection cannot be null");
     }
 
-    @Scheduled(fixedDelayString = "${wallet.dlq.replay.fixed-delay:10000}", initialDelayString = "${wallet.dlq.replay.initial-delay:10000}")
+    @Scheduled(fixedDelayString = "${wallet.dlq.replay.fixed-delay:20000}", initialDelayString = "${wallet.dlq.replay.initial-delay:20000}")
     @Transactional
     public void process() {
         final var now = clock.instant();
-        log.info("Retry engine process started! at={}", now);
+        log.debug("Retry engine process started! at={}", now);
 
         final var batch = dlqDao.claimBatch(now, 50);
 
         for (final var event : batch) {
             try {
-                if (event.status() == DlqStatus.COMPLETED || event.status() == DlqStatus.EXHAUSTED || event.status() == DlqStatus.DISCARDED) {
+                if (event.status() != DlqStatus.PENDING) {
                     continue;
                 }
                 replay(event);
@@ -58,6 +58,7 @@ public class DlqReplayEngine {
 
             } catch (TransientException e) {
                 // retry with exponential backoff (transitions to EXHAUSTED if retry >= 3)
+                log.debug("Transient exception during replay process", e);
                 dlqDao.markFailed(
                         event.id(),
                         now,
@@ -66,6 +67,7 @@ public class DlqReplayEngine {
 
             } catch (Exception e) {
                 // fails a poison event (transitions to EXHAUSTED if retry >= 3)
+                log.error("Exception during replay process", e);
                 dlqDao.markFailed(event.id(), now, DlqFailureType.POISON);
             }
         }
@@ -89,6 +91,7 @@ public class DlqReplayEngine {
                 .build();
 
         final JetStream jetStream = connection.jetStream();
+        log.info("Sending DLQ replay event message: {}", message.toString());
         jetStream.publish(message);
     }
 }

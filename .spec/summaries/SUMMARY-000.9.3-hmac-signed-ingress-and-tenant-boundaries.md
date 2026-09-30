@@ -81,18 +81,18 @@ Phase 000.9.3 establishes an air-tight, zero-trust perimeter security architectu
 This guide provides reproducible CLI/cURL commands, test key fixtures, canonical signing scripts, and expected outputs for testing the perimeter security system.
 
 ### 3.1 Test Credentials Fixture
-The Edge in-memory resolver is initialized with the following credentials:
-- **Active Key ID**: `test-key-alpha`
-- **Secret**: `k7V9xP2mQ5wL8zR1tY4uN6bC3vX0sA9d`
+The Edge in-memory resolver is initialized with the following credentials (configured in `InMemoryCredentialResolver`):
+- **Active Key ID**: `wallet-key-dev-1`
+- **Secret**: `wallet-secret-dev-key-32-bytes!!`
 - **Tenant ID**: `tenant-alpha`
-- **Principal ID**: `principal-alpha-1`
-- **Permissions**: `TRANSFER, DEPOSIT, WITHDRAW, STREAM`
+- **Principal ID**: `default-principal`
+- **Permissions**: `wallet:read, wallet:write`
 
 ### 3.2 Canonical Request & Signature Generator Helper
 Save the following helper script as `sign-request.sh` or run directly in bash:
 ```bash
 #!/usr/bin/env bash
-# HMAC-SHA-256 Signer for Wallet Service Ingress
+# WALLET-HMAC-V1 Signer for Wallet Service Ingress
 METHOD="$1"
 PATH_URI="$2"
 QUERY="$3"
@@ -101,19 +101,14 @@ SECRET="$5"
 OP_ID="$6"
 PAYLOAD="$7"
 
-TIMESTAMP=$(date +%s%3N)
-BODY_HASH=$(echo -n "$PAYLOAD" | sha256sum | awk '{print $1}')
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
 
-# Build canonical representation (7 newline-delimited fields, no trailing newline)
-CANONICAL_STRING="${METHOD}
-${PATH_URI}
-${QUERY}
-${KEY_ID}
-${TIMESTAMP}
-${OP_ID}
-${BODY_HASH}"
+# Build canonical representation (8 newline-delimited fields according to WALLET-HMAC-V1, no trailing newline)
+CANONICAL_STRING=$(printf "WALLET-HMAC-V1\n%s\n%s\n%s\n%s\n%s\n%s\n%s" \
+  "$METHOD" "$PATH_URI" "$QUERY" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
 
-SIGNATURE=$(echo -n "$CANONICAL_STRING" | openssl dgst -sha256 -hmac "$SECRET" | awk '{print $2}')
+SIGNATURE=$(printf "%s" "$CANONICAL_STRING" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
 
 echo "TIMESTAMP=$TIMESTAMP"
 echo "SIGNATURE=$SIGNATURE"
@@ -124,18 +119,22 @@ echo "OP_ID=$OP_ID"
 ```bash
 # Generate parameters
 OP_ID="11111111-1111-1111-1111-111111111111"
-PAYLOAD='{"walletId":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","amount":100.00}'
-TIMESTAMP=$(date +%s%3N)
-BODY_HASH=$(echo -n "$PAYLOAD" | sha256sum | awk '{print $1}')
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+PAYLOAD='{"walletId":"a0000000-0000-0000-0000-000000000001","userId":"b0000000-0000-0000-0000-000000000001","amount":"100.00","operationOrigin":"USER"}'
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
 
-CANONICAL=$(printf "POST\n/operations/deposits\n\ntest-key-alpha\n%s\n%s\n%s" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
-SIGNATURE=$(echo -n "$CANONICAL" | openssl dgst -sha256 -hmac "k7V9xP2mQ5wL8zR1tY4uN6bC3vX0sA9d" | awk '{print $2}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/deposits\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
 
 # Send request to Edge Gateway
 curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
-  -H "X-Key-Id: test-key-alpha" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
@@ -143,10 +142,10 @@ curl -s -i -X POST http://localhost:8080/operations/deposits \
 **Expected Response**:
 ```http
 HTTP/1.1 202 Accepted
-Location: /operations/11111111-1111-1111-1111-111111111111/stream
+Location: /operations/11111111-1111-1111-1111-111111111111
 Content-Type: application/json
 
-{"operationId":"11111111-1111-1111-1111-111111111111","status":"ACCEPTED"}
+{"operationId":"11111111-1111-1111-1111-111111111111","status":"PROCESSING","timestamp":"2026-09-21T16:00:00Z","message":"Command accepted for execution"}
 ```
 
 ---
@@ -154,15 +153,17 @@ Content-Type: application/json
 ### 3.4 Verification Scenario 2: Timestamp Skew Rejection (Anti-Replay)
 Attempt to replay a request with a timestamp older than 30,000ms:
 ```bash
-SKEWED_TIMESTAMP=$(( $(date +%s%3N) - 35000 ))
-BODY_HASH=$(echo -n "$PAYLOAD" | sha256sum | awk '{print $1}')
-CANONICAL=$(printf "POST\n/operations/deposits\n\ntest-key-alpha\n%s\n%s\n%s" "$SKEWED_TIMESTAMP" "$OP_ID" "$BODY_HASH")
-SIGNATURE=$(echo -n "$CANONICAL" | openssl dgst -sha256 -hmac "k7V9xP2mQ5wL8zR1tY4uN6bC3vX0sA9d" | awk '{print $2}')
+SKEWED_TIMESTAMP=$(( $(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))") - 35000 ))
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/deposits\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$SKEWED_TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
 
 curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
-  -H "X-Key-Id: test-key-alpha" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
   -H "X-Timestamp: $SKEWED_TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
@@ -172,7 +173,7 @@ curl -s -i -X POST http://localhost:8080/operations/deposits \
 HTTP/1.1 401 Unauthorized
 Content-Type: application/json
 
-{"error":"TIMESTAMP_OUT_OF_RANGE","message":"Request timestamp is outside acceptable window"}
+{"error":"UNAUTHORIZED","code":"TIMESTAMP_OUT_OF_RANGE","message":"Request timestamp is skewed beyond 30000ms window"}
 ```
 
 ---
@@ -183,17 +184,18 @@ Modify payload body without updating cryptographic signature:
 curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
-  -H "X-Key-Id: test-key-alpha" \
+  -H "X-Nonce: $(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)" \
+  -H "X-Key-Id: $KEY_ID" \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
-  -d '{"walletId":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","amount":999999.00}'
+  -d '{"walletId":"a0000000-0000-0000-0000-000000000001","userId":"b0000000-0000-0000-0000-000000000001","amount":"999999.00","operationOrigin":"USER"}'
 ```
 **Expected Response**:
 ```http
 HTTP/1.1 401 Unauthorized
 Content-Type: application/json
 
-{"error":"INVALID_SIGNATURE","message":"Cryptographic signature verification failed"}
+{"error":"UNAUTHORIZED","code":"INVALID_SIGNATURE","message":"HMAC signature verification failed"}
 ```
 
 ---
@@ -204,16 +206,18 @@ Attempt to transfer funds across different tenant boundaries:
 - Target account in `tenant-beta`
 ```bash
 XFER_OP_ID="22222222-2222-2222-2222-222222222222"
-XFER_PAYLOAD='{"from":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","to":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","amount":50.00}'
-TIMESTAMP=$(date +%s%3N)
-BODY_HASH=$(echo -n "$XFER_PAYLOAD" | sha256sum | awk '{print $1}')
-CANONICAL=$(printf "POST\n/operations/transfers\n\ntest-key-alpha\n%s\n%s\n%s" "$TIMESTAMP" "$XFER_OP_ID" "$BODY_HASH")
-SIGNATURE=$(echo -n "$CANONICAL" | openssl dgst -sha256 -hmac "k7V9xP2mQ5wL8zR1tY4uN6bC3vX0sA9d" | awk '{print $2}')
+NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+XFER_PAYLOAD='{"sourceAccountId":"a0000000-0000-0000-0000-000000000001","targetAccountId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","amount":50.00}'
+TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+BODY_HASH=$(printf "%s" "$XFER_PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$XFER_OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
 
 curl -s -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $XFER_OP_ID" \
-  -H "X-Key-Id: test-key-alpha" \
+  -H "X-Nonce: $NONCE" \
+  -H "X-Key-Id: $KEY_ID" \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$XFER_PAYLOAD"

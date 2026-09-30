@@ -27,6 +27,9 @@ usage() {
     echo "  logs [service]  Tail logs for a specific service (or all services)"
     echo "  update-schema   Apply latest PostgreSQL schema (docker/init/schema.sql)"
     echo "  test-tx         Execute an end-to-end deposit transaction through Edge"
+    echo "  test-transfer   Execute an end-to-end transfer transaction through Edge"
+    echo "  test-stream [id] Connect to real-time Server-Sent Events stream on Edge Gateway"
+    echo "  curl [args...]  Execute an HMAC-signed request via ./scripts/curl-edge.sh"
     echo "  test-webhook [url] Trigger a Portainer Stack Redeploy Webhook"
     echo "  clean           Stop and remove all volumes, containers, and local data"
     echo ""
@@ -197,7 +200,7 @@ case "$ACTION" in
         echo "  Key ID       : $KEY_ID"
         echo ""
 
-        TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+        TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
         PAYLOAD="{\"walletId\":\"$WALLET_ID\",\"userId\":\"$USER_ID\",\"amount\":\"150.00\",\"operationOrigin\":\"USER\"}"
         BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
         CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/deposits\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
@@ -246,6 +249,27 @@ case "$ACTION" in
         else
             echo "⚠️ Unexpected status $STATUS. Check logs with '$0 logs edge' or '$0 logs core'."
         fi
+        ;;
+
+    test-transfer)
+        print_banner
+        AMOUNT="${2:-150.00}"
+        echo "▶ Executing live Transfer Transaction through Edge Ingress..."
+        "$(dirname "$0")/curl-edge.sh" transfer "$AMOUNT" "${3:-0a35fb14-75ee-4125-943b-500893c30d33}" "${4:-1b46fc25-86ff-5236-a54c-611904d41e44}"
+        ;;
+
+    test-stream)
+        print_banner
+        OP_ID="${2:-}"
+        if [ -z "$OP_ID" ]; then
+            echo "Usage: $0 test-stream <operationId>"
+            exit 1
+        fi
+        "$(dirname "$0")/curl-edge.sh" stream "$OP_ID"
+        ;;
+
+    curl|call)
+        "$(dirname "$0")/curl-edge.sh" "${@:2}"
         ;;
 
     test-webhook)

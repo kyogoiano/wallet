@@ -88,48 +88,45 @@ The Edge in-memory resolver is initialized with the following credentials (confi
 - **Principal ID**: `default-principal`
 - **Permissions**: `wallet:read, wallet:write`
 
-### 3.2 Canonical Request & Signature Generator Helper
-Save the following helper script as `sign-request.sh` or run directly in bash:
+### 3.2 Automated Ingress Tooling (`scripts/curl-edge.sh` & `scripts/appliance.sh`)
+The repository provides dedicated CLI ingress tools that handle RFC-compliant HMAC-SHA256 signature generation, 13-digit millisecond timestamps, nonces, and canonical headers in a single command:
+
 ```bash
-#!/usr/bin/env bash
-# WALLET-HMAC-V1 Signer for Wallet Service Ingress
-METHOD="$1"
-PATH_URI="$2"
-QUERY="$3"
-KEY_ID="$4"
-SECRET="$5"
-OP_ID="$6"
-PAYLOAD="$7"
+# 1. Deposit funds through Edge Ingress (1-line)
+./scripts/curl-edge.sh deposit 100.00
 
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
-BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
+# 2. Transfer funds through Edge Ingress (1-line)
+./scripts/curl-edge.sh transfer 50.00 0a35fb14-75ee-4125-943b-500893c30d33 1b46fc25-86ff-5236-a54c-611904d41e44
 
-# Build canonical representation (8 newline-delimited fields according to WALLET-HMAC-V1, no trailing newline)
-CANONICAL_STRING=$(printf "WALLET-HMAC-V1\n%s\n%s\n%s\n%s\n%s\n%s\n%s" \
-  "$METHOD" "$PATH_URI" "$QUERY" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+# 3. Stream real-time Server-Sent Events for an operation
+./scripts/curl-edge.sh stream 11111111-1111-1111-1111-111111111111
 
-SIGNATURE=$(printf "%s" "$CANONICAL_STRING" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
-echo "TIMESTAMP=$TIMESTAMP"
-echo "SIGNATURE=$SIGNATURE"
-echo "OP_ID=$OP_ID"
+# 4. Or use appliance orchestration shortcuts:
+./scripts/appliance.sh test-tx
+./scripts/appliance.sh test-transfer 150.00
+./scripts/appliance.sh test-stream 11111111-1111-1111-1111-111111111111
 ```
 
+---
+
 ### 3.3 Verification Scenario 1: Valid Signed Deposit Transaction
+**Option A: 1-Line Execution via CLI Runner**
 ```bash
-# Generate parameters
+./scripts/curl-edge.sh deposit 100.00
+```
+
+**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+```bash
+(
 OP_ID="11111111-1111-1111-1111-111111111111"
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 KEY_ID="wallet-key-dev-1"
 SECRET="wallet-secret-dev-key-32-bytes!!"
 PAYLOAD='{"walletId":"a0000000-0000-0000-0000-000000000001","userId":"b0000000-0000-0000-0000-000000000001","amount":"100.00","operationOrigin":"USER"}'
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
-
 CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/deposits\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
-# Send request to Edge Gateway
 curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -138,6 +135,7 @@ curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
+)
 ```
 **Expected Response**:
 ```http
@@ -153,12 +151,17 @@ Content-Type: application/json
 ### 3.4 Verification Scenario 2: Timestamp Skew Rejection (Anti-Replay)
 Attempt to replay a request with a timestamp older than 30,000ms:
 ```bash
-SKEWED_TIMESTAMP=$(( $(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))") - 35000 ))
+(
+OP_ID="11111111-1111-1111-1111-111111111111"
+NOW_MS=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
+SKEWED_TIMESTAMP=$(( NOW_MS - 35000 ))
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+PAYLOAD='{"walletId":"a0000000-0000-0000-0000-000000000001","userId":"b0000000-0000-0000-0000-000000000001","amount":"100.00","operationOrigin":"USER"}'
 BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
 CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/deposits\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$SKEWED_TIMESTAMP" "$OP_ID" "$BODY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
 curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -167,6 +170,7 @@ curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "X-Timestamp: $SKEWED_TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
+)
 ```
 **Expected Response**:
 ```http
@@ -181,6 +185,15 @@ Content-Type: application/json
 ### 3.5 Verification Scenario 3: Tampered Payload Detection
 Modify payload body without updating cryptographic signature:
 ```bash
+(
+OP_ID="11111111-1111-1111-1111-111111111111"
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+PAYLOAD='{"walletId":"a0000000-0000-0000-0000-000000000001","userId":"b0000000-0000-0000-0000-000000000001","amount":"100.00","operationOrigin":"USER"}'
+BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
+CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/deposits\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
 curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -189,6 +202,7 @@ curl -s -i -X POST http://localhost:8080/operations/deposits \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d '{"walletId":"a0000000-0000-0000-0000-000000000001","userId":"b0000000-0000-0000-0000-000000000001","amount":"999999.00","operationOrigin":"USER"}'
+)
 ```
 **Expected Response**:
 ```http
@@ -204,15 +218,24 @@ Content-Type: application/json
 Attempt to transfer funds across different tenant boundaries:
 - Source account in `tenant-alpha`
 - Target account in `tenant-beta`
+
+**Option A: 1-Line Execution via CLI Runner**
 ```bash
+./scripts/curl-edge.sh POST /operations/transfers '{"sourceAccountId":"a0000000-0000-0000-0000-000000000001","targetAccountId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","amount":50.00}'
+```
+
+**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+```bash
+(
 XFER_OP_ID="22222222-2222-2222-2222-222222222222"
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
 XFER_PAYLOAD='{"sourceAccountId":"a0000000-0000-0000-0000-000000000001","targetAccountId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb","amount":50.00}'
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 BODY_HASH=$(printf "%s" "$XFER_PAYLOAD" | sha256sum | awk '{print $1}')
 CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$XFER_OP_ID" "$BODY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
 curl -s -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $XFER_OP_ID" \
@@ -221,6 +244,7 @@ curl -s -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$XFER_PAYLOAD"
+)
 ```
 **Database Validation Query**:
 ```sql

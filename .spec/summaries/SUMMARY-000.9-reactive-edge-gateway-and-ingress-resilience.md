@@ -145,17 +145,26 @@ EOF
 
 ### 3.1. Financial Transfer Ingress (`202 ACCEPTED`)
 Submit a transfer through the Reactive Edge Gateway using HMAC-SHA-256 signature (`WALLET-HMAC-V1`):
+
+**Option A: 1-Line Execution via CLI Runner**
 ```bash
+./scripts/curl-edge.sh transfer 150.00 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
+# or appliance helper:
+./scripts/appliance.sh test-transfer 150.00
+```
+
+**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+```bash
+(
 OP_ID="a0000000-0000-0000-0000-000000000001"
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 KEY_ID="wallet-key-dev-1"
 SECRET="wallet-secret-dev-key-32-bytes!!"
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 PAYLOAD='{"sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":150.00,"currency":"BRL"}'
 BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
 CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -164,6 +173,7 @@ curl -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
+)
 ```
 **Expected Response**:
 ```http
@@ -202,11 +212,14 @@ Content-Type: application/json
 #### B. Invalid Signature Stream Attempt
 Connecting to the stream with a corrupted or forged HMAC signature returns `HTTP 401 Unauthorized`:
 ```bash
+(
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 curl -i -N -H "Accept: text/event-stream" \
   -H "X-Key-Id: wallet-key-dev-1" \
-  -H "X-Timestamp: $(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")" \
+  -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: badsignature00000000000000000000000000000000000000000000000000000000" \
   http://localhost:8080/operations/a0000000-0000-0000-0000-000000000001/stream
+)
 ```
 **Expected Response**:
 ```http
@@ -218,23 +231,32 @@ Content-Type: application/json
 
 #### C. Authorized Real-Time Stream Subscription
 Connecting with valid HMAC credentials streams state transitions in real time without polling:
+
+**Option A: 1-Line Execution via CLI Runner**
 ```bash
+./scripts/curl-edge.sh stream a0000000-0000-0000-0000-000000000001
+# or appliance helper:
+./scripts/appliance.sh test-stream a0000000-0000-0000-0000-000000000001
+```
+
+**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+```bash
+(
 OP_ID="a0000000-0000-0000-0000-000000000001"
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 KEY_ID="wallet-key-dev-1"
 SECRET="wallet-secret-dev-key-32-bytes!!"
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 EMPTY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-
 CANONICAL=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "$OP_ID" "$KEY_ID" "$TIMESTAMP" "$EMPTY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
 curl -N -H "Accept: text/event-stream" \
   -H "X-Key-Id: $KEY_ID" \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -H "X-Nonce: $NONCE" \
   http://localhost:8080/operations/$OP_ID/stream
+)
 ```
 **Expected Stream Output**:
 ```text
@@ -268,17 +290,24 @@ curl -s http://localhost:8080/actuator/health/readiness
 
 ### 3.5. Idempotency Conflict Gate (`409 Conflict`)
 Submit a conflicting payload reusing the **same** `operationId` from step 3.1 (`a0000000-0000-0000-0000-000000000001`) with a different amount (`999.00` instead of `150.00`):
+
+**Option A: 1-Line Execution via CLI Runner**
 ```bash
+./scripts/curl-edge.sh POST /operations/transfers '{"sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":999.00,"currency":"BRL"}'
+```
+
+**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+```bash
+(
 OP_ID="a0000000-0000-0000-0000-000000000001"
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 KEY_ID="wallet-key-dev-1"
 SECRET="wallet-secret-dev-key-32-bytes!!"
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 CONFLICT_PAYLOAD='{"sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":999.00,"currency":"BRL"}'
 BODY_HASH=$(printf "%s" "$CONFLICT_PAYLOAD" | sha256sum | awk '{print $1}')
 CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -287,6 +316,7 @@ curl -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$CONFLICT_PAYLOAD"
+)
 ```
 **Expected Response (`HTTP 409 Conflict`)**:
 ```http
@@ -303,17 +333,24 @@ Content-Type: application/json
 When a transfer exceeding the account balance is submitted under a **new** `operationId`, the Edge Gateway decouples HTTP callers from synchronous DB scans, issuing `202 ACCEPTED (PROCESSING)`. The Financial Core then asynchronously rejects the command with `InsufficientFundsException` and transitions the operation to `FAILED`:
 
 1. Submit transfer exceeding available balance:
+
+**Option A: 1-Line Execution via CLI Runner**
 ```bash
+./scripts/curl-edge.sh transfer 99999.00 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
+```
+
+**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+```bash
+(
 FAIL_OP_ID="a0000000-0000-0000-0000-000000000002"
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 KEY_ID="wallet-key-dev-1"
 SECRET="wallet-secret-dev-key-32-bytes!!"
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 FAIL_PAYLOAD='{"sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":99999.00,"currency":"BRL"}'
 BODY_HASH=$(printf "%s" "$FAIL_PAYLOAD" | sha256sum | awk '{print $1}')
 CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$FAIL_OP_ID" "$BODY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $FAIL_OP_ID" \
@@ -322,23 +359,31 @@ curl -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$FAIL_PAYLOAD"
+)
 ```
 **Ingress Response**: `HTTP 202 Accepted` (`"status": "PROCESSING"`).
 
 2. Observe terminal rejection on the real-time SSE stream:
 ```bash
-STREAM_TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
-STREAM_NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
-EMPTY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-STREAM_CANONICAL=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "$FAIL_OP_ID" "$KEY_ID" "$STREAM_TIMESTAMP" "$EMPTY_HASH")
-STREAM_SIGNATURE=$(printf "%s" "$STREAM_CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+# Option A: 1-Line Execution
+./scripts/curl-edge.sh stream a0000000-0000-0000-0000-000000000002
 
+# Option B: Direct Subshell
+(
+STREAM_TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
+STREAM_NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
+KEY_ID="wallet-key-dev-1"
+SECRET="wallet-secret-dev-key-32-bytes!!"
+EMPTY_HASH="e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+STREAM_CANONICAL=$(printf "WALLET-HMAC-V1\nGET\n/operations/%s/stream\n\n%s\n%s\n\n%s" "a0000000-0000-0000-0000-000000000002" "$KEY_ID" "$STREAM_TIMESTAMP" "$EMPTY_HASH")
+STREAM_SIGNATURE=$(printf "%s" "$STREAM_CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
 curl -N -H "Accept: text/event-stream" \
   -H "X-Key-Id: $KEY_ID" \
   -H "X-Timestamp: $STREAM_TIMESTAMP" \
   -H "X-Signature: $STREAM_SIGNATURE" \
   -H "X-Nonce: $STREAM_NONCE" \
-  http://localhost:8080/operations/$FAIL_OP_ID/stream
+  http://localhost:8080/operations/a0000000-0000-0000-0000-000000000002/stream
+)
 ```
 **Expected Terminal Event**:
 ```text

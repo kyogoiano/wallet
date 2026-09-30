@@ -109,17 +109,26 @@ MC4CAQAwBQYDK2VwBCIEIPz5WvB7r2hX6Hk5GkQj6b7M8zL1qT9yU0vX2sA3d4eF
 
 ### 3.2 Ingress HMAC-Signed Request with Two-Phase Nonce
 Submit a transfer command with HMAC-SHA-256 signature and unique nonce:
+
+**Option A: 1-Line Execution via CLI Runner**
 ```bash
+./scripts/curl-edge.sh transfer 250.00 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
+# or appliance orchestration shortcut:
+./scripts/appliance.sh test-transfer 250.00 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
+```
+
+**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+```bash
+(
 OP_ID="c86e2468-b7db-4b6d-bcbf-91b61972f102"
 NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
 KEY_ID="wallet-key-dev-1"
 SECRET="wallet-secret-dev-key-32-bytes!!"
-TIMESTAMP=$(date +%s%3N 2>/dev/null || echo "$(($(date +%s) * 1000))")
+TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
 PAYLOAD='{"operationId":"c86e2468-b7db-4b6d-bcbf-91b61972f102","sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":250.00}'
 BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
 CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
 SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
-
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -128,6 +137,7 @@ curl -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
+)
 ```
 **Expected HTTP Response (202 Accepted)**:
 ```http
@@ -147,6 +157,7 @@ Content-Type: application/json
 Re-executing the identical request above with the **same** `X-Nonce` triggers immediate rejection:
 ```bash
 # Re-submitting the exact same request with the already-consumed $NONCE triggers immediate rejection:
+(
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -155,6 +166,7 @@ curl -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
+)
 ```
 **Expected HTTP Response (401 Unauthorized)**:
 ```http

@@ -127,6 +127,7 @@ public class EdgeToCoreIntegrationTest extends DockerProperties {
                         .header(SecurityHeaders.X_KEY_ID, InMemoryCredentialResolver.DEFAULT_DEV_KEY_ID)
                         .header(SecurityHeaders.X_TIMESTAMP, timestamp)
                         .header(SecurityHeaders.X_SIGNATURE, signature)
+                        .header(SecurityHeaders.X_NONCE, opId.toString())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(requestJson))
                 .andReturn();

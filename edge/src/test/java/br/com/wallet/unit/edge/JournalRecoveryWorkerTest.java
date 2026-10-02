@@ -143,4 +143,21 @@ class JournalRecoveryWorkerTest {
         assertThat(healthIndicator.getCurrentState()).isEqualTo(EdgeReadinessState.READY);
         assertThat(healthIndicator.health().block().getStatus().getCode()).isEqualTo("UP");
     }
+
+    @Test
+    @DisplayName("Should skip concurrent recovery scan if already running")
+    void shouldSkipConcurrentRecoveryScan() {
+        Path seg1 = Path.of("/spool/segment-0000000000000001.wal");
+        when(journal.listSegmentFiles()).thenAnswer(invocation -> {
+            // Trigger concurrent run while first is inside listSegmentFiles
+            worker.runRecoveryScan();
+            return List.of();
+        });
+
+        worker.runRecoveryScan();
+
+        // journal.listSegmentFiles() should only be called once by the outer execution
+        verify(journal, times(1)).listSegmentFiles();
+        assertThat(healthIndicator.getCurrentState()).isEqualTo(EdgeReadinessState.READY);
+    }
 }

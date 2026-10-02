@@ -182,7 +182,7 @@ services:
     image: oraclelinux:9-slim
     container_name: wallet-appliance-spool-init
     user: "0:0"
-    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 700 /spool && chmod -R u+rwX /spool"]
+    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 755 /spool && chmod -R a+rX,u+rwX /spool"]
     volumes:
       - ./spool-data:/spool
     networks:
@@ -219,7 +219,7 @@ services:
       SPRING_DATA_REDIS_PORT: 6379
       REDIS_SOCKET_ENABLED: "true"
       REDIS_SOCKET_PATH: /var/run/redis/redis.sock
-      EDGE_SPOOL_DIR: /spool
+      EDGE_SPOOL_DIRECTORY: /spool
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-appliance-edge,service.version=0.0.1-SNAPSHOT

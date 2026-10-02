@@ -108,27 +108,172 @@ MC4CAQAwBQYDK2VwBCIEIPz5WvB7r2hX6Hk5GkQj6b7M8zL1qT9yU0vX2sA3d4eF
 - **Algorithm**: `AES-256-GCM` (`WALLET_ENV_V1`)
 
 ### 3.2 Ingress HMAC-Signed Request with Two-Phase Nonce
-Submit a transfer command with HMAC-SHA-256 signature and unique nonce:
+Submit a transfer command with HMAC-SHA-256 signature and unique nonce.
 
-**Option A: 1-Line Execution via CLI Runner**
+#### Reusable Shell Helper Functions & Pre-Evaluation Environment
+To prevent timestamp drift, quoting errors in payload JSON, or signature mismatch, source [`scripts/wallet-security-env.sh`](file:///scripts/wallet-security-env.sh) or declare these functions in your shell:
+
 ```bash
-./scripts/curl-edge.sh transfer 250.00 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
-# or appliance orchestration shortcut:
-./scripts/appliance.sh test-transfer 250.00 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
+# 1. Load helper functions and credentials
+source scripts/wallet-security-env.sh
+
+# Or define directly in your shell session:
+export WALLET_KEY_ID="${WALLET_KEY_ID:-wallet-key-dev-1}"
+export WALLET_SECRET="${WALLET_SECRET:-wallet-secret-dev-key-32-bytes!!}"
+export KEY_ID="$WALLET_KEY_ID"
+export SECRET="$WALLET_SECRET"
+export EDGE_HOST="${EDGE_HOST:-http://localhost:8080}"
+
+wallet_timestamp() {
+    python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || \
+    echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))"
+}
+
+wallet_uuid() {
+    uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid 2>/dev/null || python3 -c 'import uuid; print(uuid.uuid4())'
+}
+
+wallet_body_hash() {
+    local payload="${1:-}"
+    if [ -n "$payload" ]; then
+        printf "%s" "$payload" | sha256sum | awk '{print $1}'
+    else
+        echo "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    fi
+}
+
+wallet_canonical() {
+    local method="${1:-POST}"
+    local path="${2:-/operations/transfers}"
+    local key_id="${3:-${WALLET_KEY_ID:-wallet-key-dev-1}}"
+    local timestamp="${4:-}"
+    local op_id="${5:-}"
+    local body_hash="${6:-e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855}"
+    printf "WALLET-HMAC-V1\n%s\n%s\n\n%s\n%s\n%s\n%s" "$method" "$path" "$key_id" "$timestamp" "$op_id" "$body_hash"
+}
+
+wallet_sign() {
+    local canonical="$1"
+    local secret="${2:-${WALLET_SECRET:-wallet-secret-dev-key-32-bytes!!}}"
+    printf "%s" "$canonical" | openssl dgst -sha256 -hmac "$secret" 2>/dev/null | awk '{print $2}'
+}
+
+wallet_curl() {
+    local method="${1:-POST}"
+    local path="${2:-/operations/transfers}"
+    local op_id=""
+    local nonce=""
+    local payload=""
+
+    if [[ "$method" == "transfer" ]]; then
+        local amount="${2:-150.00}"
+        local from="${3:-a0000000-0000-0000-0000-000000000001}"
+        local to="${4:-415f3af5-f559-4d95-9b4e-abdd1dfa18a8}"
+        method="POST"
+        path="/operations/transfers"
+        op_id="${OP_ID:-$(wallet_uuid)}"
+        nonce="${NONCE:-be9215b0-009c-4816-a4fe-b32229928b75}"
+        payload="{\"sourceAccountId\":\"$from\",\"targetAccountId\":\"$to\",\"amount\":$amount,\"currency\":\"BRL\"}"
+    elif [[ "$#" -eq 3 ]]; then
+        op_id="${OP_ID:-$(wallet_uuid)}"
+        nonce="${NONCE:-be9215b0-009c-4816-a4fe-b32229928b75}"
+        payload="$3"
+    elif [[ "$#" -ge 5 ]]; then
+        op_id="$3"
+        nonce="$4"
+        payload="$5"
+    else
+        op_id="${3:-${OP_ID:-$(wallet_uuid)}}"
+        nonce="${4:-${NONCE:-be9215b0-009c-4816-a4fe-b32229928b75}}"
+        payload="${5:-}"
+    fi
+
+    if [[ "$nonce" == "random" || "$nonce" == "new" ]]; then
+        nonce="$(wallet_uuid)"
+    fi
+
+    local key_id="${WALLET_KEY_ID:-wallet-key-dev-1}"
+    local secret="${WALLET_SECRET:-wallet-secret-dev-key-32-bytes!!}"
+
+    local timestamp
+    local body_hash
+    local canonical
+    local signature
+
+    timestamp=$(wallet_timestamp)
+    body_hash=$(wallet_body_hash "$payload")
+    canonical=$(wallet_canonical "$method" "$path" "$key_id" "$timestamp" "$op_id" "$body_hash")
+    signature=$(wallet_sign "$canonical" "$secret")
+
+    echo "▶ Request: $method ${EDGE_HOST:-http://localhost:8080}${path}"
+    echo "  Content-Type    : application/json"
+    echo "  Idempotency-Key : $op_id"
+    echo "  X-Nonce         : $nonce"
+    echo "  X-Key-Id        : $key_id"
+    echo "  X-Timestamp     : $timestamp"
+    echo "  X-Signature     : $signature"
+    if [ -n "$payload" ]; then
+        echo "  Payload         : $payload"
+    fi
+    echo "-------------------------------------------------------------------------"
+
+    local curl_cmd=(
+        curl -i -X "$method" "${EDGE_HOST:-http://localhost:8080}${path}"
+        -H "Content-Type: application/json"
+        -H "Idempotency-Key: $op_id"
+        -H "X-Nonce: $nonce"
+        -H "X-Key-Id: $key_id"
+        -H "X-Timestamp: $timestamp"
+        -H "X-Signature: $signature"
+    )
+
+    if [ -n "$payload" ]; then
+        curl_cmd+=(-d "$payload")
+    fi
+
+    "${curl_cmd[@]}"
+}
 ```
 
-**Option B: Direct Subshell (Atomic Execution — Paste-Safe)**
+**Step 0: Rebuild & Restart Edge Appliance Service (Required for new code)**
 ```bash
-(
-OP_ID="c86e2468-b7db-4b6d-bcbf-91b61972f102"
-NONCE="$(uuidgen 2>/dev/null || cat /proc/sys/kernel/random/uuid)"
-KEY_ID="wallet-key-dev-1"
-SECRET="wallet-secret-dev-key-32-bytes!!"
-TIMESTAMP=$(python3 -c 'import time; print(int(time.time() * 1000))' 2>/dev/null || echo "$(($(date +%s%N 2>/dev/null || echo "$(date +%s)000000000") / 1000000))")
-PAYLOAD='{"operationId":"c86e2468-b7db-4b6d-bcbf-91b61972f102","sourceAccountId":"11111111-1111-1111-1111-111111111111","targetAccountId":"22222222-2222-2222-2222-222222222222","amount":250.00}'
-BODY_HASH=$(printf "%s" "$PAYLOAD" | sha256sum | awk '{print $1}')
-CANONICAL=$(printf "WALLET-HMAC-V1\nPOST\n/operations/transfers\n\n%s\n%s\n%s\n%s" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
-SIGNATURE=$(printf "%s" "$CANONICAL" | openssl dgst -sha256 -hmac "$SECRET" 2>/dev/null | awk '{print $2}')
+docker compose -f docker-compose.appliance.yaml up -d --build edge
+# Or restart complete appliance:
+./scripts/appliance.sh restart
+```
+
+**Option A: Automated Execution via Ingress Helpers**
+```bash
+# Using the helper function (first execution -> 202 Accepted):
+wallet_curl transfer 250.00 a0000000-0000-0000-0000-000000000001 415f3af5-f559-4d95-9b4e-abdd1dfa18a8
+
+# Second execution with same default nonce -> 401 Unauthorized (DUPLICATE_NONCE):
+wallet_curl transfer 250.00 a0000000-0000-0000-0000-000000000001 415f3af5-f559-4d95-9b4e-abdd1dfa18a8
+
+# Or with JSON payload:
+OP_ID=$(wallet_uuid)
+PAYLOAD="{\"operationId\":\"$OP_ID\",\"sourceAccountId\":\"a0000000-0000-0000-0000-000000000001\",\"targetAccountId\":\"415f3af5-f559-4d95-9b4e-abdd1dfa18a8\",\"amount\":250.00}"
+wallet_curl POST /operations/transfers "$PAYLOAD"
+
+# Or using the repository CLI runner:
+./scripts/curl-edge.sh transfer 250.00 a0000000-0000-0000-0000-000000000001 415f3af5-f559-4d95-9b4e-abdd1dfa18a8
+```
+
+**Option B: Explicit Shell Variables (Stored Before Calling curl)**
+Compute and store all parameters in the shell first so `X-Timestamp`, `Idempotency-Key`, and the canonical signature match with 100% precision:
+```bash
+# 1. Setup request parameters
+OP_ID=$(wallet_uuid)
+NONCE="$OP_ID"
+PAYLOAD="{\"operationId\":\"$OP_ID\",\"sourceAccountId\":\"a0000000-0000-0000-0000-000000000001\",\"targetAccountId\":\"415f3af5-f559-4d95-9b4e-abdd1dfa18a8\",\"amount\":250.00}"
+
+# 2. Store timestamp, body hash, canonical string, and signature BEFORE calling curl
+TIMESTAMP=$(wallet_timestamp)
+BODY_HASH=$(wallet_body_hash "$PAYLOAD")
+CANONICAL=$(wallet_canonical "POST" "/operations/transfers" "$KEY_ID" "$TIMESTAMP" "$OP_ID" "$BODY_HASH")
+SIGNATURE=$(wallet_sign "$CANONICAL" "$SECRET")
+
+# 3. Execute curl with exact stored values
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -137,7 +282,6 @@ curl -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
-)
 ```
 **Expected HTTP Response (202 Accepted)**:
 ```http
@@ -154,10 +298,9 @@ Content-Type: application/json
 ```
 
 ### 3.3 Replay Detection Verification
-Re-executing the identical request above with the **same** `X-Nonce` triggers immediate rejection:
+Re-executing the identical request using the previously stored `$OP_ID`, `$NONCE`, `$TIMESTAMP`, `$SIGNATURE`, and `$PAYLOAD` triggers immediate rejection:
 ```bash
-# Re-submitting the exact same request with the already-consumed $NONCE triggers immediate rejection:
-(
+# Re-submitting the exact same request with the already-consumed $NONCE:
 curl -i -X POST http://localhost:8080/operations/transfers \
   -H "Content-Type: application/json" \
   -H "Idempotency-Key: $OP_ID" \
@@ -166,7 +309,6 @@ curl -i -X POST http://localhost:8080/operations/transfers \
   -H "X-Timestamp: $TIMESTAMP" \
   -H "X-Signature: $SIGNATURE" \
   -d "$PAYLOAD"
-)
 ```
 **Expected HTTP Response (401 Unauthorized)**:
 ```http
@@ -180,13 +322,45 @@ Content-Type: application/json
 }
 ```
 
-### 3.4 Raw Spool Journal Zero-Plaintext Inspection (`I-ENV-001`)
-Inspect the active binary spool journal segment:
+### 3.4 Raw Spool Journal Zero-Plaintext Inspection (`I-ENV-001`, `I-EDGE-001`)
+
+The Edge Gateway implements **Durable Acceptance Semantics (`I-EDGE-001`)** with two modes:
+1. **Normal Path (Broker UP)**: Commands are published directly to NATS JetStream; the response returns `X-Edge-Spooled: false`.
+2. **NATS Internal 8MB Buffer usage (Broker DOWN / Circuit Breaker OPEN)**:  Before journal spillover it uses the buffer to store the commands
+3**Degraded Spillover Path (Broker DOWN / Circuit Breaker OPEN)**: Commands spill into preallocated 64MB journal segments (`segment-%016d.wal`); the response returns `X-Edge-Spooled: true`.
+
+#### Verification Procedure
+
+**Step 1: Trigger Degraded Spooling (Simulate NATS Outage)**
 ```bash
-# Search for cleartext account UUIDs or amounts in raw segment files
-strings /spool/edge-journal-*.wal | grep "11111111-1111-1111-1111-111111111111"
+# Temporarily stop NATS broker
+docker compose -f docker-compose.appliance.yaml stop nats
+
+# Send a transfer through Edge Ingress (Port 8080)
+wallet_curl transfer 250.00 11111111-1111-1111-1111-111111111111 22222222-2222-2222-2222-222222222222
+# Response returns: HTTP/1.1 202 Accepted with header 'X-Edge-Spooled: true'
 ```
-**Expected Output**: Empty (zero matches). The raw segment contains only the binary `0x454E5631` header and opaque ciphertext bytes.
+
+**Step 2: Inspect Raw Segment Files on Host (`./spool-data/segment-*.wal`)**
+```bash
+# Verify the segment file exists on the host mount:
+ls -la ./spool-data/segment-*.wal
+
+# Search for plaintext account UUIDs or amounts in raw segment files
+strings ./spool-data/segment-*.wal | grep "11111111-1111-1111-1111-111111111111"
+# Or from inside the container:
+docker compose -f docker-compose.appliance.yaml exec edge sh -c 'strings /spool/segment-*.wal 2>/dev/null | grep 11111111'
+```
+**Expected Output**: Empty (zero matches). The raw segment contains only the binary `0x454E5631` (`ENV1`) header and opaque AES-256-GCM ciphertext bytes (`I-ENV-001`).
+
+**Step 3: Restore Broker and Verify Automatic Drain (`I-EDGE-004`)**
+```bash
+# Restart NATS broker
+docker compose -f docker-compose.appliance.yaml start nats
+
+# Edge JournalRecoveryWorker automatically scans and drains spilled records to NATS JetStream,
+# Core updates the accounts, and segment records are acknowledged.
+```
 
 ### 3.5 Tampered Envelope Core DLQ Quarantine (`I-ENV-003`)
 If a message with tampered ciphertext or altered AAD is published to NATS:

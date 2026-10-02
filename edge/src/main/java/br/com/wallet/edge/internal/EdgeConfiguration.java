@@ -20,10 +20,20 @@ import br.com.wallet.edge.api.CredentialResolver;
 import br.com.wallet.edge.internal.security.HmacAuthenticationFilter;
 import br.com.wallet.edge.internal.security.HmacSignatureVerifier;
 import br.com.wallet.edge.internal.security.InMemoryCredentialResolver;
+import br.com.wallet.edge.internal.security.replay.DragonflyNonceTracker;
+import br.com.wallet.edge.internal.security.replay.InMemoryNonceTracker;
+import br.com.wallet.security.replay.NonceTracker;
+import io.lettuce.core.RedisClient;
+import io.lettuce.core.RedisURI;
+import io.lettuce.core.api.StatefulRedisConnection;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.annotation.Configuration;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -32,6 +42,8 @@ import java.util.concurrent.CompletableFuture;
 @Configuration
 @ConditionalOnEdgeIngress
 public class EdgeConfiguration {
+
+    private static final Logger log = LoggerFactory.getLogger(EdgeConfiguration.class);
 
     @Bean
     @ConditionalOnMissingBean
@@ -176,10 +188,51 @@ public class EdgeConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
+    public NonceTracker nonceTracker(
+            @Autowired(required = false) StatefulRedisConnection<String, String> existingConnection,
+            @Value("${redis.socket.enabled:false}") boolean useSocket,
+            @Value("${redis.socket.path:/var/run/redis/redis.sock}") String socketPath,
+            @Value("${spring.data.redis.host:localhost}") String host,
+            @Value("${spring.data.redis.port:6379}") int port
+    ) {
+        if (existingConnection != null) {
+            log.info("Initialized DragonflyNonceTracker using existing StatefulRedisConnection");
+            return new DragonflyNonceTracker(existingConnection.sync());
+        }
+
+        if (useSocket) {
+            log.info("Initializing DragonflyNonceTracker via Unix domain socket {}", socketPath);
+            final var redisURI = RedisURI.Builder.socket(socketPath).build();
+            try {
+                final RedisClient client = RedisClient.create(redisURI);
+                StatefulRedisConnection<String, String> connection = client.connect();
+                return new DragonflyNonceTracker(connection.sync());
+            } catch (Exception e) {
+                log.warn("DragonflyDB Unix socket failed on {}. Falling back to TCP {}:{}: {}", socketPath, host, port, e.getMessage());
+            }
+        }
+
+        log.info("Initializing DragonflyNonceTracker via TCP connecting to {}:{}", host, port);
+        final var redisURI = RedisURI.create("redis://" + host + ":" + port);
+        try {
+            final RedisClient client = RedisClient.create(redisURI);
+            StatefulRedisConnection<String, String> connection = client.connect();
+            return new DragonflyNonceTracker(connection.sync());
+        } catch (Exception e) {
+            log.warn("DragonflyDB TCP connection failed on {}:{}. Falling back to InMemoryNonceTracker: {}", host, port, e.getMessage());
+            return new InMemoryNonceTracker();
+        }
+    }
+
+    @Bean
+    @ConditionalOnMissingBean
     public HmacAuthenticationFilter hmacAuthenticationFilter(
             CredentialResolver credentialResolver,
-            HmacSignatureVerifier signatureVerifier
+            HmacSignatureVerifier signatureVerifier,
+            @Autowired(required = false) NonceTracker nonceTracker,
+            @Autowired(required = false) Clock clock
     ) {
-        return new HmacAuthenticationFilter(credentialResolver, signatureVerifier);
+        return new HmacAuthenticationFilter(credentialResolver, signatureVerifier, nonceTracker, clock);
     }
 }
+

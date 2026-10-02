@@ -5,6 +5,10 @@ import br.com.wallet.edge.api.EdgeCommandResult;
 import br.com.wallet.edge.api.CommandEnvelope;
 import br.com.wallet.edge.internal.ingress.EdgeOperationsController;
 import br.com.wallet.edge.internal.ingress.OperationStatusResponse;
+import br.com.wallet.security.envelope.TenantId;
+import br.com.wallet.security.replay.NonceTracker;
+import br.com.wallet.security.replay.PrincipalId;
+import br.com.wallet.security.replay.ReplayKey;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -96,5 +100,48 @@ class EdgeOperationsControllerTest {
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
         assertThat(response.getHeaders().getFirst("Retry-After")).isEqualTo("5");
+    }
+
+    @Test
+    @DisplayName("Should commit nonce when command is accepted")
+    void shouldCommitNonceOnAccepted() {
+        NonceTracker tracker = mock(NonceTracker.class);
+        EdgeOperationsController c = new EdgeOperationsController(ingress, tracker);
+        ReplayKey replayKey = new ReplayKey(
+                new TenantId("tenant-alpha"),
+                new PrincipalId("principal-alpha"),
+                "nonce-123"
+        );
+        when(request.getAttribute(HmacAuthenticationFilter.REPLAY_KEY_ATTR)).thenReturn(replayKey);
+        UUID opId = UUID.randomUUID();
+        when(ingress.acceptCommand(any(CommandEnvelope.class)))
+                .thenReturn(CompletableFuture.completedFuture(
+                        new EdgeCommandResult.Accepted(opId, "/operations/" + opId, false)
+                ));
+
+        c.acceptTransfer(opId, "{\"amount\": 100.00}", request);
+
+        verify(tracker).commit(replayKey);
+    }
+
+    @Test
+    @DisplayName("Should release nonce when command is rate limited")
+    void shouldReleaseNonceOnRateLimited() {
+        NonceTracker tracker = mock(NonceTracker.class);
+        EdgeOperationsController c = new EdgeOperationsController(ingress, tracker);
+        ReplayKey replayKey = new ReplayKey(
+                new TenantId("tenant-alpha"),
+                new PrincipalId("principal-alpha"),
+                "nonce-123"
+        );
+        when(request.getAttribute(HmacAuthenticationFilter.REPLAY_KEY_ATTR)).thenReturn(replayKey);
+        when(ingress.acceptCommand(any(CommandEnvelope.class)))
+                .thenReturn(CompletableFuture.completedFuture(
+                        new EdgeCommandResult.RateLimited("Rate limited", 1)
+                ));
+
+        c.acceptDeposit(null, "{\"amount\": 50.00}", request);
+
+        verify(tracker).release(replayKey);
     }
 }

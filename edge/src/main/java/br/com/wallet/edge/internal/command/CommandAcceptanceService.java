@@ -11,6 +11,9 @@ import br.com.wallet.edge.internal.resilience.BrokerCircuitBreaker;
 import br.com.wallet.edge.internal.resilience.IngressBulkhead;
 import br.com.wallet.edge.internal.resilience.PerimeterRateLimiter;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.nio.charset.StandardCharsets;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +31,8 @@ import java.util.concurrent.CompletableFuture;
  * 6. Saturated shedding with HTTP 503 Retry-After: 5 (REQ-EDG-003, I-EDGE-005)
  */
 public class CommandAcceptanceService implements EdgeCommandIngress {
+
+    private static final Logger log = LoggerFactory.getLogger(CommandAcceptanceService.class);
 
     private final EdgeCommandPublisher publisher;
     private final DurableSpilloverJournal journal;
@@ -133,16 +138,26 @@ public class CommandAcceptanceService implements EdgeCommandIngress {
     }
 
     private CompletableFuture<EdgeCommandResult> fallbackToJournal(CommandEnvelope command) {
+        log.warn("Broker unavailable. Spilling over command opId={} to local spool journal (REQ-EDG-002)...",
+                command.operationId());
         byte[] payloadBytes = command.payloadJson().getBytes(StandardCharsets.UTF_8);
         return journal.append(command.type(), command.operationId(), payloadBytes)
-                .thenApply(record -> (EdgeCommandResult) new EdgeCommandResult.Accepted(
-                        command.operationId(),
-                        "/operations/" + command.operationId(),
-                        true
-                ))
-                .exceptionally(journalError -> new EdgeCommandResult.Saturated(
-                        "Spool journal saturated or unavailable: " + journalError.getMessage(),
-                        5
-                ));
+                .thenApply(record -> {
+                    log.info("Command opId={} successfully spooled to journal seq={} (I-EDGE-001)",
+                            command.operationId(), record.sequenceNumber());
+                    return (EdgeCommandResult) new EdgeCommandResult.Accepted(
+                            command.operationId(),
+                            "/operations/" + command.operationId(),
+                            true
+                    );
+                })
+                .exceptionally(journalError -> {
+                    log.error("Failed to spool command opId={} to journal: {}",
+                            command.operationId(), journalError.getMessage(), journalError);
+                    return new EdgeCommandResult.Saturated(
+                            "Spool journal saturated or unavailable: " + journalError.getMessage(),
+                            5
+                    );
+                });
     }
 }

@@ -20,6 +20,7 @@ import java.util.Objects;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Startup Crash Recovery and Fair Drain Worker (REQ-EDG-009, REQ-EDG-014, REQ-EDG-018, I-EDGE-004).
@@ -39,6 +40,7 @@ public class JournalRecoveryWorker implements ApplicationRunner {
     private final EdgeReadinessHealthIndicator healthIndicator;
     private final double replayQuotaShare;
     private final double liveQuotaShare;
+    private final AtomicBoolean scanning = new AtomicBoolean(false);
 
     public JournalRecoveryWorker(
             DurableSpilloverJournal journal,
@@ -73,70 +75,83 @@ public class JournalRecoveryWorker implements ApplicationRunner {
     }
 
     public void runRecoveryScan() {
-        healthIndicator.transitionTo(EdgeReadinessState.RECOVERING, "Scanning spool segments for crash recovery");
-        boolean encounteredCorruption = false;
+        if (!scanning.compareAndSet(false, true)) {
+            log.warn("Edge crash recovery scan is already in progress. Skipping duplicate invocation.");
+            return;
+        }
+        try {
+            healthIndicator.transitionTo(EdgeReadinessState.RECOVERING, "Scanning spool segments for crash recovery");
+            boolean encounteredCorruption = false;
 
-        List<Path> segmentFiles = journal.listSegmentFiles();
-        for (final Path segment : segmentFiles) {
-            try {
-                List<JournalRecord> records = journal.readSegmentRecords(segment);
-                if (records.isEmpty()) {
-                    continue;
-                }
-
-                List<Long> seqNos = records.stream().map(JournalRecord::sequenceNumber).toList();
-                ackTracker.trackSegment(segment, seqNos);
-
-                for (final JournalRecord record : records) {
-                    if (ackTracker.isRecordAcknowledged(segment, record.sequenceNumber())) {
-                        log.debug("Skipping already acknowledged record seq={} opId={}",
-                                record.sequenceNumber(), record.operationId());
+            List<Path> segmentFiles = journal.listSegmentFiles();
+            for (final Path segment : segmentFiles) {
+                try {
+                    List<JournalRecord> records = journal.readSegmentRecords(segment);
+                    if (records.isEmpty()) {
                         continue;
                     }
 
-                    CommandEnvelope envelope = new CommandEnvelope(
-                            record.operationId(),
-                            record.commandType(),
-                            new String(record.payload(), StandardCharsets.UTF_8),
-                            record.timestamp(),
-                            "recovery-worker",
-                            "tenant-alpha"
-                    );
+                    List<Long> seqNos = records.stream().map(JournalRecord::sequenceNumber).toList();
+                    ackTracker.trackSegment(segment, seqNos);
+                    log.info("Found spool segment {} with {} records (I-EDGE-004)...", segment.getFileName(), records.size());
 
-                    // Replay to primary broker
-                    try {
-                        publisher.publish(envelope).get(5, TimeUnit.SECONDS);
-                        ackTracker.acknowledgeRecord(segment, record.sequenceNumber());
-                    } catch (InterruptedException | ExecutionException | TimeoutException e) {
-                        log.error("Failed to replay record seq={} opId={} to broker: {}",
-                                record.sequenceNumber(), record.operationId(), e.getMessage());
-                        // Stop replaying this segment until broker is restored
-                        break;
+                    for (final JournalRecord record : records) {
+                        if (ackTracker.isRecordAcknowledged(segment, record.sequenceNumber())) {
+                            log.debug("Skipping already acknowledged record seq={} opId={}",
+                                    record.sequenceNumber(), record.operationId());
+                            continue;
+                        }
+
+                        CommandEnvelope envelope = new CommandEnvelope(
+                                record.operationId(),
+                                record.commandType(),
+                                new String(record.payload(), StandardCharsets.UTF_8),
+                                record.timestamp(),
+                                "recovery-worker",
+                                "tenant-alpha"
+                        );
+
+                        // Replay to primary broker
+                        try {
+                            publisher.publish(envelope).get(5, TimeUnit.SECONDS);
+                            ackTracker.acknowledgeRecord(segment, record.sequenceNumber());
+                            log.info("Successfully replayed spooled record seq={} opId={} to broker (I-EDGE-004)",
+                                    record.sequenceNumber(), record.operationId());
+                        } catch (InterruptedException | ExecutionException | TimeoutException e) {
+                            log.error("Failed to replay record seq={} opId={} to broker: {}",
+                                    record.sequenceNumber(), record.operationId(), e.getMessage());
+                            // Stop replaying this segment until broker is restored
+                            break;
+                        }
                     }
-                }
 
-                // Reclaim segment if all records are acknowledged
-                try {
-                    ackTracker.reclaimIfFullyAcknowledged(segment);
-                } catch (IOException e) {
-                    log.warn("Failed to delete acknowledged segment {}: {}", segment, e.getMessage());
-                }
+                    // Reclaim segment if all records are acknowledged
+                    try {
+                        if (ackTracker.reclaimIfFullyAcknowledged(segment)) {
+                            log.info("Reclaimed fully acknowledged spool segment: {} (I-EDGE-016)", segment.getFileName());
+                        }
+                    } catch (IOException e) {
+                        log.warn("Failed to delete acknowledged segment {}: {}", segment, e.getMessage());
+                    }
 
-            } catch (CorruptedJournalException cje) {
-                // Invariant REQ-EDG-018: Isolate segment for forensics; never route corrupted bytes to DLQ
-                encounteredCorruption = true;
-                log.error("CRITICAL: Storage corruption detected in segment {}. Isolating for forensics: {}",
-                        segment, cje.getMessage());
-                journal.quarantineSegment(segment, cje.getMessage());
-                healthIndicator.transitionTo(EdgeReadinessState.DEGRADED,
-                        "Storage corruption isolated in " + segment.getFileName());
-            } catch (Exception e) {
-                log.error("Unexpected error reading segment {}: {}", segment, e.getMessage());
+                } catch (CorruptedJournalException cje) {
+                    // Invariant REQ-EDG-018: Isolate segment for forensics; never route corrupted bytes to DLQ
+                    encounteredCorruption = true;
+                    log.error("CRITICAL: Storage corruption detected in segment {}. Isolating for forensics: {}",
+                            segment, cje.getMessage());
+                    journal.quarantineSegment(segment, cje.getMessage());
+                    healthIndicator.transitionTo(EdgeReadinessState.DEGRADED,
+                            "Storage corruption isolated in " + segment.getFileName());
+                } catch (Exception e) {
+                    log.error("Unexpected error reading segment {}: {}", segment, e.getMessage());
+                }
             }
-        }
 
-        if (!encounteredCorruption) {
-            healthIndicator.transitionTo(EdgeReadinessState.READY, "Edge recovery scan completed successfully");
+            if (!encounteredCorruption) {
+                healthIndicator.transitionTo(EdgeReadinessState.READY, "Edge recovery scan completed successfully");
+            }
+        } finally {
+            scanning.set(false);
         }
     }
 }

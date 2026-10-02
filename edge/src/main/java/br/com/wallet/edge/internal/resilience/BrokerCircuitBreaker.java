@@ -128,7 +128,11 @@ public class BrokerCircuitBreaker {
         transitionTo(State.OPEN);
     }
 
-    public void resetForTest() {
+    public void reset() {
         transitionTo(State.CLOSED);
+    }
+
+    public void resetForTest() {
+        reset();
     }
 }

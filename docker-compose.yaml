@@ -185,7 +185,7 @@ services:
     image: oraclelinux:9-slim
     container_name: wallet-spool-init
     user: "0:0"
-    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 700 /spool && chmod -R u+rwX /spool"]
+    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 755 /spool && chmod -R a+rX,u+rwX /spool"]
     volumes:
       - edge-spool:/spool
     networks:
@@ -214,7 +214,7 @@ services:
       WALLET_EDGE_ENABLED: "true"
       NATS_URL: nats://nats:4222
       NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
-      EDGE_SPOOL_DIR: /spool
+      EDGE_SPOOL_DIRECTORY: /spool
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-edge,service.version=0.0.1-SNAPSHOT

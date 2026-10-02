@@ -162,11 +162,11 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
                 Thread.currentThread().interrupt();
                 break;
             } catch (IllegalStateException e) {
-                if (!running.get() || (e.getMessage() != null && e.getMessage().contains("inactive"))) {
+                if (!running.get()) {
                     log.debug("NATS subscription closed or became inactive during shutdown: {}", e.getMessage());
                     break;
                 }
-                log.error("Unexpected IllegalStateException while fetching messages from NATS JetStream: {}", e.getMessage(), e);
+                log.warn("NATS subscription inactive or error while fetching messages (will retry): {}", e.getMessage());
                 try {
                     Thread.sleep(1000);
                 } catch (InterruptedException ie) {

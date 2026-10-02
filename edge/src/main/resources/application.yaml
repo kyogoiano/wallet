@@ -40,6 +40,6 @@ edge:
   runtime:
     mode: ${WALLET_RUNTIME_MODE:multi-process}
   spool:
-    directory: ${EDGE_SPOOL_DIR:${java.io.tmpdir}/wallet-spool}
+    directory: ${EDGE_SPOOL_DIRECTORY:${java.io.tmpdir}/wallet-spool}
     segment-size-bytes: 67108864
     max-capacity-bytes: 10737418240

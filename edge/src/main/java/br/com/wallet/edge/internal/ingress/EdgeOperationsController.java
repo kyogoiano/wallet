@@ -2,7 +2,10 @@ package br.com.wallet.edge.internal.ingress;
 
 import br.com.wallet.edge.api.*;
 import br.com.wallet.edge.internal.security.HmacAuthenticationFilter;
+import br.com.wallet.security.replay.NonceTracker;
+import br.com.wallet.security.replay.ReplayKey;
 import jakarta.servlet.http.HttpServletRequest;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -23,9 +26,16 @@ import java.util.UUID;
 public class EdgeOperationsController {
 
     private final EdgeCommandIngress ingress;
+    private final NonceTracker nonceTracker;
+
+    @Autowired
+    public EdgeOperationsController(EdgeCommandIngress ingress, @Autowired(required = false) NonceTracker nonceTracker) {
+        this.ingress = ingress;
+        this.nonceTracker = nonceTracker;
+    }
 
     public EdgeOperationsController(EdgeCommandIngress ingress) {
-        this.ingress = ingress;
+        this(ingress, null);
     }
 
     @PostMapping({"/transfers", "/transfer"})
@@ -80,8 +90,31 @@ public class EdgeOperationsController {
                 opId, type, requestJson, clientIp, tenantId, principalId, keyId
         );
 
-        EdgeCommandResult result = ingress.acceptCommand(envelope).join();
+        final var replayKey = (ReplayKey) request.getAttribute(HmacAuthenticationFilter.REPLAY_KEY_ATTR);
+
+        final var result = trackCommand(envelope, replayKey);
+
         return mapResultToResponse(result, opId);
+    }
+
+    private EdgeCommandResult trackCommand(final CommandEnvelope envelope, final ReplayKey replayKey) {
+        EdgeCommandResult result;
+        try {
+            result = ingress.acceptCommand(envelope).join();
+            if (nonceTracker != null && replayKey != null) {
+                if (result instanceof EdgeCommandResult.Accepted) {
+                    nonceTracker.commit(replayKey);
+                } else {
+                    nonceTracker.release(replayKey);
+                }
+            }
+        } catch (Exception ex) {
+            if (nonceTracker != null && replayKey != null) {
+                nonceTracker.release(replayKey);
+            }
+            throw ex;
+        }
+        return result;
     }
 
     private ResponseEntity<?> mapResultToResponse(EdgeCommandResult result, UUID opId) {

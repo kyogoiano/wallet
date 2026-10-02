@@ -45,7 +45,7 @@ spec:
               value: "true"
             - name: NATS_URL
               value: {{ .Values.nats.url | quote }}
-            - name: EDGE_SPOOL_DIR
+            - name: EDGE_SPOOL_DIRECTORY
               value: {{ .Values.edge.persistence.mountPath | quote }}
             - name: JAVA_TOOL_OPTIONS
               value: "-XX:MaxRAMPercentage=75 -Duser.timezone=UTC"

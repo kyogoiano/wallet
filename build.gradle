@@ -1,7 +1,7 @@
 plugins {
 	id 'java'
 	id 'jacoco'
-	id 'org.springframework.boot' version '4.2.0-M1'
+	id 'org.springframework.boot' version '4.2.0-M2'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -9,15 +9,16 @@ group = 'br.com.wallet'
 version = '0.0.1-SNAPSHOT'
 
 ext {
-	springVersion = "7.1.0-M1"
-	openApiVersion = "3.1.0"
-	jnatsVersion = "2.26.3"
-	lettuceVersion = "7.7.0.RELEASE"
+	springVersion = "7.1.0-M2"
+	openApiVersion = "3.1.1"
+	jnatsVersion = "2.26.4"
+	lettuceVersion = "7.8.0.RELEASE"
 	otlpAppenderVersion = "2.28.1-alpha"
-	nettyVersion = "4.2.17.Final"
-	modulithVersion = "2.2.0-M1"
-	archunitVersion = "1.5.0"
+	nettyVersion = "4.2.18.Final"
+	modulithVersion = "2.2.0-M2"
+	archunitVersion = "1.5.1"
 	asmVersion = "9.10.1"
+	caffeineVersion = "3.3.0"
 }
 
 dependencyManagement {
@@ -55,8 +56,8 @@ subprojects {
 
 	dependencyManagement {
 		imports {
-			mavenBom "org.springframework.boot:spring-boot-dependencies:4.2.0-M1"
-			mavenBom "org.springframework.modulith:spring-modulith-bom:2.2.0-M1"
+			mavenBom "org.springframework.boot:spring-boot-dependencies:4.2.0-M2"
+			mavenBom "org.springframework.modulith:spring-modulith-bom:2.2.0-M2"
 		}
 	}
 

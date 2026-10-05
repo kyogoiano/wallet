@@ -44,7 +44,7 @@ class DlqQueryServiceTest {
         DlqEvent event = new DlqEvent(
                 eventId, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit",
                 DlqStatus.EXHAUSTED, "err", "{}", 3, null, Instant.now(), null,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
 
         when(dlqDao.findById(eventId)).thenReturn(Optional.of(event));
@@ -58,12 +58,12 @@ class DlqQueryServiceTest {
     @Test
     @DisplayName("Should find DLQ operations by filter with sanitized limit/offset")
     void shouldFindByFilter() {
-        DlqQueryFilter filter = new DlqQueryFilter(DlqStatus.EXHAUSTED, DlqFailureType.TRANSIENT, "Deposit", null);
+        DlqQueryFilter filter = new DlqQueryFilter(DlqStatus.EXHAUSTED, DlqFailureType.TRANSIENT, "Deposit", null, "tenant-alpha");
         UUID eventId = UUID.randomUUID();
         DlqEvent event = new DlqEvent(
                 eventId, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit",
                 DlqStatus.EXHAUSTED, "err", "{}", 3, null, Instant.now(), null,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
 
         when(dlqDao.findByFilter(eq(filter), eq(20), eq(0))).thenReturn(List.of(event));

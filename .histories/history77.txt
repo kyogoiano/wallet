@@ -1,0 +1,575 @@
+Sim — isso muda bastante a modelagem do **SPEC-000.11** e, na minha opinião, deixa a arquitetura mais clara. O draft atual ainda trata “DLQ” como se fosse um único mecanismo, quando no Wallet V4 temos **dois níveis semanticamente diferentes de failure handling**.
+
+O ponto principal que eu colocaria no centro da Rev.2 é:
+
+> **Core Command DLQ ≠ Bounded-Context DLQ.**
+
+E isso combina muito melhor com a arquitetura atual do Wallet.
+
+---
+
+# 1. Os dois DLQs têm responsabilidades diferentes
+
+Eu modelaria assim:
+
+```text
+                         EDGE GATEWAY
+                              │
+                              │ authenticated/encrypted
+                              ▼
+                    NATS Core Command Stream
+                              │
+                              ▼
+                    ┌────────────────────┐
+                    │   CORE COMMAND     │
+                    │     CONSUMER       │
+                    └─────────┬──────────┘
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+                 SUCCESS              FAILURE
+                    │                   │
+                    ▼                   ▼
+              Wallet Core        CORE COMMAND DLQ
+                                     │
+                                     │ recovery/replay
+                                     ▼
+                              Core Command Consumer
+
+
+        ───────────────── WALLET CORE ─────────────────
+
+
+                    Domain / Modulith Events
+                              │
+          ┌───────────┬───────┼────────┬─────────────┐
+          ▼           ▼       ▼        ▼             ▼
+        Fraud      Deposit  Transfer Withdraw    WalletCreation
+          │           │       │        │             │
+          ▼           ▼       ▼        ▼             ▼
+      Consumer    Consumer  Consumer Consumer      Consumer
+          │           │       │        │             │
+          └───────────┴───────┴────────┴─────────────┘
+                              │
+                           FAILURE
+                              │
+                              ▼
+                     BOUNDED CONTEXT DLQ
+```
+
+Então temos **dois tipos de recuperação**.
+
+### A. Core Command DLQ
+
+É relacionada à **entrada financeira do sistema**.
+
+Responsabilidade:
+
+```text
+Edge → NATS → Core Command Consumer
+```
+
+Exemplos:
+
+* `TransferFunds`
+* `Deposit`
+* `Withdraw`
+* `CreateWallet`
+
+A mensagem veio do Edge e representa uma **operação financeira externa**.
+
+Aqui `operationId` é particularmente importante porque é a identidade da operação financeira.
+
+---
+
+### B. Bounded-Context DLQ
+
+É relacionada ao **processamento interno do Wallet Core**.
+
+Por exemplo:
+
+```text
+TransferFunds
+      │
+      ├── Ledger
+      ├── Fraud
+      ├── Notification
+      └── ...
+```
+
+Ou eventos/comandos internos como:
+
+```text
+wallet.created
+deposit.created
+withdrawal.completed
+transfer.completed
+fraud.evaluation.requested
+```
+
+Cada bounded context pode possuir seu consumer e seu próprio failure isolation:
+
+```text
+br.com.wallet.fraud
+br.com.wallet.deposit
+br.com.wallet.transfer
+br.com.wallet.withdraw
+br.com.wallet.walletcreation
+```
+
+Aqui o problema não é mais:
+
+> "O Core conseguiu processar a requisição que chegou do Edge?"
+
+É:
+
+> "Um consumidor interno conseguiu processar o evento/comando que recebeu?"
+
+Essa distinção deve aparecer **explicitamente no SPEC**.
+
+---
+
+# 2. Isso muda o significado de "DLQ"
+
+Eu evitaria chamar tudo simplesmente de `dlq_operations`.
+
+Podemos ter um conceito comum:
+
+```text
+DLQ Infrastructure
+```
+
+mas duas categorias:
+
+```text
+CoreCommandDlq
+BoundedContextDlq
+```
+
+Ou, ainda melhor, no modelo:
+
+```text
+DlqScope.CORE_COMMAND
+DlqScope.BOUNDED_CONTEXT
+```
+
+E:
+
+```text
+boundedContext = FRAUD
+boundedContext = DEPOSIT
+boundedContext = TRANSFER
+boundedContext = WITHDRAW
+boundedContext = WALLET
+```
+
+Isso permite uma infraestrutura comum sem perder a semântica.
+
+---
+
+# 3. O Core Command DLQ deve ser mais conservador
+
+Esse é o ponto financeiro mais importante.
+
+Imagine:
+
+```text
+POST /transfer
+        │
+        ▼
+Edge
+        │
+        ▼
+Core Command
+        │
+        ▼
+TransferFunds
+        │
+        ├── PostgreSQL transaction
+        │
+        └── failure
+```
+
+Se for transient:
+
+```text
+Core Command
+     │
+     ▼
+Core Command DLQ
+     │
+     ▼
+retry
+```
+
+A operação continua sendo:
+
+```text
+operationId = OP-123
+```
+
+Nunca:
+
+```text
+retryId = OP-456
+```
+
+como nova operação financeira.
+
+O `replayId` continua sendo apenas a identidade operacional da tentativa.
+
+---
+
+# 4. Já o Bounded-Context DLQ pode ser muito mais genérico
+
+Aqui eu adotaria justamente a ideia de **generic reliable reprocessing**.
+
+Por exemplo:
+
+```text
+TransferCompleted
+      │
+      ▼
+Fraud Consumer
+      │
+      ├── success
+      │
+      └── transient failure
+              │
+              ▼
+       Fraud DLQ
+              │
+              ▼
+       retry scheduler
+```
+
+Não precisamos fazer o DLQ entender `Transfer`, `Fraud`, `Deposit` etc.
+
+Ele deveria enxergar algo como:
+
+```java
+DlqMessage {
+    messageId
+    correlationId
+    operationId
+    source
+    destination
+    boundedContext
+    subject
+    failureType
+    attempt
+    payload
+}
+```
+
+E o payload continua sendo **opaco para a infraestrutura de DLQ**.
+
+---
+
+# 5. Isso também resolve uma questão que estava incomodando no draft
+
+O draft atual diz:
+
+> `br.com.wallet.dlq` coordinating with `:edge` spool and `:core` consumer.
+
+Eu mudaria isso.
+
+Porque `br.com.wallet.dlq` não deveria ser arquiteturalmente "coordenador do Edge spool".
+
+O Edge spool pertence ao mecanismo de **Edge durability/recovery** do SPEC-000.9.
+
+E o DLQ infrastructure deveria funcionar assim:
+
+```text
+                   DLQ Infrastructure
+                          │
+              ┌───────────┴───────────┐
+              │                       │
+       Core Command DLQ        Context DLQs
+              │                       │
+              │              ┌────────┼────────┐
+              │              ▼        ▼        ▼
+              │            Fraud   Transfer  Deposit
+              │
+              ▼
+       Core Command Consumer
+```
+
+Ou seja:
+
+**DLQ é uma infraestrutura de recuperação de mensagens.**
+
+Não é dona do Edge journal.
+
+---
+
+# 6. Eu criaria dois fluxos de retry explicitamente
+
+## Flow A — Core Command Reprocessing
+
+```text
+Edge
+ │
+ ▼
+NATS
+ │
+ ▼
+Core Command Consumer
+ │
+ ├── SUCCESS ───────────────► COMPLETED
+ │
+ ├── TRANSIENT ─────────────► Core Command DLQ
+ │                                  │
+ │                                  ▼
+ │                              retry #1
+ │                                  │
+ │                              retry #2
+ │                                  │
+ │                              retry #3
+ │                                  │
+ │                                  ▼
+ │                              EXHAUSTED
+ │
+ └── NON-RETRYABLE ─────────► QUARANTINED
+```
+
+Aqui o foco é **preservar a operação financeira**.
+
+---
+
+# 7. Flow B — Bounded Context Reprocessing
+
+```text
+Internal Domain Event
+        │
+        ▼
+Bounded Context Consumer
+        │
+        ├── SUCCESS
+        │
+        └── TRANSIENT
+              │
+              ▼
+        Context DLQ
+              │
+              ▼
+         retry #1
+              │
+         retry #2
+              │
+         retry #3
+              │
+              ▼
+          EXHAUSTED
+```
+
+Aqui o foco é **isolamento do consumer**.
+
+E isso é muito importante para o Wallet Core:
+
+```text
+Fraud consumer quebrado
+       ≠
+Transfer consumer quebrado
+       ≠
+Deposit consumer quebrado
+```
+
+Um poison message de Fraud não pode bloquear Transfer.
+
+Esse é exatamente o tipo de isolamento que o conceito de reliable reprocessing ajuda a formalizar.
+
+---
+
+# 8. Eu faria o conceito de "bounded DLQ" ser parte do contrato
+
+Algo assim:
+
+```text
+I-TDLQ-001 — Consumer Isolation
+
+A failure in one bounded-context consumer MUST NOT block
+message processing of another bounded-context consumer.
+```
+
+Exemplo:
+
+```text
+Fraud DLQ
+   │
+   ├── msg 101
+   ├── msg 102
+   └── msg 103
+
+Transfer consumer
+   │
+   ├── msg 201 ✓
+   ├── msg 202 ✓
+   └── msg 203 ✓
+```
+
+Não queremos:
+
+```text
+Fraud failure
+     ↓
+Wallet Core global DLQ
+     ↓
+everything stops
+```
+
+---
+
+# 9. Mas existe uma nuance importante: Core Command e Context DLQ não são iguais
+
+Eu colocaria isso na própria especificação.
+
+| Característica          | Core Command DLQ       | Bounded Context DLQ              |
+| ----------------------- | ---------------------- | -------------------------------- |
+| Origem                  | Edge Gateway           | Wallet Core                      |
+| Transporte              | NATS                   | Inter-process/internal messaging |
+| Significado             | operação externa       | processamento interno            |
+| Identidade principal    | `operationId`          | `messageId` + `correlationId`    |
+| Financeiramente crítico | diretamente            | depende do contexto              |
+| Replay                  | preserva `operationId` | preserva mensagem/evento         |
+| Quarantine              | sim                    | sim                              |
+| Retry                   | bounded                | bounded                          |
+| Isolamento              | Core command stream    | por bounded context              |
+| Payload                 | `CryptoEnvelope`       | mensagem interna/evento          |
+| Decryption              | Core                   | normalmente não aplicável        |
+| Tenant                  | security boundary      | propagado quando aplicável       |
+
+Essa tabela é, na minha opinião, mais importante que boa parte do material operacional que está no draft atual.
+
+---
+
+# 10. Eu também mudaria o nome do SPEC
+
+Agora que entendemos melhor a arquitetura, eu não usaria:
+
+> Tiered Failure Recovery, DLQ & Quarantine Governance
+
+Está muito genérico.
+
+Eu usaria:
+
+# **SPEC-000.11 — Reliable Reprocessing & Domain DLQ**
+
+ou, se quisermos enfatizar os dois mecanismos:
+
+# **SPEC-000.11 — Reliable Reprocessing for Core Commands & Domain Consumers**
+
+Prefiro o segundo porque deixa claro que estamos especificando **comportamento**, não uma tecnologia de DLQ.
+
+---
+
+# 11. E o SPEC pode ficar muito menor
+
+Eu faria a Rev.2 com esta estrutura:
+
+```text
+1. Intent
+2. DLQ Topology
+3. Failure Classification
+4. Core Command Reprocessing
+5. Bounded-Context Reprocessing
+6. Common Invariants
+7. Replay / Quarantine Contract
+8. Scope / Non-goals
+```
+
+E não colocaria ainda:
+
+* SQL;
+* índices;
+* `FOR UPDATE SKIP LOCKED`;
+* REST detalhado;
+* 8 MB Edge buffer;
+* 80:20 scheduler;
+* detalhes de OTel;
+* detalhes de KMS;
+* detalhes de implementação do scheduler.
+
+Isso vai para `ARCH-000.11` e `PLAN-000.11`.
+
+---
+
+# 12. Um detalhe que eu mudaria no modelo anterior
+
+Eu **não usaria uma única tabela mental de estados para os dois tipos**.
+
+A infraestrutura pode compartilhar estados:
+
+```text
+PENDING
+PROCESSING
+FAILED
+EXHAUSTED
+QUARANTINED
+DISCARDED
+```
+
+mas a semântica de replay é diferente.
+
+### Core Command
+
+```text
+operationId = immutable
+replayId = new
+```
+
+### Domain Consumer
+
+```text
+messageId = immutable
+deliveryAttempt = new attempt
+operationId/correlationId = propagated
+```
+
+Isso evita transformar uma mensagem interna em uma nova operação financeira.
+
+---
+
+# 13. O conceito que eu colocaria como princípio do SPEC
+
+Algo como:
+
+> **Reliable Reprocessing Principle**
+>
+> A failed message MUST leave the live processing path before automatic reprocessing begins. Retry processing MUST be isolated from live traffic and MUST be bounded. Core Command retries preserve financial operation identity; bounded-context retries preserve message identity and context ownership.
+
+Esse princípio captura praticamente toda a inspiração do modelo da Uber, mas adaptado ao nosso Wallet.
+
+E aí o desenho fica muito mais coerente:
+
+```text
+                    ┌──────────────────┐
+                    │   LIVE TRAFFIC   │
+                    └────────┬─────────┘
+                             │
+               ┌─────────────┴─────────────┐
+               │                           │
+        CORE COMMAND                  DOMAIN CONSUMERS
+               │                           │
+               ▼                           ▼
+        Command DLQ                 Context-specific DLQ
+               │                           │
+               ▼                           ▼
+       Core reprocessing           Domain reprocessing
+               │                           │
+               └─────────────┬─────────────┘
+                             │
+                       bounded retry
+                             │
+                    ┌────────┴────────┐
+                    │                 │
+                recovered          terminal
+                    │                 │
+                    ▼                 ▼
+                  live          EXHAUSTED /
+                                  QUARANTINED
+```
+
+**Esse, para mim, é o modelo certo para a Rev.2.** O draft atual já contém várias das invariantes necessárias — especialmente `operationId`, `QUARANTINED`, `EXHAUSTED`, payload criptográfico opaco e rejeição de admission failures — mas está misturando esses conceitos com Edge spool e detalhes de implementação.
+
+O próximo passo que eu faria é **reescrever integralmente o SPEC-000.11 Rev.2 nessa estrutura**, mantendo os IDs existentes quando a semântica permanecer a mesma e introduzindo explicitamente `CORE_COMMAND` vs `BOUNDED_CONTEXT` como `DlqScope`. Isso nos dá uma base bem melhor para depois produzir `ARCH → PLAN → TASKS` sem carregar complexidade desnecessária do draft atual.

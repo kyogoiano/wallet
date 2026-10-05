@@ -136,16 +136,25 @@ CREATE TABLE IF NOT EXISTS dlq_operations (
   next_retry_at TIMESTAMPTZ,
   processed_at TIMESTAMPTZ,
   failure_type TEXT NOT NULL,
-  event_type VARCHAR(50) NOT NULL
-      CHECK (failure_type IN ('TRANSIENT', 'BUSINESS', 'POISON')),
-  CONSTRAINT dlq_status_chk
-      CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED', 'EXHAUSTED', 'DISCARDED')),
+  event_type VARCHAR(50) NOT NULL,
+  tenant_id VARCHAR(64) NOT NULL,
+  CONSTRAINT chk_dlq_failure_type
+      CHECK (failure_type IN ('TRANSIENT', 'PERMANENT', 'POISON', 'SECURITY')),
+  CONSTRAINT chk_dlq_status
+      CHECK (status IN ('PENDING', 'PROCESSING', 'FAILED', 'COMPLETED', 'EXHAUSTED', 'QUARANTINED', 'DISCARDED')),
   CONSTRAINT dlq_operations_pkey PRIMARY KEY (id, created_at)
 ) PARTITION BY RANGE (created_at);
 
 CREATE INDEX IF NOT EXISTS idx_dlq_retry
     ON dlq_operations (next_retry_at)
     WHERE status IN ('PENDING', 'FAILED');
+
+CREATE INDEX IF NOT EXISTS idx_dlq_operations_claim
+    ON dlq_operations (status, next_retry_at)
+    WHERE status IN ('PENDING', 'FAILED');
+
+CREATE INDEX IF NOT EXISTS idx_dlq_operations_tenant_query
+    ON dlq_operations (tenant_id, status, failure_type, created_at DESC);
 
 CREATE INDEX IF NOT EXISTS idx_dlq_exhausted
     ON dlq_operations (status, created_at)

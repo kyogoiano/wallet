@@ -25,7 +25,7 @@ dependencies {
     implementation 'io.micrometer:micrometer-core'
     implementation 'org.slf4j:slf4j-api'
     implementation 'jakarta.servlet:jakarta.servlet-api'
-    implementation 'com.github.ben-manes.caffeine:caffeine:3.2.4'
+    implementation "com.github.ben-manes.caffeine:caffeine:${rootProject.ext.caffeineVersion}"
     implementation "io.lettuce:lettuce-core:${rootProject.ext.lettuceVersion}"
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'

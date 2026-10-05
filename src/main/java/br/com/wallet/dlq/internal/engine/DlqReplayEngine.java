@@ -3,7 +3,6 @@ package br.com.wallet.dlq.internal.engine;
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.dlq.api.model.DlqEvent;
 import br.com.wallet.dlq.api.model.DlqFailureType;
-import br.com.wallet.dlq.api.model.DlqStatus;
 import br.com.wallet.dlq.internal.persistence.DlqOperationsDao;
 import br.com.wallet.ledger.api.exceptions.TransientException;
 import io.nats.client.Connection;
@@ -21,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.io.IOException;
 import java.time.Clock;
 import java.util.Objects;
+import java.util.UUID;
 
 @Component
 public class DlqReplayEngine {
@@ -79,8 +79,10 @@ public class DlqReplayEngine {
             headers.add("userId", event.userId().toString());
         }
         headers.add("replayed", "true");
+        headers.add("replay_id", UUID.randomUUID().toString());
         headers.add("replay_count", String.valueOf(event.retryCount()));
         headers.add("type", event.eventType());
+        headers.add("tenant_id", event.tenantId());
         final var message = NatsMessage.builder()
                 .subject(event.subject())
                 .headers(headers)

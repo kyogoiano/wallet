@@ -100,7 +100,8 @@ class CoreDecryptBeforeTransactionTest {
                 dlqPublisher,
                 null,
                 decryptor,
-                keyManagementClient
+                keyManagementClient,
+                null
         );
     }
 

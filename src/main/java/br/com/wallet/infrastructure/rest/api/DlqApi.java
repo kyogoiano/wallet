@@ -27,6 +27,7 @@ public interface DlqApi {
             DlqFailureType failureType,
             String eventType,
             UUID operationId,
+            String tenantId,
             Integer limit,
             Integer offset
     );

@@ -22,7 +22,11 @@ public class NatsJetStreamBootstrap implements InitializingBean, JetStreamConfig
 
     @Override
     public void afterPropertiesSet() throws Exception {
-        var jsm = connection.jetStreamManagement();
+        if (connection == null) {
+            log.warn("NATS connection is null, skipping JetStream initialization");
+            return;
+        }
+        final var jsm = connection.jetStreamManagement();
         log.info(">>>> Inicializando Streams NATS...");
         ensureStream(jsm, "commands", List.of("commands.*", "commands.wallet.*"), Duration.ofHours(24));
         ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));

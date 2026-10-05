@@ -1,5 +1,7 @@
 package br.com.wallet.security.envelope;
 
+import org.jspecify.annotations.NonNull;
+
 import java.util.Objects;
 
 /**
@@ -14,7 +16,7 @@ public record TenantId(String value) {
     }
 
     @Override
-    public String toString() {
+    public @NonNull String toString() {
         return value;
     }
 }

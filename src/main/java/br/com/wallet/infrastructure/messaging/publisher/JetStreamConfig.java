@@ -23,11 +23,15 @@ public interface JetStreamConfig {
         ensureStream(jsm, streamName, List.of(subjects), retention);
     }
 
-    default void ensureStream(@NonNull final JetStreamManagement jsm,
+    default void ensureStream(final JetStreamManagement jsm,
                               @NonNull final String streamName,
                               @NonNull final Collection<String> subjects,
                               @NonNull final Duration retention)
             throws IOException, JetStreamApiException {
+
+        if (jsm == null) {
+            return;
+        }
 
         final var config = StreamConfiguration.builder()
                 .name(streamName)

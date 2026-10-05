@@ -14,6 +14,9 @@ trigger: model_decision
 - **Null Safety**: Annotate non-nullable parameters and return types with `@NonNull` (from `org.jspecify.annotations.NonNull`).
 - **Immutability by Default**: Fields must be `final` wherever possible. Avoid mutable shared state.
 - **Zero Lombok**: Do not introduce or use Lombok; use native Java records, explicit constructors, and standard Java idioms.
+- **Strict Domain Completeness (Zero Legacy Defaults)**: Mandatory domain attributes (e.g. `tenantId`, `operationId`) must be strictly non-null (`@NonNull`) across all records and DTOs. Never introduce secondary constructors that inject synthetic default values (e.g. `"default"`) to appease legacy tests; update callers and tests to provide explicit domain values (`I-SDD-007`).
+- **Canonical NATS Messaging Headers**: Do not duplicate headers across naming conventions (e.g. avoid adding both `tenant_id` and `X-Tenant-Id`). Use canonical lowercase snake_case headers across all NATS JetStream communications (`operation_id`, `tenant_id`, `replayed`, `replay_id`, `type`).
+
 
 ---
 

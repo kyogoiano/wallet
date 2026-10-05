@@ -1,5 +1,6 @@
 package br.com.wallet.infrastructure.messaging.consumer;
 
+import br.com.wallet.dlq.api.DlqManagementUseCase;
 import br.com.wallet.edge.api.CommandType;
 import br.com.wallet.edge.api.OperationStatusBroadcaster;
 import br.com.wallet.infrastructure.messaging.publisher.DlqPublisher;
@@ -12,6 +13,8 @@ import br.com.wallet.ledger.api.context.Transfer;
 import br.com.wallet.ledger.api.context.Withdraw;
 import br.com.wallet.ledger.api.exceptions.ExceptionType;
 import br.com.wallet.ledger.api.guard.FraudCheckHelper;
+import br.com.wallet.security.envelope.EnvelopeDecryptor;
+import br.com.wallet.security.keymanagement.KeyManagementClient;
 import io.nats.client.Connection;
 import io.nats.client.Message;
 import org.jspecify.annotations.NonNull;
@@ -49,6 +52,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
     private final OperationStateUseCase operationStateUseCase;
     private final br.com.wallet.security.envelope.EnvelopeDecryptor envelopeDecryptor;
     private final br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient;
+    private final DlqManagementUseCase dlqManagementUseCase;
 
     public CoreCommandConsumer(
             @Autowired final Connection natsConnection,
@@ -62,7 +66,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
             @Autowired(required = false) final OperationStateUseCase operationStateUseCase
     ) {
         this(natsConnection, objectMapper, transferFundsUseCase, depositFundsUseCase, withdrawFundsUseCase,
-                fraudCheckHelper, statusBroadcaster, dlqPublisher, operationStateUseCase, null, null);
+                fraudCheckHelper, statusBroadcaster, dlqPublisher, operationStateUseCase, null, null, null);
     }
 
     @Autowired
@@ -76,8 +80,9 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
             @Autowired final OperationStatusBroadcaster statusBroadcaster,
             @Autowired final DlqPublisher dlqPublisher,
             @Autowired(required = false) final OperationStateUseCase operationStateUseCase,
-            @Autowired(required = false) final br.com.wallet.security.envelope.EnvelopeDecryptor envelopeDecryptor,
-            @Autowired(required = false) final br.com.wallet.security.keymanagement.KeyManagementClient keyManagementClient
+            @Autowired(required = false) final EnvelopeDecryptor envelopeDecryptor,
+            @Autowired(required = false) final KeyManagementClient keyManagementClient,
+            @Autowired(required = false) final DlqManagementUseCase dlqManagementUseCase
     ) {
         super(SUBJECT, natsConnection);
         this.objectMapper = objectMapper;
@@ -90,6 +95,7 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
         this.operationStateUseCase = operationStateUseCase;
         this.envelopeDecryptor = envelopeDecryptor;
         this.keyManagementClient = keyManagementClient;
+        this.dlqManagementUseCase = dlqManagementUseCase;
     }
 
     @Override
@@ -114,7 +120,9 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
             log.error("Rejected command due to security/tenant violation: opId={}, subject={}, error={}",
                     operationId, message.getSubject(), se.getMessage());
             if (operationId != null) {
-                statusBroadcaster.publishStatus(operationId, "FAILED", se.getMessage());
+                if (statusBroadcaster != null) {
+                    statusBroadcaster.publishStatus(operationId, "FAILED", se.getMessage());
+                }
                 if (operationStateUseCase != null) {
                     String opTenant = extractHeader(message, "tenant_id");
                     operationStateUseCase.markOperationFailed(
@@ -179,7 +187,9 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
 
             // Notify terminal success
             if (operationId != null) {
-                statusBroadcaster.publishStatus(operationId, "COMPLETED", "Command executed successfully");
+                if (statusBroadcaster != null) {
+                    statusBroadcaster.publishStatus(operationId, "COMPLETED", "Command executed successfully");
+                }
                 if (operationStateUseCase != null) {
                     operationStateUseCase.markOperationCompleted(operationId, tenantId != null ? tenantId : "tenant-alpha");
                 }
@@ -196,7 +206,9 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
                 case ACK -> {
                     // Business failure: permanent rejection, ACK the message to prevent reprocessing loop
                     if (operationId != null) {
-                        statusBroadcaster.publishStatus(operationId, "FAILED", e.getMessage());
+                        if (statusBroadcaster != null) {
+                            statusBroadcaster.publishStatus(operationId, "FAILED", e.getMessage());
+                        }
                         if (operationStateUseCase != null) {
                             String failureCategory = (e instanceof br.com.wallet.core.exceptions.TenantMismatchException)
                                     ? "FORBIDDEN_TENANT_ACCESS"
@@ -214,7 +226,9 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
                 case RETRY -> {
                     // Transient failure: notify client retrying and NAK with delay backoff
                     if (operationId != null) {
-                        statusBroadcaster.publishStatus(operationId, "PROCESSING", "Transient failure: Retrying... (" + e.getMessage() + ")");
+                        if (statusBroadcaster != null) {
+                            statusBroadcaster.publishStatus(operationId, "PROCESSING", "Transient failure: Retrying... (" + e.getMessage() + ")");
+                        }
                     }
                     message.nakWithDelay(retryDelay(deliveries));
                 }
@@ -247,10 +261,36 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
     private void handlePoisonMessage(Message message, CommandType type, UUID operationId, Exception error) {
         String dlqSubject = resolveDlqSubject(type);
         try {
-            log.error("Routing poison message to DLQ subject={}: error={}", dlqSubject, error.getMessage());
-            dlqPublisher.publishDlqConfirmed(dlqSubject, natsConnection, message, error);
+            log.error("Routing failed message to DLQ subject={}: error={}", dlqSubject, error.getMessage());
+            if (dlqManagementUseCase != null) {
+                final br.com.wallet.dlq.api.model.DlqFailureType failureType =
+                        br.com.wallet.dlq.api.FailureClassifier.classify(error);
+                final String tenantId = resolveTenantId(message);
+                final String payloadStr = (message.getData() != null) ? new String(message.getData()) : "{}";
+                final String eventType = (type != null) ? type.name() : "UNKNOWN";
+                final UUID finalOpId = (operationId != null) ? operationId : UUID.randomUUID();
+
+                final br.com.wallet.dlq.api.dto.DlqCommandFailure failure =
+                        new br.com.wallet.dlq.api.dto.DlqCommandFailure(
+                                finalOpId,
+                                extractUserId(message),
+                                message.getSubject() != null ? message.getSubject() : dlqSubject,
+                                payloadStr,
+                                failureType,
+                                error.getMessage(),
+                                eventType,
+                                tenantId
+                        );
+                // Durable handoff committed BEFORE ACK (I-TDLQ-009)
+                dlqManagementUseCase.recordFailure(failure);
+            } else {
+                dlqPublisher.publishDlqConfirmed(dlqSubject, natsConnection, message, error);
+            }
+
             if (operationId != null) {
-                statusBroadcaster.publishStatus(operationId, "FAILED", "Routed to DLQ: " + error.getMessage());
+                if (statusBroadcaster != null) {
+                    statusBroadcaster.publishStatus(operationId, "FAILED", "Routed to DLQ: " + error.getMessage());
+                }
                 if (operationStateUseCase != null) {
                     operationStateUseCase.markOperationFailed(
                             operationId,
@@ -259,12 +299,29 @@ public class CoreCommandConsumer extends AbstractNatsConsumer {
                     );
                 }
             }
+            // ACK ONLY after durable handoff is complete (I-TDLQ-009, I-TDLQ-002)
             message.ack();
         } catch (Exception dlqEx) {
-            log.error("CRITICAL: Failed to publish poison message to DLQ confirmed: {}", dlqEx.getMessage(), dlqEx);
+            log.error("CRITICAL: Failed durable DLQ handoff for opId={}: {}", operationId, dlqEx.getMessage(), dlqEx);
             message.nakWithDelay(Duration.ofSeconds(5));
         }
     }
+
+    private String resolveTenantId(Message message) {
+        String tenant = extractHeader(message, "tenant_id");
+        return tenant != null ? tenant : "unknown";
+    }
+
+    private UUID extractUserId(Message message) {
+        String uIdStr = extractHeader(message, "userId");
+        if (uIdStr != null) {
+            try {
+                return UUID.fromString(uIdStr);
+            } catch (IllegalArgumentException ignored) {}
+        }
+        return null;
+    }
+
 
     private UUID extractOperationId(Message message) {
         if (message.getHeaders() != null) {

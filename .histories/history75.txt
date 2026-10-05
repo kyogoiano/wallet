@@ -1,0 +1,1211 @@
+Yes. I reviewed the draft as the next architectural slice after **000.9 / 000.10**. The direction is good, but I would **not move this to PLAN yet**. There are a few important semantic issues to resolve first—especially around **what is actually DLQ-able, retry state, security failures, and manual replay identity**.
+
+The draft is well scoped: Phase 000.11 establishes a three-tier failure hierarchy, bounded retries, quarantine, and operator governance.
+
+# SPEC-000.11 review
+
+## 1. The central architecture is good
+
+The three-tier model is conceptually clean:
+
+```text
+                    ┌──────────────────────┐
+                    │      Edge ingress    │
+                    │ HMAC / nonce / spool │
+                    └──────────┬───────────┘
+                               │
+                     Tier 1    │
+                               ▼
+                    ┌──────────────────────┐
+                    │ Local durable spool  │
+                    │ /spool/*.wal         │
+                    └──────────┬───────────┘
+                               │
+                               ▼
+                         NATS / Core
+                               │
+                     Tier 2    ▼
+                    ┌──────────────────────┐
+                    │ Transient retry      │
+                    │ jitter / max 3       │
+                    └──────────┬───────────┘
+                               │
+                      failure │
+                               ▼
+                     Tier 3
+                    ┌──────────────────────┐
+                    │ Quarantine            │
+                    │ permanent/poison/sec │
+                    │ operator governance  │
+                    └──────────────────────┘
+```
+
+That aligns well with the historical model you cite: classification before persistence, bounded retries, and quarantine.
+
+The important thing is that **Tier 1, Tier 2 and Tier 3 are actually different failure domains**, not three names for the same DLQ.
+
+---
+
+# 2. 🔴 MUST — `SECURITY` failures cannot all enter Core DLQ
+
+This is the first thing I'd change.
+
+You currently define:
+
+```text
+SECURITY:
+- Invalid HMAC signature
+- replay nonce collision
+- AEAD tag verification failure
+```
+
+
+
+But **invalid HMAC never reaches Core**.
+
+Your 000.10 architecture established:
+
+```text
+HTTP
+ ↓
+HMAC authentication
+ ↓
+nonce admission
+ ↓
+encryption
+ ↓
+journal/NATS
+```
+
+Therefore:
+
+```text
+Invalid HMAC
+    ↓
+Edge rejects
+    ↓
+Core never sees it
+```
+
+Trying to make invalid HMAC a Core `DlqFailureType.SECURITY` creates an architectural contradiction.
+
+More importantly, **you absolutely do not want attackers generating invalid HMAC requests that cause durable DLQ writes**.
+
+That would turn your DLQ into an attacker-controlled storage amplification mechanism.
+
+### Change the taxonomy
+
+I would distinguish:
+
+```text
+SECURITY_ADMISSION
+SECURITY_PROCESSING
+```
+
+or, preferably, keep `SECURITY` as the category but define **security admission failures as non-DLQable**.
+
+For example:
+
+```text
+Edge admission failures
+────────────────────────
+INVALID_HMAC
+INVALID_TIMESTAMP
+REPLAY_NONCE
+MALFORMED_AUTH_HEADERS
+
+→ reject
+→ telemetry counter
+→ NO DLQ persistence
+```
+
+while:
+
+```text
+Core security failures
+───────────────────────
+AEAD_TAG_FAILURE
+ENVELOPE_TAMPERING
+TENANT_BINDING_FAILURE
+UNAUTHORIZED_KEY
+```
+
+can go to quarantine **if and only if the envelope is already a trusted durable message**.
+
+This distinction is important.
+
+---
+
+# 3. 🔴 MUST — `retry_count = 3` contradicts your own invariant
+
+You have:
+
+```text
+I-TDLQ-001:
+PERMANENT / POISON / SECURITY
+→ AutoRetryAttempts = 0
+```
+
+
+
+But then:
+
+```text
+REQ-TDLQ-002:
+PERMANENT / POISON / SECURITY
+→ retry_count = 3
+status = EXHAUSTED
+```
+
+
+
+That is semantically wrong.
+
+`retry_count = 3` normally means:
+
+> this operation consumed three retry attempts.
+
+But your invariant says:
+
+> it consumed zero automatic retry attempts.
+
+Therefore:
+
+### Change this to
+
+```text
+PERMANENT / POISON / SECURITY
+
+retry_count = 0
+next_retry_at = NULL
+status = QUARANTINED
+```
+
+If you want `EXHAUSTED` to mean "not eligible for automatic processing anymore", that's okay—but then the state machine needs to distinguish:
+
+```text
+EXHAUSTED
+    reason = RETRY_LIMIT
+
+QUARANTINED
+    reason = PERMANENT | POISON | SECURITY
+```
+
+I'd actually prefer that.
+
+---
+
+# 4. 🔴 MUST — `EXHAUSTED` and `QUARANTINED` need to be separate states
+
+The draft currently mixes:
+
+```text
+EXHAUSTED / Quarantine
+```
+
+
+
+These are operationally different.
+
+### EXHAUSTED
+
+Means:
+
+```text
+TRANSIENT
+→ retry 1
+→ retry 2
+→ retry 3
+→ still failing
+→ no more automatic retries
+```
+
+### QUARANTINED
+
+Means:
+
+```text
+PERMANENT / POISON / SECURITY
+→ zero automatic retries
+→ isolated immediately
+```
+
+Those states answer different operational questions.
+
+I'd make:
+
+```text
+PENDING
+PROCESSING
+FAILED
+EXHAUSTED
+QUARANTINED
+REPLAY_PENDING
+DISCARDED
+```
+
+Then:
+
+```text
+TRANSIENT failure
+    ↓
+FAILED
+    ↓
+retry_count < 3
+    ↓
+PENDING
+    ↓
+...
+    ↓
+EXHAUSTED
+```
+
+while:
+
+```text
+PERMANENT
+POISON
+SECURITY
+    ↓
+QUARANTINED
+```
+
+This will make the operator API much clearer.
+
+---
+
+# 5. 🔴 MUST — manual replay must not change financial identity
+
+This is the most important issue in `I-TDLQ-005`.
+
+You say:
+
+> manual replay generates a fresh replay context (`replayed=true`, `replay_id=UUID`), references `original_operation_id`, and never reuses the original client X-Nonce.
+
+
+
+The `replay_id` is good.
+
+But **do not let `replay_id` replace `operationId`**.
+
+You already established in 000.9.3/000.10 that `operationId` is the financial idempotency identity.
+
+Therefore:
+
+```text
+original operationId
+        │
+        │ remains immutable
+        ▼
+financial idempotency
+```
+
+while:
+
+```text
+replayId
+        │
+        ▼
+operational replay attempt
+```
+
+So the model should be:
+
+```text
+Original operation:
+    operationId = OP-123
+    nonce = N-123
+
+Manual replay:
+    operationId = OP-123        ← SAME
+    replayId = R-456            ← NEW
+    originalOperationId = OP-123
+    replayed = true
+    nonce = NONE / fresh internal replay context
+```
+
+Why?
+
+Because if you generate:
+
+```text
+operationId = R-456
+```
+
+you've potentially transformed:
+
+> "retry the failed financial operation"
+
+into:
+
+> "execute a new financial operation."
+
+That is dangerous.
+
+### I would explicitly add
+
+```text
+I-TDLQ-006 — Financial Identity Preservation
+
+Manual replay MUST preserve the original operationId.
+Replay identity MUST be represented separately by replayId.
+A replay MUST NOT create a new financial idempotency identity.
+```
+
+This is a **MUST**.
+
+---
+
+# 6. 🔴 MUST — `force=true` is too weak as an authorization model
+
+Currently:
+
+```http
+POST /dlq/operations/{id}/replay?force=true
+```
+
+
+
+and:
+
+> SECURITY requires administrative override `force=true`.
+
+The problem isn't the HTTP parameter itself.
+
+The problem is that:
+
+```text
+force=true
+```
+
+must never itself be the authorization mechanism.
+
+You need:
+
+```text
+authenticated operator
+       ↓
+permission/capability
+       ↓
+replay authorization
+       ↓
+optional force
+```
+
+For example conceptually:
+
+```text
+dlq:read
+dlq:replay
+dlq:replay:security
+dlq:discard
+```
+
+Then:
+
+```text
+SECURITY replay
+    requires dlq:replay:security
+    AND explicit force
+```
+
+I'd also record:
+
+```text
+operatorId
+authorization context
+reason
+timestamp
+original operationId
+replayId
+```
+
+in an immutable audit record.
+
+---
+
+# 7. Important: don't allow replay of cryptographically corrupted envelopes
+
+This is a subtle consequence of 000.10.
+
+You currently say:
+
+> Security failures require explicit administrative override.
+
+But consider:
+
+```text
+AEAD tag verification failure
+```
+
+The ciphertext is cryptographically invalid.
+
+`force=true` cannot magically make it valid.
+
+Therefore:
+
+```text
+SECURITY
+ ├── replayable security failure
+ └── cryptographic integrity failure
+```
+
+need different semantics.
+
+For example:
+
+| Security failure                      | Manual replay   |
+| ------------------------------------- | --------------- |
+| replay nonce collision                | Potentially yes |
+| authorization/security policy failure | Potentially yes |
+| tenant binding mismatch               | Usually no      |
+| AEAD tag failure                      | **No**          |
+| malformed CryptoEnvelope              | **No**          |
+| corrupted ciphertext                  | **No**          |
+
+The latter cases should be:
+
+```text
+QUARANTINED
+→ forensic inspection
+→ discard / external remediation
+```
+
+not:
+
+```text
+force=true → replay
+```
+
+I'd add:
+
+```text
+I-TDLQ-007 — Cryptographic Integrity Replay Prohibition
+
+An operation whose failure proves cryptographic integrity failure
+MUST NOT be manually replayable from the stored payload.
+```
+
+This is particularly important given 000.10.
+
+---
+
+# 8. Tier 2 architecture needs clarification
+
+You say:
+
+> NATS `nakWithDelay` → persistent `dlq_operations` with full-jitter exponential backoff
+
+
+
+But later:
+
+```text
+TRANSIENT
+→ NATS DLQ subject
+→ Tier 2
+```
+
+
+
+And:
+
+```text
+DlqOperationsDao
+claimBatch()
+FOR UPDATE SKIP LOCKED
+```
+
+
+
+So what exactly is the source of retry scheduling?
+
+You appear to have **two retry mechanisms**:
+
+```text
+NATS delayed NAK
+        +
+PostgreSQL next_retry_at
+```
+
+That can work, but the responsibility must be explicit.
+
+I'd recommend:
+
+```text
+NATS
+    = transport / immediate retry signal
+
+PostgreSQL dlq_operations
+    = durable retry schedule / recovery authority
+```
+
+or:
+
+```text
+NATS nakWithDelay
+    = transient retry #1/#2/#3
+
+PostgreSQL
+    = only exhausted/quarantine persistence
+```
+
+But don't leave both as competing retry schedulers.
+
+Otherwise you can get:
+
+```text
+NATS retry
++
+DB retry
++
+recovery worker
+```
+
+all attempting the same operation.
+
+---
+
+# 9. The retry state machine should become explicit
+
+I strongly recommend adding a state machine to the SPEC.
+
+Something like:
+
+```text
+                    ┌──────────────┐
+                    │   RECEIVED   │
+                    └──────┬───────┘
+                           │
+                    classification
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+          TRANSIENT     PERMANENT     POISON/SECURITY
+             │             │             │
+             ▼             ▼             ▼
+          FAILED       QUARANTINED   QUARANTINED
+             │
+        retry < 3?
+          /     \
+        yes      no
+         │        │
+         ▼        ▼
+       PENDING  EXHAUSTED
+         │
+         ▼
+     PROCESSING
+         │
+         └────── failure ────→ FAILED
+```
+
+Then:
+
+```text
+QUARANTINED
+    │
+    ├── manual replay
+    │      ↓
+    │  REPLAY_PENDING
+    │      ↓
+    │  PROCESSING
+    │
+    └── discard
+           ↓
+       DISCARDED
+```
+
+That would eliminate a lot of ambiguity in the later PLAN.
+
+---
+
+# 10. Tier 1 80/20 fairness needs more precision
+
+This is interesting:
+
+```text
+80/20 drain interleaving
+```
+
+
+
+But what does 80/20 mean?
+
+Probably:
+
+```text
+80% fresh ingress
+20% recovery
+```
+
+which makes sense.
+
+But the current wording:
+
+> fair 80/20 drain interleaving
+
+doesn't define the scheduling unit.
+
+I'd define:
+
+```text
+For every scheduling window of N publish opportunities:
+    at most 80% recovery?
+    at least 20% fresh?
+```
+
+Actually, given the intent to avoid recovery starving live traffic, I suspect what you really want is:
+
+```text
+fresh : recovery = 80 : 20
+```
+
+Therefore:
+
+```text
+N=10:
+8 fresh
+2 recovery
+```
+
+But don't implement a rigid `8 then 2` sequence—it can create periodic bursts.
+
+A weighted fair scheduler would be cleaner.
+
+### Also important
+
+Your history says:
+
+> Edge durable acceptance
+
+So the journal is already durable.
+
+The 8 MB RAM buffer is therefore a **performance optimization**, not the durability boundary.
+
+That distinction should appear explicitly:
+
+```text
+RAM buffer loss
+    ≠
+financial command loss
+
+because only durable journal append establishes acceptance.
+```
+
+---
+
+# 11. `Zero plaintext in DLQ DB` is correct
+
+This is one of the strongest parts.
+
+You explicitly require:
+
+```text
+Payload_dlq = CryptoEnvelopeBytes
+Plaintext ∩ DlqDatabaseBytes = ∅
+```
+
+
+
+That correctly carries 000.10's cryptographic boundary into 000.11.
+
+I'd strengthen it slightly:
+
+```text
+I-TDLQ-003
+
+The DLQ persistence layer MUST accept only CryptoEnvelope
+or opaque encrypted payload types.
+
+FinancialCommand MUST NOT be a valid payload type for
+dlq_operations.payload.
+```
+
+That's stronger than relying only on runtime discipline.
+
+---
+
+# 12. Don't store raw exception stack traces
+
+Your requirement says:
+
+> error stack summary
+
+which is good.
+
+Keep **summary**, not raw stack traces.
+
+A database DLQ record should contain something like:
+
+```text
+failure_code
+failure_category
+sanitized_message
+exception_type
+source_component
+retry_count
+```
+
+and perhaps a correlation/reference to logs.
+
+Do not persist:
+
+```text
+Throwable
+stacktrace
+request body
+CryptoEnvelope plaintext
+financial command
+```
+
+This should inherit `I-SEC-012`.
+
+---
+
+# 13. Tenant filtering must be authorization-scoped
+
+You have:
+
+```http
+GET /dlq/operations?...&tenantId=tenant-corp-1
+```
+
+
+
+That's fine as a query filter, but it must **never be the security boundary**.
+
+Same principle as 000.9.3:
+
+```text
+?tenantId=A
+```
+
+doesn't grant access to tenant A.
+
+The authenticated operator's authorization scope determines the accessible tenant set.
+
+So:
+
+```text
+tenantId query parameter
+    = filter
+
+operator tenant permissions
+    = authorization boundary
+```
+
+I'd add this explicitly to the SPEC.
+
+---
+
+# 14. Schema needs one important change
+
+This:
+
+```sql
+tenant_id VARCHAR(64) NOT NULL DEFAULT 'default'
+```
+
+is consistent with the migration strategy used elsewhere, but for a new DLQ record created by the security-aware architecture I'd avoid allowing application code to silently create:
+
+```text
+tenant_id = default
+```
+
+after migration.
+
+Use the default only as a **migration compatibility mechanism**, then remove it when the migration is complete.
+
+Otherwise a missing tenant context can silently become:
+
+```text
+default tenant
+```
+
+which is exactly the class of implicit identity problem 000.9.3 was designed to eliminate.
+
+---
+
+# 15. `failure_type` index is probably not the optimal claim index
+
+You have:
+
+```sql
+(status, failure_type, next_retry_at)
+```
+
+
+
+But the claim query is:
+
+```sql
+WHERE status IN (...)
+AND retry_count < 3
+AND next_retry_at <= now()
+```
+
+The planner may benefit more from:
+
+```sql
+(status, next_retry_at)
+```
+
+with potentially:
+
+```sql
+WHERE status IN ('PENDING','FAILED')
+```
+
+as a partial index.
+
+Then keep a separate query index for:
+
+```text
+tenant_id
+failure_type
+status
+```
+
+Don't optimize the exact index yet in SPEC unless you've already benchmarked the actual PostgreSQL workload. The important thing here is that the index should follow the **claim predicate**.
+
+---
+
+# 16. BigDecimal scale 2 deserves reconsideration
+
+You state:
+
+> Replayed payload verification uses exact `BigDecimal` scale 2 arithmetic.
+
+For financial commands, I would be cautious about making **scale 2** the DLQ invariant.
+
+Your ledger architecture is more naturally:
+
+```text
+amountCents: long
+```
+
+or a domain `Money` value object.
+
+If the original operation already contains canonical monetary representation, replay should preserve **the exact original representation**, not reconstruct it through `BigDecimal`.
+
+I'd make this:
+
+```text
+I-TDLQ-008
+
+DLQ replay MUST preserve the canonical monetary representation
+of the original financial command without rounding or rescaling.
+```
+
+If V4's canonical representation is cents, then say:
+
+```text
+Money = signed long minorUnits + Currency
+```
+
+and eliminate this ambiguity.
+
+---
+
+# 17. One more issue: operator replay of a quarantined envelope
+
+Given 000.10, the replay pipeline should probably be:
+
+```text
+Operator authorizes replay
+        ↓
+retrieve CryptoEnvelope
+        ↓
+validate envelope structurally
+        ↓
+cryptographic verification
+        ↓
+decrypt
+        ↓
+domain command
+        ↓
+existing operationId
+        ↓
+financial idempotency
+```
+
+Not:
+
+```text
+decrypt in DLQ service
+        ↓
+store plaintext
+        ↓
+re-enqueue plaintext
+```
+
+The DLQ service should remain **cryptographically opaque**.
+
+That's a very important boundary.
+
+---
+
+# 18. I'd add an explicit invariant for DLQ opacity
+
+Something like:
+
+### `I-TDLQ-009 — Quarantine Cryptographic Opacity`
+
+```text
+br.com.wallet.dlq
+MUST NOT require plaintext FinancialCommand
+access to perform persistence, query, claim, or governance.
+
+dlq_operations.payload
+MUST remain CryptoEnvelope bytes.
+
+Decryption occurs only in the authorized Core processing boundary.
+```
+
+That fits extremely well with 000.10.
+
+---
+
+# 19. Test strategy needs to be expanded
+
+The current SPEC stops before the test section in the supplied draft, but I would plan these tests before writing PLAN.
+
+### Classification
+
+```text
+FailureClassifierTest
+```
+
+Triad:
+
+* transient → retry
+* permanent → quarantine
+* poison → quarantine
+* security → quarantine where applicable
+* Edge admission security → no DLQ
+
+### Retry
+
+```text
+FullJitterBackoffTest
+```
+
+Verify:
+
+```text
+0 <= delay <= min(60s, 2s × 2^retry)
+```
+
+and statistically ensure the scheduler isn't deterministic.
+
+### State machine
+
+```text
+DlqStateTransitionTest
+```
+
+Reject illegal transitions:
+
+```text
+EXHAUSTED → PENDING
+DISCARDED → PROCESSING
+QUARANTINED → AUTO_RETRY
+```
+
+etc.
+
+### Concurrency
+
+```text
+DlqClaimConcurrencyTest
+```
+
+Two workers:
+
+```text
+FOR UPDATE SKIP LOCKED
+```
+
+must not process the same record.
+
+### Replay
+
+```text
+ManualReplayIdentityTest
+```
+
+assert:
+
+```text
+originalOperationId == replay.operationId
+originalOperationId != replayId
+originalNonce != replayNonce
+```
+
+### Security
+
+```text
+SecurityReplayAuthorizationTest
+```
+
+and:
+
+```text
+CryptoIntegrityReplayProhibitionTest
+```
+
+### Tenant isolation
+
+```text
+DlqTenantIsolationTest
+```
+
+Operator A must not retrieve/replay/discard tenant B records merely by changing:
+
+```text
+?tenantId=B
+```
+
+### Persistence
+
+```text
+DlqEncryptedPayloadTest
+```
+
+assert no plaintext `FinancialCommand` exists in DB.
+
+---
+
+# 20. Suggested additional invariants
+
+I'd add these to the SPEC:
+
+```text
+I-TDLQ-006 — Financial Identity Preservation
+Manual replay MUST preserve original operationId.
+replayId is operational metadata, not financial identity.
+```
+
+```text
+I-TDLQ-007 — Cryptographic Integrity Replay Prohibition
+AEAD integrity failures and structurally invalid envelopes
+MUST NOT be replayable through operator force.
+```
+
+```text
+I-TDLQ-008 — DLQ Cryptographic Opacity
+DLQ persistence and governance MUST operate on opaque
+CryptoEnvelope bytes and MUST NOT persist plaintext commands.
+```
+
+```text
+I-TDLQ-009 — Tenant Authorization Boundary
+tenantId filters MUST NOT determine authorization scope.
+Operator authorization determines accessible tenants.
+```
+
+```text
+I-TDLQ-010 — Admission Security Non-Persistence
+Unauthenticated Edge admission failures MUST NOT create
+durable DLQ records.
+```
+
+Those five would make 000.11 much more robust.
+
+---
+
+# 21. Recommended failure taxonomy
+
+I'd settle on this:
+
+```text
+                   FAILURE
+                      │
+        ┌─────────────┴─────────────┐
+        │                           │
+    ADMISSION                  PROCESSING
+        │                           │
+ HMAC / nonce                  TRANSIENT
+ malformed auth                PERMANENT
+        │                       POISON
+        ▼                       SECURITY
+   REJECT ONLY                     │
+   NO DLQ                          ▼
+                              DLQ / QUARANTINE
+```
+
+Then:
+
+```text
+PROCESSING
+ ├── TRANSIENT
+ │     ├── retry 1
+ │     ├── retry 2
+ │     ├── retry 3
+ │     └── EXHAUSTED
+ │
+ ├── PERMANENT ───────→ QUARANTINED
+ │
+ ├── POISON ──────────→ QUARANTINED
+ │
+ └── SECURITY
+       ├── replayable policy/security issue
+       │       → QUARANTINED
+       │
+       └── cryptographic integrity failure
+               → QUARANTINED / NO REPLAY
+```
+
+This is much easier to implement correctly.
+
+---
+
+# 22. One naming recommendation
+
+The title:
+
+> **Tiered DLQ, Spillover & Recovery Intelligence**
+
+is okay, but **"Recovery Intelligence"** sounds broader than what this SPEC actually does.
+
+The actual scope is:
+
+* failure classification;
+* retry orchestration;
+* quarantine;
+* operator replay;
+* Edge spillover coordination.
+
+I'd consider:
+
+> **SPEC-000.11 — Tiered DLQ, Spillover & Recovery Governance**
+
+or:
+
+> **SPEC-000.11 — Tiered Failure Recovery, DLQ & Quarantine**
+
+The second is particularly clear.
+
+---
+
+# 23. Final gate
+
+My current status would be:
+
+### 🟡 `SPEC-000.11 — ARCHITECTURE REVIEW: REVISE`
+
+Not because the architecture is fundamentally wrong. Quite the opposite—the **three-tier model is a good continuation of 000.9 and 000.10**.
+
+But before PLAN, I would require these **7 MUST corrections**:
+
+1. **Separate Edge admission failures from Core DLQ failures.**
+2. **Fix `retry_count=3` for non-transient failures → it must be 0.**
+3. **Separate `EXHAUSTED` from `QUARANTINED`.**
+4. **Preserve `operationId` during manual replay; `replayId` is separate.**
+5. **Replace `force=true` as a conceptual authorization mechanism with explicit operator capability.**
+6. **Prohibit replay of cryptographic-integrity failures even with force.**
+7. **Define whether NATS delayed retry and PostgreSQL `next_retry_at` are complementary or competing schedulers.**
+
+Then add the five invariants above and the state machine.
+
+After that, I think **SPEC-000.11 will be ready to become PLAN-000.11**, and we can make the PLAN very traceable: **every MUST requirement → architecture component → TASK → triad test → acceptance evidence**, which fits the SDD workflow we've been using for 000.8–000.10.

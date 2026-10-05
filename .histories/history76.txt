@@ -1,0 +1,639 @@
+Sim. Depois de ler a revisão atual e comparar com o modelo descrito pela Uber, eu faria uma mudança de direção no **SPEC-000.11**, não apenas mais uma rodada de correções.
+
+A ideia central do artigo da Uber é muito boa para o nosso caso: **o objetivo do mecanismo de retry não é “garantir que o handler eventualmente dê certo”; é tirar a mensagem problemática do caminho do tráfego normal e criar um fluxo separado para reprocessamento**. A Uber chama isso de *separate retry queues*: o consumidor conclui o processamento original quando consegue encaminhar a mensagem para o fluxo de retry, permitindo que as demais mensagens avancem. ([Uber][1])
+
+E isso casa muito bem com nosso NATS + PostgreSQL + Edge spool.
+
+### Minha sugestão: reduzir bastante o escopo do SPEC
+
+O SPEC-000.11 poderia ser essencialmente sobre **Reliable Reprocessing**, com apenas três responsabilidades:
+
+```text
+                    ┌──────────────────────┐
+                    │     LIVE TRAFFIC     │
+                    │ NATS wallet.commands  │
+                    └──────────┬───────────┘
+                               │
+                         Core Consumer
+                               │
+                    ┌──────────┴───────────┐
+                    │                      │
+                 SUCCESS                FAILURE
+                    │                      │
+                    ▼                      ▼
+                 OUTBOX             classify failure
+                                          │
+                              ┌───────────┴───────────┐
+                              │                       │
+                         TRANSIENT               NON-RETRYABLE
+                              │                       │
+                              ▼                       ▼
+                       RETRY / DELAY              QUARANTINE
+                              │
+                     retry 1 → retry 2 → retry 3
+                              │
+                              ▼
+                          EXHAUSTED
+```
+
+Isso é muito mais próximo do princípio da Uber: **failed messages deixam o fluxo principal e entram em outro fluxo independente**, evitando que uma mensagem problemática bloqueie as demais. ([Uber][1])
+
+---
+
+# O que eu manteria do nosso SPEC atual
+
+A revisão atual já acertou algumas coisas importantes.
+
+### 1. Edge admission failure não é DLQ
+
+Eu manteria exatamente isso:
+
+> `INVALID_HMAC`, nonce replay, timestamp inválido etc. são rejeitados no Edge e não entram no DLQ.
+
+Isso é particularmente importante porque DLQ é um mecanismo para **mensagens autenticadas que falharam durante processamento**, não um depósito para tráfego hostil.
+
+O draft atual já expressa isso em `I-TDLQ-008`.
+
+---
+
+### 2. O `operationId` continua sendo a identidade financeira
+
+Também manteria:
+
+```text
+operationId = identidade da operação financeira
+
+replayId = identidade da tentativa de reprocessamento
+```
+
+Ou seja:
+
+```text
+original operation
+    operationId = OP-123
+
+retry #1
+    operationId = OP-123
+
+retry #2
+    operationId = OP-123
+
+manual replay
+    operationId = OP-123
+    replayId    = REP-456
+```
+
+Isso é fundamental para nosso modelo de idempotência.
+
+O draft atual já está correto nesse ponto.
+
+---
+
+### 3. CryptoEnvelope permanece opaco
+
+Também manteria.
+
+O DLQ **não deve virar um segundo domínio financeiro capaz de entender/descriptografar comandos**.
+
+```text
+dlq_operations.payload
+        │
+        └── opaque CryptoEnvelope bytes
+```
+
+E no replay:
+
+```text
+DLQ
+ │
+ └── envelope
+       │
+       ▼
+     NATS
+       │
+       ▼
+     Core
+       │
+       ├── validate envelope
+       ├── decrypt
+       ├── validate nonce
+       └── execute financial command
+```
+
+Isso preserva muito bem o limite estabelecido pelo SPEC-000.10.
+
+---
+
+# Onde eu simplificaria
+
+Aqui está a principal mudança.
+
+## 1. Eu removeria o conceito de "Tier 1/2/3" como arquitetura de execução
+
+Hoje o SPEC está tentando fazer três sistemas:
+
+```text
+Tier 1 = Edge spool
+Tier 2 = Core retry engine
+Tier 3 = quarantine/governance
+```
+
+Isso cria uma falsa impressão de que os três são partes do mesmo mecanismo.
+
+Eu separaria conceitualmente:
+
+### A. Edge Durability
+
+Já existe em `SPEC-000.9`.
+
+```text
+NATS unavailable
+      ↓
+Edge journal
+      ↓
+JournalRecoveryWorker
+```
+
+Não precisa ser reinventado pelo SPEC-000.11.
+
+### B. Reliable Reprocessing
+
+Esse é o verdadeiro escopo do 000.11:
+
+```text
+Core processing failure
+       ↓
+retry stream
+       ↓
+retry
+       ↓
+retry
+       ↓
+DLQ
+```
+
+### C. Quarantine
+
+É simplesmente o destino para aquilo que **não deve ser automaticamente reprocessado**.
+
+---
+
+# 2. Eu adotaria uma "retry ladder" simples
+
+Aqui a influência do Uber fica particularmente interessante.
+
+Eles utilizam diferentes canais de retry para tirar a mensagem do fluxo principal e aplicar atrasos progressivos. ([Uber][1])
+
+Para nosso NATS, não precisamos necessariamente criar vários subjects físicos imediatamente.
+
+Podemos modelar:
+
+```text
+wallet.commands
+      │
+      ▼
+ Core Consumer
+      │
+      ├── SUCCESS ──────────────► done
+      │
+      ├── PERMANENT ────────────► quarantine
+      │
+      ├── POISON ───────────────► quarantine
+      │
+      ├── SECURITY ─────────────► quarantine
+      │
+      └── TRANSIENT
+             │
+             ▼
+        retry scheduler
+             │
+             ├── attempt 1
+             ├── attempt 2
+             └── attempt 3
+                    │
+                    ▼
+                 EXHAUSTED
+```
+
+E o PostgreSQL pode ser o **durable retry registry**, em vez de termos NATS `nakWithDelay` + PostgreSQL scheduler competindo entre si.
+
+Essa última parte é uma das mudanças que eu considero realmente importante.
+
+---
+
+# 3. Eu escolheria PostgreSQL como autoridade do retry
+
+No draft atual temos:
+
+> PostgreSQL como durable retry schedule authority
+
+e
+
+> NATS `nakWithDelay` como transport-level backpressure.
+
+Isso já está indo na direção certa.
+
+Eu deixaria ainda mais simples:
+
+### NATS
+
+Responsável por:
+
+* entregar;
+* desacoplar live traffic;
+* transportar retry;
+* permitir concorrência.
+
+### PostgreSQL
+
+Responsável por:
+
+* retry state;
+* retry count;
+* next attempt;
+* exhausted;
+* quarantine;
+* operator replay.
+
+Então:
+
+```text
+NATS = transport
+Postgres = recovery state
+```
+
+Isso elimina muita complexidade conceitual.
+
+---
+
+# 4. E eu não faria `nakWithDelay` parte fundamental do retry
+
+Esse é um ponto onde eu mudaria o draft.
+
+Se fazemos:
+
+```text
+message
+  ↓
+NATS nakWithDelay
+  ↓
+message novamente
+```
+
+e ao mesmo tempo:
+
+```text
+dlq_operations
+  retry_count
+  next_retry_at
+```
+
+temos dois mecanismos controlando a mesma coisa.
+
+Melhor:
+
+```text
+Core
+ │
+ ├── transient
+ │       ↓
+ │   persist retry state
+ │       ↓
+ │   ACK original message
+ │
+ ▼
+retry scheduler
+ │
+ ▼
+NATS retry subject
+ │
+ ▼
+Core
+```
+
+Isso segue justamente a filosofia da Uber: **quando a mensagem é encaminhada para o fluxo alternativo, o fluxo original pode prosseguir**. ([Uber][1])
+
+---
+
+# 5. Eu simplificaria o Failure Taxonomy
+
+O draft atual tem:
+
+```text
+TRANSIENT
+PERMANENT
+POISON
+SECURITY
+```
+
+Isso é suficiente.
+
+Mas eu não criaria dentro de `SECURITY` uma segunda hierarquia tão grande no SPEC.
+
+O essencial é:
+
+| Tipo      | Auto retry | Destino           |
+| --------- | ---------: | ----------------- |
+| TRANSIENT |          3 | Retry → EXHAUSTED |
+| PERMANENT |          0 | QUARANTINED       |
+| POISON    |          0 | QUARANTINED       |
+| SECURITY  |         0* | QUARANTINED       |
+
+`*` com uma distinção importante:
+
+**crypto-integrity failure nunca é replayável.**
+
+Mas um erro operacional de segurança, como uma indisponibilidade temporária de KMS, pode eventualmente ser replayável.
+
+Isso pode ser tratado como uma propriedade:
+
+```java
+failure.replayable()
+```
+
+em vez de criar mais estados e mais taxonomia no SPEC.
+
+---
+
+# 6. `force=true` eu removeria
+
+Acho que esse é um bom exemplo de complexidade que não precisamos.
+
+O draft atual já exige capability:
+
+```text
+dlq:replay
+```
+
+Então:
+
+```http
+POST /dlq/operations/{id}/replay
+```
+
+pode simplesmente verificar:
+
+```text
+operator authorized?
+        │
+        ├── no → 403
+        │
+        └── yes
+              │
+              ├── replayable? no → 422
+              │
+              └── replayable? yes → replay
+```
+
+Não precisamos:
+
+```text
+force=true
+```
+
+porque isso cria a falsa semântica de que uma autorização administrativa consegue ultrapassar uma garantia criptográfica.
+
+E já decidimos que:
+
+```text
+AEAD failure
+≠
+force replay
+```
+
+Então o endpoint pode ser semanticamente muito mais limpo.
+
+---
+
+# 7. `QUARANTINED` vs `EXHAUSTED` continua valendo
+
+Aqui eu **não simplificaria**.
+
+São conceitos realmente diferentes:
+
+```text
+EXHAUSTED
+    mensagem era retryable
+    tentou 3 vezes
+    não resolveu
+
+QUARANTINED
+    mensagem não deveria ser automaticamente retryable
+```
+
+Isso é útil operacionalmente e também muito próximo da ideia de DLQ como ponto de diagnóstico/reprocessamento do artigo da Uber. ([Uber][1])
+
+---
+
+# 8. O modelo de estados pode ficar pequeno
+
+Eu usaria:
+
+```text
+PENDING
+   │
+   ▼
+PROCESSING
+   │
+   ├── success ───────► COMPLETED
+   │
+   ├── transient ─────► PENDING
+   │                         │
+   │                         └── attempts >= 3
+   │                                  ↓
+   │                              EXHAUSTED
+   │
+   └── non-retryable ─────────► QUARANTINED
+                                      │
+                                      ├── manual replay
+                                      │       ↓
+                                      │   PENDING
+                                      │
+                                      └── discard
+                                             ↓
+                                         DISCARDED
+```
+
+Só isso.
+
+Não precisamos de uma máquina de estados muito mais sofisticada no SPEC.
+
+---
+
+# 9. A parte que eu considero mais importante do Uber para nós
+
+É esta ideia:
+
+> **A conclusão do processamento não significa necessariamente sucesso financeiro.**
+
+No modelo de reprocessing, uma mensagem pode ser considerada processada pelo consumer quando ele conseguiu colocá-la no fluxo apropriado de retry/DLQ, liberando o fluxo normal. A Uber explicitamente redefine o sucesso do consumer dessa forma. ([Uber][1])
+
+No nosso sistema:
+
+```text
+NATS command
+     │
+     ▼
+Core Consumer
+     │
+     ├── financial success
+     │
+     └── processing failure
+             │
+             ▼
+       durable retry state
+             │
+             ▼
+       ACK original message
+```
+
+Isso é excelente para o nosso desenho porque impede que:
+
+```text
+bad message
+   ↓
+consumer
+   ↓
+retry
+   ↓
+retry
+   ↓
+retry
+```
+
+fique bloqueando o fluxo normal.
+
+---
+
+# 10. E eu reduziria o SPEC para algo como isto
+
+### SPEC-000.11 — Reliable Reprocessing & Dead Letter Queue
+
+**Scope:**
+
+> Define como o Wallet V4 remove mensagens que falharam do fluxo de processamento normal, reprocessa falhas transitórias de forma limitada e envia falhas não-retryable para DLQ/quarantine.
+
+### Invariants
+
+Eu ficaria com aproximadamente **6**:
+
+```text
+I-TDLQ-001
+Live traffic cannot be blocked by failed messages.
+
+I-TDLQ-002
+Only TRANSIENT failures are automatically retried.
+
+I-TDLQ-003
+Automatic retry is bounded to 3 attempts with jitter.
+
+I-TDLQ-004
+EXHAUSTED and QUARANTINED are distinct terminal states.
+
+I-TDLQ-005
+Financial operationId is immutable across retries/replays.
+
+I-TDLQ-006
+DLQ payload remains opaque CryptoEnvelope bytes.
+```
+
+E manteria a segurança de admission como uma regra já herdada de 000.9.3/000.10:
+
+```text
+Invalid HMAC / replay nonce / timestamp
+→ rejected at Edge
+→ never enters DLQ
+```
+
+Não precisa transformar isso em um grande subsistema do 000.11.
+
+---
+
+# O que eu tiraria do SPEC
+
+Eu removeria ou deslocaria para ARCH/PLAN:
+
+* detalhes do **8 MB RAM buffer**;
+* `80:20` Edge fairness;
+* detalhes de `JournalRecoveryWorker`;
+* fórmula matemática excessivamente específica de jitter;
+* `FOR UPDATE SKIP LOCKED` como requisito arquitetural;
+* índice específico `(status,next_retry_at)`;
+* SLA `<5ms` para batch claim;
+* detalhes de RBAC;
+* detalhes de OpenTelemetry;
+* `force=true`;
+* detalhes extensos de KMS/security classification;
+* toda a parte de "forensic governance".
+
+Essas coisas podem aparecer posteriormente no **PLAN-000.11**.
+
+O SPEC deveria responder:
+
+> **Qual comportamento queremos garantir?**
+
+e não:
+
+> **Como exatamente implementaremos o scheduler, DAO, índices e API?**
+
+---
+
+## A arquitetura resultante fica muito mais elegante
+
+```text
+                         ┌─────────────────────┐
+                         │    LIVE NATS        │
+                         │ wallet.commands     │
+                         └──────────┬──────────┘
+                                    │
+                                    ▼
+                             ┌─────────────┐
+                             │ Core Worker │
+                             └──────┬──────┘
+                                    │
+                   ┌────────────────┼────────────────┐
+                   │                │                │
+                SUCCESS          TRANSIENT       NON-RETRYABLE
+                   │                │                │
+                   ▼                ▼                ▼
+                OUTBOX       Retry State         QUARANTINE
+                                  │
+                                  ▼
+                           delayed reprocess
+                                  │
+                              attempt 1
+                                  │
+                              attempt 2
+                                  │
+                              attempt 3
+                                  │
+                                  ▼
+                              EXHAUSTED
+
+
+              Operator
+                 │
+                 ▼
+             QUARANTINE
+                 │
+          ┌──────┴──────┐
+          │             │
+       REPLAY         DISCARD
+          │
+          ▼
+       retry flow
+```
+
+Isso também preserva a propriedade que eu considero central do artigo da Uber: **reprocessing é um work stream separado do live traffic**, justamente para que mensagens problemáticas não impeçam novas mensagens de avançarem. ([Uber][1])
+
+### Minha recomendação para a próxima revisão
+
+Eu **não faria mais uma lista de correções no draft atual**. Eu faria um **SPEC-000.11 Rev.2 enxuto**, provavelmente com ~100–130 linhas, cujo único conceito novo realmente importante seja:
+
+> **Reliable Reprocessing = separar o fluxo de recuperação do fluxo de produção.**
+
+Depois colocamos no PLAN os detalhes de PostgreSQL scheduler/claim, NATS subjects, jitter, replay API, Edge journal etc.
+
+Isso deixaria o 000.11 muito mais especializado e coerente com a filosofia que já estamos usando nos outros SPECs: **o SPEC define invariantes e contratos; ARCH/PLAN define a mecânica.**
+
+[1]: https://www.uber.com/rs/en/blog/reliable-reprocessing/ "Building Reliable Reprocessing and Dead Letter Queues with Apache Kafka"

@@ -73,11 +73,11 @@ The repository Dockerfile (`dockerfile`) uses multi-stage builds producing harde
 
 ```dockerfile
 # Stage 1: Build
-FROM oraclelinux:9-slim AS builder
+FROM oraclelinux:10-slim AS builder
 # ... Compile :bootJar and :edge:bootJar) ...
 
 # Stage 2: Hardened Edge Runtime (wallet-edge)
-FROM oraclelinux:9-slim AS edge
+FROM oraclelinux:10-slim AS edge
 RUN useradd -u 10001 -m -s /bin/sh wallet && \
     mkdir -p /spool && chown -R 10001:10001 /spool && chmod 700 /spool
 USER 10001:10001
@@ -88,7 +88,7 @@ EXPOSE 8080 8443/udp
 ENTRYPOINT ["java", "-Duser.timezone=UTC", "-XX:MaxRAMPercentage=75", "-jar", "app.jar"]
 
 # Stage 3: Hardened Core Runtime (wallet-core)
-FROM oraclelinux:9-slim AS core
+FROM oraclelinux:10-slim AS core
 RUN microdnf install -y libstdc++ libgomp curl && microdnf clean all && \
     useradd -u 10001 -m -s /bin/sh wallet
 USER 10001:10001

@@ -78,14 +78,14 @@ class ContainerImageVerificationTest {
         String content = Files.readString(dockerfilePath);
 
         // Edge Stage Hardening Checks
-        assertThat(content).contains("FROM oraclelinux:9-slim AS edge");
+        assertThat(content).contains("FROM oraclelinux:10-slim AS edge");
         assertThat(content).contains("useradd -u 10001");
         assertThat(content).contains("chown -R 10001:10001 /spool");
         assertThat(content).contains("chmod 700 /spool");
         assertThat(content).contains("USER 10001:10001");
 
         // Core Stage Hardening Checks
-        assertThat(content).contains("FROM oraclelinux:9-slim AS core");
+        assertThat(content).contains("FROM oraclelinux:10-slim AS core");
         assertThat(content).contains("libstdc++ libgomp curl");
         assertThat(content).contains("USER 10001:10001");
 

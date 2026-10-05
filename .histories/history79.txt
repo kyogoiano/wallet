@@ -1,0 +1,410 @@
+Sim. E eu acho que essa separação deixa a arquitetura **bem mais limpa**.
+
+Hoje a 000.11 ainda mistura dois conceitos: **reprocessing de comandos Edge → Core** e **DLQ/reprocessamento de eventos internos dos bounded contexts**. Pela evolução da 000.12, eu faria uma correção estrutural: **000.11 passa a ser exclusivamente o mecanismo de confiabilidade da fronteira Edge → Core**.
+
+A 000.12 então fica responsável pela descentralização dos consumers e pela comunicação **intra-Core via Spring Modulith**. A própria 000.12 já está caminhando nessa direção ao definir NATS como fronteira inter-processo e Modulith para eventos dentro do Core.
+
+## Como eu dividiria
+
+### SPEC-000.11 — Edge → Core Reliable Reprocessing
+
+**Escopo único:**
+
+```text
+wallet-edge
+    │
+    │ NATS JetStream
+    ▼
+wallet-core ingress
+    │
+    ├── success
+    │
+    └── failure
+          │
+          ▼
+    Core Command Reprocessing
+          │
+          ├── retry 1
+          ├── retry 2
+          ├── retry 3
+          ├── EXHAUSTED
+          └── QUARANTINED
+```
+
+Ou seja, a 000.11 responde:
+
+> **"O que fazemos quando um comando financeiro que saiu do Edge não consegue ser processado pelo Core?"**
+
+Ela deve tratar:
+
+* `TransferFunds`
+* `Deposit`
+* `Withdraw`
+* futuramente outros comandos ingressados pelo Edge
+* `operationId`
+* `CryptoEnvelope`
+* retry
+* classificação de falha
+* DLQ/reprocessing
+* quarantine
+* exhausted
+* replay operacional
+* durable handoff antes do ACK
+* preservação da identidade financeira
+
+E **somente isso**.
+
+---
+
+# O que sai da 000.11
+
+Eu removeria da 000.11 qualquer tentativa de definir:
+
+### 1. DLQ de eventos internos
+
+Por exemplo:
+
+```text
+TransferCompletedEvent
+FraudEvent
+RiskEvaluatedEvent
+SavingsSweptEvent
+```
+
+Esses eventos já estão dentro do processo `wallet-core`.
+
+Não deveriam ser tratados como parte da 000.11.
+
+A 000.12 deixa isso muito mais claro:
+
+```text
+Edge
+  │
+  │ NATS
+  ▼
+Core
+  │
+  │ Spring Modulith
+  ├── ledger
+  ├── fraud
+  └── savings
+```
+
+A própria 000.12 define explicitamente que eventos internos devem usar `@ApplicationModuleListener`, eliminando o "boomerang" via NATS.
+
+---
+
+# Então eu mudaria o conceito de `DlqScope`
+
+Na 000.11 atual temos:
+
+```java
+CORE_COMMAND
+BOUNDED_CONTEXT
+```
+
+Eu **não manteria `BOUNDED_CONTEXT` na 000.11**.
+
+Ficaria:
+
+```java
+public enum DlqScope {
+    CORE_COMMAND
+}
+```
+
+Ou, melhor ainda, talvez nem precisemos de um enum nesse momento.
+
+O próprio contexto da SPEC já é:
+
+> **Core Command Reprocessing**
+
+A distinção entre:
+
+```text
+CORE_COMMAND
+BOUNDED_CONTEXT
+```
+
+pode desaparecer da 000.11 e ser tratada em outra especificação se algum bounded context realmente precisar de reprocessamento persistente.
+
+Isso evita que a 000.11 vire uma "DLQ framework" genérica.
+
+---
+
+# A nova fronteira das três specs
+
+Eu desenharia assim:
+
+```text
+                    ┌──────────────────────────────┐
+                    │         wallet-edge           │
+                    │                              │
+                    │ HMAC                         │
+                    │ Nonce                        │
+                    │ CryptoEnvelope                │
+                    │ Journal                       │
+                    └──────────────┬───────────────┘
+                                   │
+                                   │ NATS
+                                   ▼
+             ╔══════════════════════════════════════╗
+             ║            SPEC-000.11               ║
+             ║                                      ║
+             ║ Edge → Core Reliable Reprocessing    ║
+             ║                                      ║
+             ║ ACK / retry / DLQ / quarantine       ║
+             ║ operationId / replay                 ║
+             ╚══════════════════════╤═══════════════╝
+                                    │
+                                    ▼
+                    ┌──────────────────────────────┐
+                    │         wallet-core           │
+                    │                              │
+                    │   ledger / fraud / savings   │
+                    │                              │
+                    │       SPEC-000.12            │
+                    │                              │
+                    │   Spring Modulith events      │
+                    └──────────────────────────────┘
+```
+
+E isso produz uma regra arquitetural muito boa:
+
+> **NATS é usado para atravessar processo. Modulith Events são usados dentro do processo.**
+
+A 000.12 já expressa exatamente essa intenção: NATS para Edge → Core, status e egress externo; eventos intra-Core via Modulith.
+
+---
+
+# Eu também mudaria o nome da 000.11
+
+O nome atual:
+
+> **Reliable Reprocessing for Core Commands & Domain Consumers**
+
+induz exatamente à mistura que estamos tentando eliminar.
+
+Eu usaria:
+
+## SPEC-000.11 — Reliable Reprocessing for Edge-to-Core Commands
+
+ou, mais explícito:
+
+## SPEC-000.11 — Edge-to-Core Command Reliability, Retry & Reprocessing
+
+Esse segundo nome me parece melhor porque deixa claro que ela não é uma especificação genérica de DLQ.
+
+---
+
+# Invariantes que ficam
+
+Os invariantes atuais continuam fazendo muito sentido, mas agora ficam todos claramente relacionados à fronteira Edge → Core:
+
+### `I-TDLQ-001`
+
+Eu mudaria o significado.
+
+Em vez de:
+
+> consumer failure isolation across bounded contexts
+
+algo como:
+
+> **`I-TDLQ-001 — Live Ingress Isolation`**
+> A failure during Core processing MUST NOT block subsequent live Edge ingress while the failed command is being reprocessed.
+
+Isso é exatamente o princípio do modelo de reprocessing que vocês adotaram.
+
+### `I-TDLQ-002`
+
+Continua:
+
+> failed ingress message leaves the live path before retry.
+
+### `I-TDLQ-003`
+
+Continua:
+
+```text
+MAX_TRANSIENT_RETRIES = 3
+```
+
+com jitter.
+
+### `I-TDLQ-004`
+
+Continua:
+
+```text
+EXHAUSTED != QUARANTINED
+```
+
+### `I-TDLQ-005`
+
+Muito importante:
+
+```text
+operationId immutable
+replayId new
+```
+
+Ou seja:
+
+```text
+original:
+operationId = OP-123
+
+retry #1:
+operationId = OP-123
+replayId    = R-001
+
+retry #2:
+operationId = OP-123
+replayId    = R-002
+
+operator replay:
+operationId = OP-123
+replayId    = R-003
+```
+
+### `I-TDLQ-006`
+
+Core DLQ contém:
+
+```text
+CryptoEnvelope
+```
+
+e não plaintext.
+
+### `I-TDLQ-007`
+
+AEAD/ciphertext corruption:
+
+```text
+NON-REPLAYABLE
+```
+
+### `I-TDLQ-008`
+
+Falha de admissão no Edge:
+
+```text
+HMAC invalid
+timestamp invalid
+nonce invalid
+```
+
+**não gera DLQ Core**, porque o comando nem entrou no domínio confiável.
+
+Isso está perfeitamente alinhado com 000.9/000.10.
+
+---
+
+# E tem uma consequência importante para a 000.12
+
+Na 000.12 eu **tiraria o Pillar C inteiro**:
+
+> `Safe Handoff & DLQ Subject Alignment`
+
+porque isso pertence conceitualmente à 000.11.
+
+Hoje a 000.12 tem:
+
+```text
+Pillar A — Ingress Command Route
+Pillar B — Intra-Core Event Alignment
+Pillar C — Safe Handoff & DLQ Subject Alignment
+```
+
+Eu deixaria:
+
+```text
+Pillar A — Edge/Core Command Ingress Decentralization
+Pillar B — Intra-Core Event Alignment
+```
+
+E no máximo colocaria uma referência:
+
+> **DLQ/reprocessing semantics are governed by SPEC-000.11 and are not redefined here.**
+
+Isso é importante porque a 000.12 não deveria começar a redefinir retry/ACK/DLQ enquanto reorganiza os consumers.
+
+---
+
+# Um detalhe especialmente importante
+
+A 000.12 atualmente tem:
+
+```text
+I-STREAM-006
+ACK(m) ⇒ DurableHandoff(m) = committed
+```
+
+Isso é correto arquiteturalmente, mas eu trataria como **dependência normativa da 000.11**, e não como uma segunda definição.
+
+Por exemplo:
+
+```text
+I-STREAM-006:
+Ingress consumers MUST obey the durable-handoff contract
+defined by SPEC-000.11.
+```
+
+A 000.11 define **o que significa durable handoff**.
+
+A 000.12 apenas garante que os novos consumers continuam obedecendo ao contrato.
+
+Assim evitamos duas specs sendo autoridade sobre a mesma coisa.
+
+---
+
+# A divisão final ficaria excelente
+
+| Responsabilidade                       | SPEC                                          |
+| -------------------------------------- | --------------------------------------------- |
+| HMAC / authentication                  | 000.9.3                                       |
+| Envelope encryption / nonce / KMS      | 000.10                                        |
+| Edge → Core NATS command ingress       | 000.9.3 / 000.12                              |
+| **Edge → Core retry/reprocessing**     | **000.11**                                    |
+| **Core Command DLQ**                   | **000.11**                                    |
+| **operationId preservation on replay** | **000.11**                                    |
+| **ACK after durable handoff**          | **000.11**                                    |
+| Command consumer ownership             | 000.12                                        |
+| Decentralized command consumers        | 000.12                                        |
+| Core bounded-context ownership         | 000.12                                        |
+| Ledger → Fraud event                   | 000.12                                        |
+| Fraud internal listeners               | 000.12                                        |
+| Savings internal events                | 000.12                                        |
+| Spring Modulith boundaries             | 000.12                                        |
+| External Core → NATS egress            | 000.12 / Outbox                               |
+| Internal bounded-context retry/DLQ     | **fora da 000.11**, futura SPEC se necessário |
+
+### E principalmente:
+
+```text
+000.11
+========
+PROCESS RELIABILITY
+Edge → Core
+        │
+        └── retry / DLQ / replay
+
+
+000.12
+========
+PROCESS STRUCTURE
+Core interno
+        │
+        ├── ledger
+        ├── fraud
+        ├── savings
+        └── ...
+             │
+             └── Modulith Events
+```
+
+**Eu faria essa alteração antes de fechar a 000.12.** Ela elimina uma sobreposição importante entre as duas specs e deixa a responsabilidade arquitetural muito mais fácil de explicar no README, no PLAN e, principalmente, durante uma revisão técnica.
+
+A próxima revisão da 000.11 deveria portanto ser uma **Rev.3**, com o título/escopo explicitamente limitado a **Edge → Core**, removendo `BOUNDED_CONTEXT` e toda semântica de DLQ de eventos internos.

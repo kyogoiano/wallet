@@ -58,6 +58,7 @@ class DlqConsumerTest {
         headers.add("error_message", "DB Lock timeout");
         headers.add("failure_type", "TRANSIENT");
         headers.add("type", "Deposit");
+        headers.add("tenant_id", "tenant-alpha");
 
         when(message.getHeaders()).thenReturn(headers);
         when(message.getData()).thenReturn("{\"amount\": 100.00}".getBytes());
@@ -76,7 +77,28 @@ class DlqConsumerTest {
         assertThat(recorded.status()).isEqualTo(DlqStatus.PENDING);
         assertThat(recorded.failureType()).isEqualTo(DlqFailureType.TRANSIENT);
         assertThat(recorded.eventType()).isEqualTo("Deposit");
+        assertThat(recorded.tenantId()).isEqualTo("tenant-alpha");
 
         verify(message).ack();
+    }
+
+    @Test
+    @DisplayName("Should NAK message with delay when mandatory tenant_id header is missing")
+    void shouldNakWhenTenantIdIsMissing() throws Exception {
+        Headers headers = new Headers();
+        headers.add("operation_id", UUID.randomUUID().toString());
+        headers.add("original_subject", "commands.deposit");
+        headers.add("failed_at", Instant.now().toString());
+        headers.add("type", "Deposit");
+
+        when(message.getHeaders()).thenReturn(headers);
+
+        Method processMethod = DlqConsumer.class.getDeclaredMethod("processMessage", Message.class);
+        processMethod.setAccessible(true);
+        processMethod.invoke(consumer, message);
+
+        verifyNoInteractions(dlqManagementUseCase);
+        verify(message, never()).ack();
+        verify(message).nakWithDelay(java.time.Duration.ofSeconds(5));
     }
 }

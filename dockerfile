@@ -1,5 +1,5 @@
 # Build stage
-FROM oraclelinux:9-slim AS builder
+FROM oraclelinux:10-slim AS builder
 
 ENV JAVA_HOME=/usr/java/valhalla-jdk
 ENV GRADLE_HOME=/opt/gradle
@@ -67,7 +67,7 @@ RUN ./gradlew clean :bootJar :edge:bootJar --no-daemon
 # =========================================================
 # Edge Runtime Stage (wallet-edge)
 # =========================================================
-FROM oraclelinux:9-slim AS edge
+FROM oraclelinux:10-slim AS edge
 
 ENV JAVA_HOME=/usr/java/valhalla-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"
@@ -98,7 +98,7 @@ ENTRYPOINT ["java", "-Duser.timezone=UTC", "-XX:MaxRAMPercentage=75", "-jar", "a
 # =========================================================
 # Core Runtime Stage (wallet-core / default)
 # =========================================================
-FROM oraclelinux:9-slim AS core
+FROM oraclelinux:10-slim AS core
 
 ENV JAVA_HOME=/usr/java/valhalla-jdk
 ENV PATH="${JAVA_HOME}/bin:${PATH}"

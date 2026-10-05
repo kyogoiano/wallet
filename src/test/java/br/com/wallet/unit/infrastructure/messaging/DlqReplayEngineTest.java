@@ -71,7 +71,8 @@ class DlqReplayEngineTest {
                 now.minusSeconds(60),
                 null,
                 DlqFailureType.TRANSIENT,
-                "Deposit"
+                "Deposit",
+                "tenant-alpha"
         );
 
         when(dlqDao.claimBatch(eq(now), eq(50))).thenReturn(List.of(event));
@@ -88,6 +89,7 @@ class DlqReplayEngineTest {
         assertThat(published.getHeaders().getFirst("userId")).isEqualTo(userId.toString());
         assertThat(published.getHeaders().getFirst("replayed")).isEqualTo("true");
         assertThat(published.getHeaders().getFirst("type")).isEqualTo("Deposit");
+        assertThat(published.getHeaders().getFirst("tenant_id")).isEqualTo("tenant-alpha");
 
         verify(dlqDao).markAsCompleted(eq(eventId), eq(now));
     }
@@ -109,7 +111,8 @@ class DlqReplayEngineTest {
                 now.minusSeconds(60),
                 null,
                 DlqFailureType.TRANSIENT,
-                "Deposit"
+                "Deposit",
+                "tenant-alpha"
         );
 
         when(dlqDao.claimBatch(eq(now), eq(50))).thenReturn(List.of(event));
@@ -138,7 +141,8 @@ class DlqReplayEngineTest {
                 now.minusSeconds(60),
                 null,
                 DlqFailureType.POISON,
-                "Deposit"
+                "Deposit",
+                "tenant-alpha"
         );
 
         when(dlqDao.claimBatch(eq(now), eq(50))).thenReturn(List.of(event));

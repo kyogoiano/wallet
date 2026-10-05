@@ -44,8 +44,12 @@ public abstract class AbstractNatsConsumer implements SmartLifecycle {
 
         for (int attempt = 1; attempt <= 3; attempt++) {
             try {
-                final var jetStream = natsConnection.jetStream();
-                final var jsm = natsConnection.jetStreamManagement();
+                final var jetStream = natsConnection != null ? natsConnection.jetStream() : null;
+                final var jsm = natsConnection != null ? natsConnection.jetStreamManagement() : null;
+                if (jetStream == null) {
+                    log.warn("NATS JetStream or JetStreamManagement is null for consumer '{}', skipping subscription", consumerName);
+                    return;
+                }
 
                 // Configure consumer for at-least-once delivery, backoff follows current retry strategy
                 final var consumerConfig = ConsumerConfiguration.builder()

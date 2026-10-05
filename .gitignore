@@ -36,3 +36,5 @@ out/
 ### VS Code ###
 .vscode/
 /dragonfly-data/
+/spool-data/.spool.lock
+/spool-data/segment-0000000000000001.wal

@@ -2,10 +2,14 @@ package br.com.wallet.dlq.internal.service;
 
 import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.dlq.api.DlqManagementUseCase;
+import br.com.wallet.dlq.api.dto.DlqCommandFailure;
 import br.com.wallet.dlq.api.dto.DlqOperationResponse;
 import br.com.wallet.dlq.api.dto.ReplayExhaustedResult;
+import br.com.wallet.dlq.api.exceptions.NonReplayableOperationException;
 import br.com.wallet.dlq.api.model.DlqEvent;
+import br.com.wallet.dlq.api.model.DlqFailureType;
 import br.com.wallet.dlq.api.model.DlqStatus;
+import br.com.wallet.dlq.internal.engine.FullJitterBackoffCalculator;
 import br.com.wallet.dlq.internal.persistence.DlqOperationsDao;
 import io.nats.client.Connection;
 import io.nats.client.JetStream;
@@ -54,6 +58,40 @@ public class DlqManagementService implements DlqManagementUseCase {
     }
 
     @Override
+    @Traceable("dlq.record_failure")
+    public void recordFailure(final DlqCommandFailure failure) {
+        Objects.requireNonNull(failure, "failure cannot be null");
+        final DlqStatus initialStatus =
+                (failure.failureType() == DlqFailureType.TRANSIENT)
+                        ? DlqStatus.FAILED
+                        : DlqStatus.QUARANTINED;
+
+        final Instant now = clock.instant();
+        final Instant nextRetryAt = (initialStatus == DlqStatus.FAILED)
+                ? now.plus(FullJitterBackoffCalculator.calculateDelay(1))
+                : null;
+
+        final DlqEvent event = new DlqEvent(
+                UUID.randomUUID(),
+                failure.operationId(),
+                failure.userId(),
+                failure.subject(),
+                initialStatus,
+                failure.error(),
+                failure.payload(),
+                (initialStatus == DlqStatus.FAILED ? 1 : 0),
+                nextRetryAt,
+                now,
+                null,
+                failure.failureType(),
+                failure.eventType(),
+                failure.tenantId()
+        );
+
+        dlqDao.insert(event);
+    }
+
+    @Override
     @NonNull
     @Traceable("dlq.manual_replay")
     public DlqOperationResponse replayOperation(@NonNull final UUID dlqEventId) {
@@ -64,6 +102,13 @@ public class DlqManagementService implements DlqManagementUseCase {
 
         if (event.status() == DlqStatus.COMPLETED) {
             throw new IllegalArgumentException("Cannot replay already COMPLETED DLQ operation: " + dlqEventId);
+        }
+
+        if (event.failureType() == DlqFailureType.SECURITY &&
+                event.error() != null && event.error().contains("AEAD tag mismatch")) {
+            throw new NonReplayableOperationException(
+                    "Cryptographically corrupted ciphertext (AEAD tag mismatch) cannot be replayed"
+            );
         }
 
         final Instant now = clock.instant();
@@ -124,8 +169,10 @@ public class DlqManagementService implements DlqManagementUseCase {
                 headers.add("userId", event.userId().toString());
             }
             headers.add("replayed", "true");
+            headers.add("replay_id", UUID.randomUUID().toString());
             headers.add("replay_count", String.valueOf(event.retryCount()));
             headers.add("type", event.eventType());
+            headers.add("tenant_id", event.tenantId());
 
             final var message = NatsMessage.builder()
                     .subject(event.subject())

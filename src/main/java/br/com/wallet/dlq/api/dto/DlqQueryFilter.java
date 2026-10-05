@@ -10,6 +10,7 @@ public record DlqQueryFilter(
         @Nullable DlqStatus status,
         @Nullable DlqFailureType failureType,
         @Nullable String eventType,
-        @Nullable UUID operationId
+        @Nullable UUID operationId,
+        @Nullable String tenantId
 ) {
 }

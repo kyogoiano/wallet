@@ -33,6 +33,9 @@ public class DlqPublisher {
         newHeaders.add("failure_type", ExceptionType.parseException(error).name());
         newHeaders.add("Nats-Msg-Id", message.getHeaders().getFirst("Nats-Msg-Id"));
         newHeaders.add("userId", message.getHeaders().getFirst("userId"));
+        if (message.getHeaders() != null && message.getHeaders().getFirst("tenant_id") != null) {
+            newHeaders.add("tenant_id", message.getHeaders().getFirst("tenant_id"));
+        }
 
         final var dlqMessage = NatsMessage.builder()
                 .subject(subject)
@@ -72,6 +75,8 @@ public class DlqPublisher {
         if (msgId != null) newHeaders.add("Nats-Msg-Id", msgId);
         String userId = message.getHeaders() != null ? message.getHeaders().getFirst("userId") : null;
         if (userId != null) newHeaders.add("userId", userId);
+        String tenantId = message.getHeaders() != null ? message.getHeaders().getFirst("tenant_id") : null;
+        if (tenantId != null) newHeaders.add("tenant_id", tenantId);
 
         final var dlqMessage = NatsMessage.builder()
                 .subject(subject)

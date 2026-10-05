@@ -52,7 +52,7 @@ public class DlqOperationsPersistenceIT extends DockerProperties {
                 id, operationId, userId, "commands.deposit",
                 DlqStatus.PENDING, "DB lock timeout", "{\"amount\": 100}",
                 0, null, now, null,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
 
         dlqDao.insert(event);
@@ -78,7 +78,7 @@ public class DlqOperationsPersistenceIT extends DockerProperties {
                 id, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit",
                 DlqStatus.PENDING, "DB lock timeout", "{\"amount\": 100}",
                 0, null, now, null,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
         dlqDao.insert(event);
 
@@ -123,7 +123,7 @@ public class DlqOperationsPersistenceIT extends DockerProperties {
                 id, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit",
                 DlqStatus.PENDING, "Poison payload", "{}",
                 0, null, now, null,
-                DlqFailureType.POISON, "Deposit"
+                DlqFailureType.POISON, "Deposit", "tenant-alpha"
         );
         dlqDao.insert(event);
 
@@ -142,14 +142,14 @@ public class DlqOperationsPersistenceIT extends DockerProperties {
         UUID id2 = UUID.randomUUID();
         Instant now = Instant.now();
 
-        dlqDao.insert(new DlqEvent(id1, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit", DlqStatus.EXHAUSTED, "err", "{}", 3, null, now, null, DlqFailureType.TRANSIENT, "Deposit"));
-        dlqDao.insert(new DlqEvent(id2, UUID.randomUUID(), UUID.randomUUID(), "commands.transfer", DlqStatus.COMPLETED, "err", "{}", 1, null, now, now, DlqFailureType.BUSINESS, "Transfer"));
+        dlqDao.insert(new DlqEvent(id1, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit", DlqStatus.EXHAUSTED, "err", "{}", 3, null, now, null, DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"));
+        dlqDao.insert(new DlqEvent(id2, UUID.randomUUID(), UUID.randomUUID(), "commands.transfer", DlqStatus.COMPLETED, "err", "{}", 1, null, now, now, DlqFailureType.PERMANENT, "Transfer", "tenant-alpha"));
 
-        List<DlqEvent> exhausted = dlqDao.findByFilter(new DlqQueryFilter(DlqStatus.EXHAUSTED, null, null, null), 10, 0);
+        List<DlqEvent> exhausted = dlqDao.findByFilter(new DlqQueryFilter(DlqStatus.EXHAUSTED, null, null, null, "tenant-alpha"), 10, 0);
         assertThat(exhausted).hasSize(1);
         assertThat(exhausted.getFirst().id()).isEqualTo(id1);
 
-        List<DlqEvent> completed = dlqDao.findByFilter(new DlqQueryFilter(DlqStatus.COMPLETED, null, null, null), 10, 0);
+        List<DlqEvent> completed = dlqDao.findByFilter(new DlqQueryFilter(DlqStatus.COMPLETED, null, null, null, "tenant-alpha"), 10, 0);
         assertThat(completed).hasSize(1);
         assertThat(completed.getFirst().id()).isEqualTo(id2);
     }

@@ -133,8 +133,9 @@ gantt
     SPEC-000.9.3 HMAC-Signed Ingress    :done, p00_11_3, 2026-09-21, 2d
     SPEC-000.9.4 Dragonfly 2.0 & Audit  :done, p00_11_4, 2026-09-23, 2d
     DF Decommission & Tenant Ratify     :done, p00_11_5, 2026-09-28, 2d
-    SPEC-000.10 Financial Security      :p00_12, after p00_11_5, 3d
-    SPEC-000.11 Tiered DLQ & Recovery   :p00_13, after p00_12, 3d
+    SPEC-000.10 Financial Security      :done, p00_12, after p00_11_5, 3d
+    SPEC-000.11 Reliable Reprocessing   :done, p00_13, after p00_12, 3d
+    SPEC-000.12 Modulith Streams        :p00_14, after p00_13, 3d
     section Phase 1 Programmable Money
     SPEC-001 Smart Savings Module       :done, p1_1, 2026-08-23, 3d
     SPEC-001.1 Account Lifecycle        :done, p1_2, 2026-08-24, 2d
@@ -415,6 +416,42 @@ gantt
   - [`plans/PLAN-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/plans/PLAN-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Approved)
   - [`tasks/TASKS-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/tasks/TASKS-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Completed)
   - [`summaries/SUMMARY-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md`](file:///.spec/summaries/SUMMARY-000.9.4-dragonfly-2.0-migration-and-codebase-audit.md) (Ratified)
+
+---
+
+### 🔹 Phase 000.10: Financial Security & Payload Cryptographic Protection
+**Spec Identifier**: [`SPEC-000.10-financial-security`](file:///.spec/SPEC-000.10-financial-security.md)  
+**Status**: 🟡 **Draft / In Review**  
+**Core Abstraction**: `Application-Layer Envelope Encryption, Two-Tier KMS/AAD Binding & Post-HMAC Two-Phase Replay Protection (br.com.wallet.security)`
+
+- **Intent**: Secure financial command payloads end-to-end between Edge admission and Core execution. Enforces zero plaintext at rest or in flight via `CryptoEnvelope` AES-256-GCM encryption with length-prefixed canonical AAD (`I-ENV-001`, `I-ENV-002`), two-phase nonce reservation in Dragonfly (`I-ENV-004`), decrypt-before-transaction in Core (`I-ENV-003`), and Spring Modulith cryptographic isolation (`I-SEC-014`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.10-financial-security.md`](file:///.spec/SPEC-000.10-financial-security.md) (Draft)
+
+---
+
+### 🔹 Phase 000.11: Edge-to-Core Command Reliability, Retry & Reprocessing
+**Spec Identifier**: [`SPEC-000.11-tiered-dlq-and-recovery`](file:///.spec/SPEC-000.11-tiered-dlq-and-recovery.md)  
+**Status**: 🟢 **Completed & Verified**  
+**Core Abstraction**: `Process Reliability (Edge -> Core), Live Ingress Isolation, Bounded Transient Retries & Quarantine Governance (br.com.wallet.dlq)`
+
+- **Intent**: Formalize reliable command reprocessing across the Edge $\rightarrow$ Core inter-process boundary. Unblocks live NATS ingress traffic immediately upon failure by routing failed commands into separate reprocessing flows before ACKing. Governs financial commands (`Transfer`, `Deposit`, `Withdraw`), preserves immutable `operationId` (`I-TDLQ-005`), enforces bounded transient retries ($\le 3$) with full jitter, isolates non-retryable failures into `QUARANTINED` with 0 retries, and requires durable handoff before ACK (`I-TDLQ-009`).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.11-tiered-dlq-and-recovery.md`](file:///.spec/SPEC-000.11-tiered-dlq-and-recovery.md) (Approved)
+  - [`.spec/plans/PLAN-000.11-tiered-dlq-and-recovery.md`](file:///.spec/plans/PLAN-000.11-tiered-dlq-and-recovery.md) (Architecture Plan)
+  - [`.spec/tasks/TASKS-000.11-tiered-dlq-and-recovery.md`](file:///.spec/tasks/TASKS-000.11-tiered-dlq-and-recovery.md) (Task List)
+  - [`.spec/summaries/SUMMARY-000.11-tiered-dlq-and-recovery.md`](file:///.spec/summaries/SUMMARY-000.11-tiered-dlq-and-recovery.md) (Summary)
+
+---
+
+### 🔹 Phase 000.12: Modulith Ingress Decentralization & Intra-Core Event Alignment
+**Spec Identifier**: [`SPEC-000.12-modulith-bounded-context-streaming`](file:///.spec/SPEC-000.12-modulith-bounded-context-streaming.md)  
+**Status**: 📝 **Draft (Rev. 2 — Pure Refactor Aligned with History 78 & Modulith Events)**  
+**Core Abstraction**: `Process Structure, Decentralized Ingress Consumers & Intra-Core Spring Modulith Event Alignment`
+
+- **Intent**: Execute a clean, pure refactor: (1) Decomposes monolithic `CoreCommandConsumer` into single-responsibility consumers inside `br.com.wallet.ledger.internal.messaging.consumer`; (2) Eliminates the NATS "boomerang" for internal domain events by migrating `FraudGraphConsumer` and `FraudConsumer` to native in-process Spring Modulith `@ApplicationModuleListener` events; (3) Demarcates NATS strictly for process crossings (Edge ingress, status streaming, and external outbox egress).
+- **Spec Kit Artifacts**:
+  - [`.spec/SPEC-000.12-modulith-bounded-context-streaming.md`](file:///.spec/SPEC-000.12-modulith-bounded-context-streaming.md) (Draft)
 
 ---
 

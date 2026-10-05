@@ -64,11 +64,15 @@ public class DlqConsumer extends AbstractNatsConsumer {
     }
 
     private DlqEvent mapToDlqEvent(@NonNull final Message message, @NonNull final Headers headers) {
+        String tenantId = headers.getFirst("tenant_id");
+        if (tenantId == null || tenantId.isBlank()) {
+            throw new IllegalArgumentException("DLQ message missing mandatory 'tenant_id' header");
+        }
         return new DlqEvent(
                 UUID.randomUUID(),
                 UUID.fromString(Objects.requireNonNull(headers.getFirst("operation_id"))),
                 headers.getFirst("userId") != null ? UUID.fromString(headers.getFirst("userId")) : null,
-                headers.getFirst("original_subject"),
+                Objects.requireNonNull(headers.getFirst("original_subject")),
                 DlqStatus.PENDING,
                 headers.getFirst("error_message"),
                 new String(message.getData()),
@@ -77,7 +81,8 @@ public class DlqConsumer extends AbstractNatsConsumer {
                 Instant.parse(Objects.requireNonNull(headers.getFirst("failed_at"))),
                 null,
                 DlqFailureType.from(headers.getFirst("failure_type")),
-                headers.getFirst("type")
+                Objects.requireNonNull(headers.getFirst("type")),
+                tenantId
         );
     }
 }

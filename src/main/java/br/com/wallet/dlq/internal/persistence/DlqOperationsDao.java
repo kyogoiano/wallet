@@ -5,6 +5,7 @@ import br.com.wallet.dlq.api.dto.DlqQueryFilter;
 import br.com.wallet.dlq.api.model.DlqEvent;
 import br.com.wallet.dlq.api.model.DlqFailureType;
 import br.com.wallet.dlq.api.model.DlqStatus;
+import br.com.wallet.dlq.internal.engine.FullJitterBackoffCalculator;
 import br.com.wallet.ledger.api.utils.JsonUtils;
 import org.jspecify.annotations.NonNull;
 import org.jspecify.annotations.Nullable;
@@ -13,6 +14,7 @@ import org.springframework.jdbc.core.RowMapper;
 import org.springframework.stereotype.Repository;
 
 import java.time.Instant;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -30,21 +32,26 @@ public class DlqOperationsDao {
     private final JdbcTemplate jdbc;
     private final JsonUtils jsonUtils;
 
-    private final RowMapper<DlqEvent> rowMapper = (rs, rowNum) -> new DlqEvent(
-            rs.getObject("id", UUID.class),
-            rs.getObject("operation_id", UUID.class),
-            rs.getObject("user_id", UUID.class),
-            rs.getString("subject"),
-            DlqStatus.valueOf(rs.getString("status")),
-            rs.getString("error"),
-            rs.getString("payload"),
-            rs.getObject("retry_count", Integer.class),
-            rs.getTimestamp("next_retry_at") != null ? rs.getTimestamp("next_retry_at").toInstant() : null,
-            rs.getTimestamp("created_at").toInstant(),
-            rs.getTimestamp("processed_at") != null ? rs.getTimestamp("processed_at").toInstant() : null,
-            DlqFailureType.valueOf(rs.getString("failure_type")),
-            rs.getString("event_type")
-    );
+    private final RowMapper<DlqEvent> rowMapper = (rs, rowNum) -> {
+        final String tenantId = Objects.requireNonNull(rs.getString("tenant_id"), "tenant_id column cannot be null");
+
+        return new DlqEvent(
+                rs.getObject("id", UUID.class),
+                rs.getObject("operation_id", UUID.class),
+                rs.getObject("user_id", UUID.class),
+                rs.getString("subject"),
+                DlqStatus.valueOf(rs.getString("status")),
+                rs.getString("error"),
+                rs.getString("payload"),
+                rs.getObject("retry_count", Integer.class),
+                rs.getTimestamp("next_retry_at") != null ? rs.getTimestamp("next_retry_at").toInstant() : null,
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getTimestamp("processed_at") != null ? rs.getTimestamp("processed_at").toInstant() : null,
+                DlqFailureType.from(rs.getString("failure_type")),
+                rs.getString("event_type"),
+                tenantId
+        );
+    };
 
     public DlqOperationsDao(final JdbcTemplate jdbc, final JsonUtils jsonUtils) {
         this.jdbc = Objects.requireNonNull(jdbc, "jdbc cannot be null");
@@ -64,7 +71,7 @@ public class DlqOperationsDao {
                       WHERE status IN ('PENDING', 'FAILED')
                         AND retry_count < ?
                         AND (next_retry_at IS NULL OR next_retry_at <= ?)
-                      ORDER BY next_retry_at, created_at
+                      ORDER BY next_retry_at NULLS FIRST, created_at ASC
                       LIMIT ?
                       FOR UPDATE SKIP LOCKED
                     )
@@ -72,7 +79,7 @@ public class DlqOperationsDao {
                     SET status = 'PROCESSING'
                     FROM claimed
                     WHERE d.id = claimed.id
-                    RETURNING d.id, d.operation_id, d.user_id, d.subject, d.status, d.error, d.payload, d.retry_count, d.next_retry_at, d.created_at, d.processed_at, d.failure_type, d.event_type
+                    RETURNING d.id, d.operation_id, d.user_id, d.subject, d.status, d.error, d.payload, d.retry_count, d.next_retry_at, d.created_at, d.processed_at, d.failure_type, d.event_type, d.tenant_id
         """,
                 rowMapper,
                 MAX_AUTOMATIC_RETRIES,
@@ -82,24 +89,93 @@ public class DlqOperationsDao {
     }
 
     /**
-     * Increment retry count. If retry_count >= 3, transition to EXHAUSTED and clear next_retry_at.
+     * Increment retry count with explicit next retry timestamp.
+     * If retry_count + 1 >= 3, transition to EXHAUSTED and clear next_retry_at.
+     */
+    @Traceable("dlq.mark_failed")
+    public void markFailed(
+            @NonNull final UUID id,
+            @NonNull final Instant now,
+            @NonNull final DlqFailureType failureType,
+            @Nullable final Instant nextRetryAt
+    ) {
+        final int currentRetry = getCurrentRetryCount(id);
+        final int nextRetry = currentRetry + 1;
+        executeMarkFailed(id, nextRetry, failureType, nextRetryAt);
+    }
+
+    /**
+     * Increment retry count using full-jitter exponential backoff (I-TDLQ-003).
      */
     @Traceable("dlq.mark_failed")
     public void markFailed(@NonNull final UUID id, @NonNull final Instant now, @NonNull final DlqFailureType failureType) {
+        final int currentRetry = getCurrentRetryCount(id);
+        final int nextRetry = currentRetry + 1;
+        final Instant nextRetryAt = (nextRetry >= MAX_AUTOMATIC_RETRIES)
+                ? null
+                : now.plus(FullJitterBackoffCalculator.calculateDelay(nextRetry));
+        executeMarkFailed(id, nextRetry, failureType, nextRetryAt);
+    }
+
+    private void executeMarkFailed(
+            final UUID id,
+            final int nextRetry,
+            final DlqFailureType failureType,
+            final Instant nextRetryAt
+    ) {
+        final boolean isExhausted = nextRetry >= MAX_AUTOMATIC_RETRIES || nextRetryAt == null;
+        final DlqStatus status = isExhausted ? DlqStatus.EXHAUSTED : DlqStatus.FAILED;
+        final OffsetDateTime effectiveNextRetry = isExhausted
+                ? null
+                : nextRetryAt.atOffset(ZoneOffset.UTC);
+
         jdbc.update("""
             UPDATE dlq_operations
-            SET retry_count = retry_count + 1,
-                status = CASE WHEN retry_count + 1 >= ? THEN 'EXHAUSTED' ELSE 'FAILED' END,
+            SET retry_count = ?,
+                status = ?,
                 failure_type = ?,
-                next_retry_at = CASE WHEN retry_count + 1 >= ? THEN NULL ELSE ? + (INTERVAL '1 second' * POWER(2, retry_count + 1)) END
+                next_retry_at = ?
             WHERE id = ?
         """,
-                MAX_AUTOMATIC_RETRIES,
+                nextRetry,
+                status.name(),
                 failureType.name(),
-                MAX_AUTOMATIC_RETRIES,
-                now.atOffset(ZoneOffset.UTC),
+                effectiveNextRetry,
                 id
         );
+    }
+
+    private int getCurrentRetryCount(final UUID id) {
+        final List<Integer> counts = jdbc.query(
+                "SELECT retry_count FROM dlq_operations WHERE id = ?",
+                (rs, rowNum) -> rs.getInt("retry_count"),
+                id
+        );
+        return counts.isEmpty() ? 0 : counts.getFirst();
+    }
+
+    /**
+     * Records a permanent, poison, or security violation directly into QUARANTINED status (I-TDLQ-004).
+     */
+    @Traceable("dlq.record_quarantined")
+    public void recordQuarantined(@NonNull final DlqEvent event) {
+        final DlqEvent quarantinedEvent = new DlqEvent(
+                event.id(),
+                event.operationId(),
+                event.userId(),
+                event.subject(),
+                DlqStatus.QUARANTINED,
+                event.error(),
+                event.payload(),
+                0,
+                null,
+                event.createdAt(),
+                null,
+                event.failureType(),
+                event.eventType(),
+                event.tenantId()
+        );
+        insert(quarantinedEvent);
     }
 
     @Traceable("dlq.mark_completed")
@@ -135,7 +211,7 @@ public class DlqOperationsDao {
 
     public Optional<DlqEvent> findById(@NonNull final UUID id) {
         final List<DlqEvent> results = jdbc.query("""
-            SELECT id, operation_id, user_id, subject, status, error, payload, retry_count, next_retry_at, created_at, processed_at, failure_type, event_type
+            SELECT id, operation_id, user_id, subject, status, error, payload, retry_count, next_retry_at, created_at, processed_at, failure_type, event_type, tenant_id
             FROM dlq_operations
             WHERE id = ?
             LIMIT 1
@@ -146,7 +222,7 @@ public class DlqOperationsDao {
 
     public List<DlqEvent> findByFilter(@NonNull final DlqQueryFilter filter, final int limit, final int offset) {
         final StringBuilder sql = new StringBuilder("""
-            SELECT id, operation_id, user_id, subject, status, error, payload, retry_count, next_retry_at, created_at, processed_at, failure_type, event_type
+            SELECT id, operation_id, user_id, subject, status, error, payload, retry_count, next_retry_at, created_at, processed_at, failure_type, event_type, tenant_id
             FROM dlq_operations
             WHERE 1=1
         """);
@@ -168,6 +244,10 @@ public class DlqOperationsDao {
             sql.append(" AND operation_id = ?");
             params.add(filter.operationId());
         }
+        if (filter.tenantId() != null && !filter.tenantId().isBlank()) {
+            sql.append(" AND tenant_id = ?");
+            params.add(filter.tenantId());
+        }
 
         sql.append(" ORDER BY created_at DESC LIMIT ? OFFSET ?");
         params.add(limit);
@@ -178,7 +258,7 @@ public class DlqOperationsDao {
 
     public List<DlqEvent> findExhaustedOperations(@NonNull final Integer limit) {
         return jdbc.query("""
-            SELECT id, operation_id, user_id, subject, status, error, payload, retry_count, next_retry_at, created_at, processed_at, failure_type, event_type
+            SELECT id, operation_id, user_id, subject, status, error, payload, retry_count, next_retry_at, created_at, processed_at, failure_type, event_type, tenant_id
             FROM dlq_operations
             WHERE status = 'EXHAUSTED'
             ORDER BY created_at ASC
@@ -191,9 +271,9 @@ public class DlqOperationsDao {
         jdbc.update("""
                     INSERT INTO dlq_operations (
                         id, operation_id, user_id, subject, status, error, payload,
-                        retry_count, next_retry_at, created_at, processed_at, failure_type, event_type
+                        retry_count, next_retry_at, created_at, processed_at, failure_type, event_type, tenant_id
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?::jsonb, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 dlqEvent.id(),
                 dlqEvent.operationId(),
@@ -207,7 +287,8 @@ public class DlqOperationsDao {
                 dlqEvent.createdAt().atOffset(ZoneOffset.UTC),
                 dlqEvent.processedAt() != null ? dlqEvent.processedAt().atOffset(ZoneOffset.UTC) : null,
                 dlqEvent.failureType().name(),
-                dlqEvent.eventType()
+                dlqEvent.eventType(),
+                dlqEvent.tenantId()
         );
     }
 

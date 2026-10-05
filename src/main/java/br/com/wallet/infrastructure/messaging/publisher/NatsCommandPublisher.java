@@ -40,10 +40,12 @@ public class NatsCommandPublisher implements JetStreamConfig {
         this.connection = connection;
         this.commandWriter = objectMapper.writer();
 
-        final var jsm = this.connection.jetStreamManagement();
-        ensureStream(jsm, "commands", List.of("commands.*", "commands.wallet.*"), Duration.ofHours(24));
-        ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
-        log.info("Commands stream created!");
+        final var jsm = this.connection != null ? this.connection.jetStreamManagement() : null;
+        if (jsm != null) {
+            ensureStream(jsm, "commands", List.of("commands.*", "commands.wallet.*"), Duration.ofHours(24));
+            ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
+            log.info("Commands stream created!");
+        }
     }
 
     /**

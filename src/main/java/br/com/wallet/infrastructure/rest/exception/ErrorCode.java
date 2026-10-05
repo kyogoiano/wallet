@@ -10,7 +10,8 @@ public enum ErrorCode {
     VALIDATION_ERROR("wallet.validation_error"),
     DUPLICATE_OPERATION("wallet.duplicate_operation"),
     FRAUD_BLOCKED("wallet.fraud_blocked"),
-    ACCOUNT_BLOCKED("wallet.account_blocked");
+    ACCOUNT_BLOCKED("wallet.account_blocked"),
+    NON_REPLAYABLE_OPERATION("wallet.non_replayable_operation");
 
     private final String error;
 

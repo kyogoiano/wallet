@@ -59,7 +59,7 @@ class DlqManagementServiceTest {
         DlqEvent event = new DlqEvent(
                 UUID.randomUUID(), UUID.randomUUID(), UUID.randomUUID(), "commands.deposit",
                 DlqStatus.PENDING, "error", "{}", 0, null, now, null,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
 
         managementService.recordDlqEvent(event);
@@ -78,13 +78,13 @@ class DlqManagementServiceTest {
                 eventId, operationId, userId, "commands.deposit",
                 DlqStatus.EXHAUSTED, "DB lock timeout", "{\"amount\": 100}",
                 3, null, now.minusSeconds(300), null,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
         DlqEvent completedEvent = new DlqEvent(
                 eventId, operationId, userId, "commands.deposit",
                 DlqStatus.COMPLETED, "DB lock timeout", "{\"amount\": 100}",
                 3, null, now.minusSeconds(300), now,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
 
         when(dlqDao.findById(eventId)).thenReturn(Optional.of(event), Optional.of(completedEvent));
@@ -108,7 +108,7 @@ class DlqManagementServiceTest {
                 eventId, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit",
                 DlqStatus.COMPLETED, null, "{}",
                 1, null, now.minusSeconds(300), now,
-                DlqFailureType.TRANSIENT, "Deposit"
+                DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha"
         );
 
         when(dlqDao.findById(eventId)).thenReturn(Optional.of(completedEvent));
@@ -119,6 +119,24 @@ class DlqManagementServiceTest {
     }
 
     @Test
+    @DisplayName("Should prohibit manual replay of AEAD tag mismatch corrupted operation (I-TDLQ-007)")
+    void shouldProhibitAeadMismatchReplay() {
+        UUID eventId = UUID.randomUUID();
+        DlqEvent securityEvent = new DlqEvent(
+                eventId, UUID.randomUUID(), UUID.randomUUID(), "commands.transfer",
+                DlqStatus.QUARANTINED, "AEAD tag mismatch: ciphertext corrupted", "{}",
+                0, null, now.minusSeconds(300), null,
+                DlqFailureType.SECURITY, "Transfer", "tenant-alpha"
+        );
+
+        when(dlqDao.findById(eventId)).thenReturn(Optional.of(securityEvent));
+
+        assertThatThrownBy(() -> managementService.replayOperation(eventId))
+                .isInstanceOf(br.com.wallet.dlq.api.exceptions.NonReplayableOperationException.class)
+                .hasMessageContaining("Cryptographically corrupted ciphertext (AEAD tag mismatch) cannot be replayed");
+    }
+
+    @Test
     @DisplayName("Should manually discard an operation")
     void shouldManuallyDiscardOperation() {
         UUID eventId = UUID.randomUUID();
@@ -126,13 +144,13 @@ class DlqManagementServiceTest {
                 eventId, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit",
                 DlqStatus.EXHAUSTED, "Poison payload", "{}",
                 3, null, now.minusSeconds(300), null,
-                DlqFailureType.POISON, "Deposit"
+                DlqFailureType.POISON, "Deposit", "tenant-alpha"
         );
         DlqEvent discardedEvent = new DlqEvent(
                 eventId, event.operationId(), event.userId(), "commands.deposit",
                 DlqStatus.DISCARDED, "Operator confirmed unrecoverable", "{}",
                 3, null, now.minusSeconds(300), now,
-                DlqFailureType.POISON, "Deposit"
+                DlqFailureType.POISON, "Deposit", "tenant-alpha"
         );
 
         when(dlqDao.findById(eventId)).thenReturn(Optional.of(event), Optional.of(discardedEvent));
@@ -149,8 +167,8 @@ class DlqManagementServiceTest {
         UUID id1 = UUID.randomUUID();
         UUID id2 = UUID.randomUUID();
 
-        DlqEvent ev1 = new DlqEvent(id1, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit", DlqStatus.EXHAUSTED, "err", "{}", 3, null, now, null, DlqFailureType.TRANSIENT, "Deposit");
-        DlqEvent ev2 = new DlqEvent(id2, UUID.randomUUID(), UUID.randomUUID(), "commands.transfer", DlqStatus.EXHAUSTED, "err", "{}", 3, null, now, null, DlqFailureType.TRANSIENT, "Transfer");
+        DlqEvent ev1 = new DlqEvent(id1, UUID.randomUUID(), UUID.randomUUID(), "commands.deposit", DlqStatus.EXHAUSTED, "err", "{}", 3, null, now, null, DlqFailureType.TRANSIENT, "Deposit", "tenant-alpha");
+        DlqEvent ev2 = new DlqEvent(id2, UUID.randomUUID(), UUID.randomUUID(), "commands.transfer", DlqStatus.EXHAUSTED, "err", "{}", 3, null, now, null, DlqFailureType.TRANSIENT, "Transfer", "tenant-alpha");
 
         when(dlqDao.findExhaustedOperations(100)).thenReturn(List.of(ev1, ev2));
         when(connection.jetStream()).thenReturn(jetStream);

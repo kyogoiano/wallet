@@ -1,5 +1,6 @@
 package br.com.wallet.dlq.api;
 
+import br.com.wallet.dlq.api.dto.DlqCommandFailure;
 import br.com.wallet.dlq.api.dto.DlqOperationResponse;
 import br.com.wallet.dlq.api.dto.ReplayExhaustedResult;
 import br.com.wallet.dlq.api.model.DlqEvent;
@@ -11,6 +12,8 @@ import java.util.UUID;
 public interface DlqManagementUseCase {
 
     void recordDlqEvent(@NonNull DlqEvent dlqEvent);
+
+    void recordFailure(DlqCommandFailure failure);
 
     @NonNull
     DlqOperationResponse replayOperation(@NonNull UUID dlqEventId);

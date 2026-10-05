@@ -179,7 +179,7 @@ services:
       - appliance-net
 
   spool-init:
-    image: oraclelinux:9-slim
+    image: oraclelinux:10-slim
     container_name: wallet-appliance-spool-init
     user: "0:0"
     command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 755 /spool && chmod -R a+rX,u+rwX /spool"]

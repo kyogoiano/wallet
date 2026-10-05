@@ -44,10 +44,11 @@ public class DlqController implements DlqApi {
             @RequestParam(required = false) final DlqFailureType failureType,
             @RequestParam(required = false) final String eventType,
             @RequestParam(required = false) final UUID operationId,
+            @RequestParam(required = false) final String tenantId,
             @RequestParam(defaultValue = "50") final Integer limit,
             @RequestParam(defaultValue = "0") final Integer offset
     ) {
-        final DlqQueryFilter filter = new DlqQueryFilter(status, failureType, eventType, operationId);
+        final DlqQueryFilter filter = new DlqQueryFilter(status, failureType, eventType, operationId, tenantId);
         return ResponseEntity.ok(queryUseCase.findOperations(filter, limit, offset));
     }
 

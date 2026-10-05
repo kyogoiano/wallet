@@ -1,6 +1,8 @@
 package br.com.wallet.infrastructure.rest.exception;
 
+import br.com.wallet.core.exceptions.AccountBlockedException;
 import br.com.wallet.core.exceptions.IdempotencyException;
+import br.com.wallet.dlq.api.exceptions.NonReplayableOperationException;
 import br.com.wallet.ledger.api.exceptions.FraudBlockedException;
 import br.com.wallet.ledger.api.exceptions.InsufficientFundsException;
 import org.slf4j.Logger;
@@ -8,6 +10,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageConversionException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingRequestHeaderException;
 import org.springframework.web.bind.MissingRequestValueException;
@@ -19,6 +22,7 @@ import org.springframework.web.context.request.async.AsyncRequestTimeoutExceptio
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 import org.springframework.web.server.ResponseStatusException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
  * Basic global exception handler.
@@ -74,11 +78,18 @@ public class ApiExceptionHandler {
                 .body(new ApiError(ErrorCode.FRAUD_BLOCKED, ex.getMessage()));
     }
 
-    @ExceptionHandler(br.com.wallet.core.exceptions.AccountBlockedException.class)
-    public ResponseEntity<ApiError> handleAccountBlocked(br.com.wallet.core.exceptions.AccountBlockedException ex) {
+    @ExceptionHandler(AccountBlockedException.class)
+    public ResponseEntity<ApiError> handleAccountBlocked(AccountBlockedException ex) {
         log.warn("Account blocked: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.FORBIDDEN)
                 .body(new ApiError(ErrorCode.ACCOUNT_BLOCKED, ex.getMessage()));
+    }
+
+    @ExceptionHandler(NonReplayableOperationException.class)
+    public ResponseEntity<ApiError> handleNonReplayable(NonReplayableOperationException ex) {
+        log.warn("Non-replayable operation: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.UNPROCESSABLE_CONTENT)
+                .body(new ApiError(ErrorCode.NON_REPLAYABLE_OPERATION, ex.getMessage()));
     }
 
     @ExceptionHandler(HandlerMethodValidationException.class)
@@ -133,16 +144,16 @@ public class ApiExceptionHandler {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).build();
     }
 
-    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
-    public ResponseEntity<ApiError> handleMethodNotSupported(org.springframework.web.HttpRequestMethodNotSupportedException ex) {
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiError> handleMethodNotSupported(HttpRequestMethodNotSupportedException ex) {
         log.warn("Method not supported: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(new ApiError(ErrorCode.BAD_REQUEST, ex.getMessage()));
     }
 
-    @ExceptionHandler(org.springframework.web.servlet.resource.NoResourceFoundException.class)
-    public ResponseEntity<ApiError> handleNoResourceFound(org.springframework.web.servlet.resource.NoResourceFoundException ex) {
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiError> handleNoResourceFound(NoResourceFoundException ex) {
         log.warn("Resource not found: {}", ex.getMessage());
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .contentType(MediaType.APPLICATION_JSON)

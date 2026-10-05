@@ -1,6 +1,7 @@
 package br.com.wallet.integration.infrastructure;
 
 import br.com.wallet.infrastructure.config.RedisConfig;
+import br.com.wallet.infrastructure.redis.ManagedRedisConnection;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.IntegrationTestBase;
@@ -83,7 +84,8 @@ public class DragonflyCompatibilityTest extends DockerProperties {
         RedisURI socketUri = config.redisUri(env);
         RedisClient client = config.redisClient(socketUri, env);
 
-        try (StatefulRedisConnection<String, String> connection = config.redisConnection(client, env)) {
+        try (ManagedRedisConnection managedRedisConnection = config.managedConnection(client, env)) {
+            var connection = managedRedisConnection.connection();
             assertThat(connection.isOpen()).isTrue();
             RedisCommands<String, String> sync = connection.sync();
             String pong = sync.ping();

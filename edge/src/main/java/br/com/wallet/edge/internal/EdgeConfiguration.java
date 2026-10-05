@@ -1,7 +1,11 @@
 package br.com.wallet.edge.internal;
 
+import br.com.wallet.edge.api.DurableOperationStateProvider;
+import br.com.wallet.edge.api.OperationAuthorizationProvider;
 import br.com.wallet.edge.internal.command.CommandAcceptanceService;
+import br.com.wallet.edge.internal.idempotency.EdgeIdempotencyGate;
 import br.com.wallet.edge.internal.ingress.EdgeRequestValidator;
+import br.com.wallet.edge.internal.ingress.OperationStatusAuthorizationFilter;
 import br.com.wallet.edge.internal.ingress.OperationStatusHub;
 import br.com.wallet.edge.internal.journal.segmented.SegmentedFileJournal;
 import br.com.wallet.edge.api.EdgeCommandPublisher;
@@ -23,8 +27,6 @@ import br.com.wallet.edge.internal.security.InMemoryCredentialResolver;
 import br.com.wallet.edge.internal.security.replay.DragonflyNonceTracker;
 import br.com.wallet.edge.internal.security.replay.InMemoryNonceTracker;
 import br.com.wallet.security.replay.NonceTracker;
-import io.lettuce.core.RedisClient;
-import io.lettuce.core.RedisURI;
 import io.lettuce.core.api.StatefulRedisConnection;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,6 +36,7 @@ import org.springframework.context.annotation.Configuration;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Clock;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 
 /**
@@ -84,8 +87,8 @@ public class EdgeConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public br.com.wallet.edge.api.DurableOperationStateProvider durableOperationStateProvider() {
-        return operationId -> java.util.Optional.empty();
+    public DurableOperationStateProvider durableOperationStateProvider() {
+        return operationId -> Optional.empty();
     }
 
     @Bean
@@ -125,8 +128,8 @@ public class EdgeConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public br.com.wallet.edge.internal.idempotency.EdgeIdempotencyGate edgeIdempotencyGate() {
-        return new br.com.wallet.edge.internal.idempotency.EdgeIdempotencyGate();
+    public EdgeIdempotencyGate edgeIdempotencyGate() {
+        return new EdgeIdempotencyGate();
     }
 
     @Bean
@@ -162,16 +165,16 @@ public class EdgeConfiguration {
 
     @Bean
     @ConditionalOnMissingBean
-    public br.com.wallet.edge.api.OperationAuthorizationProvider operationAuthorizationProvider() {
+    public OperationAuthorizationProvider operationAuthorizationProvider() {
         return (operationId, tenantId) -> true;
     }
 
     @Bean
     @ConditionalOnMissingBean
-    public br.com.wallet.edge.internal.ingress.OperationStatusAuthorizationFilter operationStatusAuthorizationFilter(
-            br.com.wallet.edge.api.OperationAuthorizationProvider authorizationProvider
+    public OperationStatusAuthorizationFilter operationStatusAuthorizationFilter(
+            OperationAuthorizationProvider authorizationProvider
     ) {
-        return new br.com.wallet.edge.internal.ingress.OperationStatusAuthorizationFilter(authorizationProvider);
+        return new OperationStatusAuthorizationFilter(authorizationProvider);
     }
 
     @Bean
@@ -189,39 +192,15 @@ public class EdgeConfiguration {
     @Bean
     @ConditionalOnMissingBean
     public NonceTracker nonceTracker(
-            @Autowired(required = false) StatefulRedisConnection<String, String> existingConnection,
-            @Value("${redis.socket.enabled:false}") boolean useSocket,
-            @Value("${redis.socket.path:/var/run/redis/redis.sock}") String socketPath,
-            @Value("${spring.data.redis.host:localhost}") String host,
-            @Value("${spring.data.redis.port:6379}") int port
+            @Autowired(required = false) StatefulRedisConnection<String, String> existingConnection
     ) {
         if (existingConnection != null) {
             log.info("Initialized DragonflyNonceTracker using existing StatefulRedisConnection");
             return new DragonflyNonceTracker(existingConnection.sync());
         }
 
-        if (useSocket) {
-            log.info("Initializing DragonflyNonceTracker via Unix domain socket {}", socketPath);
-            final var redisURI = RedisURI.Builder.socket(socketPath).build();
-            try {
-                final RedisClient client = RedisClient.create(redisURI);
-                StatefulRedisConnection<String, String> connection = client.connect();
-                return new DragonflyNonceTracker(connection.sync());
-            } catch (Exception e) {
-                log.warn("DragonflyDB Unix socket failed on {}. Falling back to TCP {}:{}: {}", socketPath, host, port, e.getMessage());
-            }
-        }
-
-        log.info("Initializing DragonflyNonceTracker via TCP connecting to {}:{}", host, port);
-        final var redisURI = RedisURI.create("redis://" + host + ":" + port);
-        try {
-            final RedisClient client = RedisClient.create(redisURI);
-            StatefulRedisConnection<String, String> connection = client.connect();
-            return new DragonflyNonceTracker(connection.sync());
-        } catch (Exception e) {
-            log.warn("DragonflyDB TCP connection failed on {}:{}. Falling back to InMemoryNonceTracker: {}", host, port, e.getMessage());
-            return new InMemoryNonceTracker();
-        }
+        log.warn("DragonflyDB Managed connection not available. Falling back to InMemoryNonceTracker");
+        return new InMemoryNonceTracker();
     }
 
     @Bean

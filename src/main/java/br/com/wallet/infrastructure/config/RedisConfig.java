@@ -1,5 +1,6 @@
 package br.com.wallet.infrastructure.config;
 
+import br.com.wallet.infrastructure.redis.ManagedRedisConnection;
 import io.lettuce.core.ClientOptions;
 import io.lettuce.core.RedisClient;
 import io.lettuce.core.RedisURI;
@@ -14,6 +15,7 @@ import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
@@ -26,7 +28,7 @@ public class RedisConfig {
     private static final Logger log = LoggerFactory.getLogger(RedisConfig.class);
 
     @Bean
-    public RedisURI redisUri(@NonNull Environment env) {
+    public RedisURI redisUri(@NonNull final Environment env) {
         boolean useSocket = env.getProperty("redis.socket.enabled", Boolean.class, false);
 
         if (useSocket) {
@@ -41,15 +43,28 @@ public class RedisConfig {
     }
 
     @Bean(destroyMethod = "shutdown")
-    public RedisClient redisClient(@Autowired @NonNull RedisURI redisUri, @NonNull Environment env) {
-        boolean useSocket = env.getProperty("redis.socket.enabled", Boolean.class, false);
-
-        final var resources = DefaultClientResources.builder()
+    @ConditionalOnMissingBean
+    public DefaultClientResources clientResources() {
+        return DefaultClientResources.builder()
                 .ioThreadPoolSize(4)
                 .computationThreadPoolSize(4)
                 .build();
+    }
+
+    public RedisClient redisClient(@NonNull final RedisURI redisUri, @NonNull final Environment env) {
+        return redisClient(redisUri, clientResources(), env);
+    }
+
+    @Bean(destroyMethod = "shutdown")
+    public RedisClient redisClient(
+            @Autowired @NonNull final RedisURI redisUri,
+            @Autowired @NonNull final DefaultClientResources clientResources,
+            @NonNull final Environment env
+    ) {
+        boolean useSocket = env.getProperty("redis.socket.enabled", Boolean.class, false);
+
         final var client = RedisClient.create(
-                resources, redisUri
+                clientResources, redisUri
         );
 
         final var socketOptionsBuilder = SocketOptions.builder()
@@ -75,7 +90,8 @@ public class RedisConfig {
     }
 
     @Bean(destroyMethod = "close")
-    public StatefulRedisConnection<String, String> redisConnection(RedisClient client, @NonNull Environment env) {
+    @ConditionalOnMissingBean
+    public ManagedRedisConnection managedConnection(final RedisClient client, @NonNull final Environment env) {
         boolean useSocket = env.getProperty("redis.socket.enabled", Boolean.class, false);
         String socketPath = env.getProperty("redis.socket.path", "/var/run/redis/redis.sock");
 
@@ -84,7 +100,7 @@ public class RedisConfig {
             for (int attempt = 1; attempt <= 5; attempt++) {
                 try {
                     log.info("Connecting to DragonflyDB via Unix Domain Socket: {} (attempt {}/5)", socketPath, attempt);
-                    return client.connect();
+                    return new ManagedRedisConnection(client);
                 } catch (Exception e) {
                     if (attempt < 5) {
                         log.warn("UDS connection attempt {} failed: {}. Retrying in 500ms...", attempt, e.getMessage());
@@ -99,19 +115,37 @@ public class RedisConfig {
                         String host = env.getProperty("spring.data.redis.host", "localhost");
                         int port = env.getProperty("spring.data.redis.port", Integer.class, 6379);
                         log.warn("Failed to connect to Unix Domain Socket after 5 attempts. Falling back to TCP at {}:{}", host, port);
-                        RedisURI tcpUri = RedisURI.create("redis://" + host + ":" + port);
-                        RedisClient tcpClient = RedisClient.create(tcpUri);
-                        return tcpClient.connect();
+                        client.shutdown();
+                        final RedisURI tcpUri = RedisURI.create("redis://" + host + ":" + port);
+                        final RedisClient tcpClient = RedisClient.create(tcpUri);
+                        long commandTimeoutMs = env.getProperty("redis.command.timeout-ms", Long.class, 20L);
+                        tcpClient.setOptions(ClientOptions.builder()
+                                .autoReconnect(true)
+                                .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
+                                .pingBeforeActivateConnection(true)
+                                .protocolVersion(ProtocolVersion.RESP3)
+                                .replayFilter(cmd -> false)
+                                .timeoutOptions(TimeoutOptions.builder().fixedTimeout(Duration.ofMillis(commandTimeoutMs)).build())
+                                .build());
+                        return new ManagedRedisConnection(tcpClient);
                     }
                 }
             }
         }
 
-        return client.connect();
+        return new ManagedRedisConnection(client);
     }
 
     @Bean
-    public RedisCommands<String, String> redisCommands(StatefulRedisConnection<String, String> connection) {
+    @ConditionalOnMissingBean
+    public StatefulRedisConnection<String, String> redisConnection(
+            final ManagedRedisConnection managedConnection
+    ) {
+        return managedConnection.connection();
+    }
+
+    @Bean
+    public RedisCommands<String, String> redisCommands(final StatefulRedisConnection<String, String> connection) {
         return connection.sync();
     }
 

@@ -17,12 +17,17 @@ In distributed financial architectures, direct network publishing to message bro
 ### 1.2 Solution Intent
 Establish a resilient **Transactional Outbox Pattern** guaranteeing at-least-once asynchronous event delivery. Persist domain events (`outbox`) atomically within the ledger write transaction, decouple downstream messaging through scheduled batch claiming with `SKIP LOCKED`, and publish to NATS JetStream with deterministic exponential retry backoff and message deduplication.
 
+Crucially, the Transactional Outbox serves strictly as an **External Egress & Audit Boundary** (`I-OUTBOX-002`, `I-STREAM-008`):
+- **External Consumers**: NATS JetStream `events.*` delivers domain events to external systems, audit pipelines, data warehouses, notifications, and downstream microservices.
+- **Intra-Core Consumers**: Intra-process bounded contexts (`savings`, `goals`, `fraud`) do **NOT** subscribe to NATS `events.*`. They consume domain events exclusively in-process via **Spring Modulith** (`@ApplicationModuleListener`) backed by the PostgreSQL `event_publication` registry, eliminating the legacy "NATS Boomerang" anti-pattern.
+
 ---
 
 ## 2. Mathematical Invariants
 
 - **`I-OUTBOX-001` (Atomic Outbox Invariant)**: Domain event persistence MUST occur inside the exact same database transaction boundary as ledger writes:
   $$\text{Tx}_{\text{atomic}} = \{ \text{Update}(\text{accounts}), \, \text{Insert}(\text{ledger}), \, \text{Insert}(\text{outbox}) \}$$
+- **`I-OUTBOX-002` (External Egress Demarcation & Zero Internal Boomerang)**: The `outbox` table and NATS `events.*` stream are strictly an external system egress and audit boundary. Intra-Core capabilities (e.g., `savings`, `fraud`) MUST NOT subscribe to NATS `events.*` and MUST consume domain events via Spring Modulith `@ApplicationModuleListener` backed by the PostgreSQL `event_publication` registry.
 - **`I-CONCURRENCY-002` (Non-Blocking Claiming)**: Outbox polling queries MUST claim batches using `FOR UPDATE SKIP LOCKED` to ensure parallel relay workers never deadlock or block active transactions:
   $$\text{Claimed} = \text{SelectBatch}(\text{now}, \text{limit}) \cap \neg \text{LockedRecords}$$
 - **`I-RETRY-001` (Exponential Backoff Schedule)**: Failed events calculate next execution timestamp deterministically:
@@ -46,6 +51,8 @@ Establish a resilient **Transactional Outbox Pattern** guaranteeing at-least-onc
 - **`REQ-OUT-008` [SHOULD]**: Payload validation failure MUST transition event to `FAILED` with retry schedule rather than dropping the record.
 - **`REQ-OUT-009` [COULD]**: Outbox archiving worker cleaning records in `PROCESSED` status older than 30 days.
 - **`REQ-OUT-010` [WON'T]**: Direct synchronous HTTP or broker publishing on the core transaction path.
+- **`REQ-OUT-011` [MUST]**: NATS `events.*` stream MUST be treated strictly as an external egress and audit log boundary. Internal Core bounded contexts MUST NOT consume from `events.*`.
+- **`REQ-OUT-012` [WON'T]**: Intra-Core event subscription via NATS ("NATS Boomerang" anti-pattern; decommissioned legacy `AbstractEventConsumer` and subclasses).
 
 ---
 
@@ -57,6 +64,7 @@ Establish a resilient **Transactional Outbox Pattern** guaranteeing at-least-onc
 | **Database Locks** | Outbox polling scans `outbox` table periodically | `FOR UPDATE SKIP LOCKED` avoids lock contention with concurrent inserts |
 | **NATS JetStream** | Network blips or broker restarts cause transient errors | Exponential backoff prevents broker hammering; `Nats-Msg-Id` guarantees deduplication |
 | **DLQ Capability** | Exhausted outbox events become permanent failures | `DEAD` records tracked and made accessible for operator analysis |
+| **Modulith Modules** (`savings`, `fraud`) | Core bounded contexts react to domain events in-process | Decoupled from NATS Outbox relay; executed via `@ApplicationModuleListener` and PostgreSQL `event_publication` registry (`I-OUTBOX-002`) |
 
 ---
 
@@ -68,6 +76,7 @@ Establish a resilient **Transactional Outbox Pattern** guaranteeing at-least-onc
 | `REQ-OUT-003` / `006` | `OutboxIT.shouldRetryProcessingLater()` | NATS down $\to$ status `FAILED` + retry backoff | Early polling $\to$ `shouldNotProcessBeforeRetryTime()` |
 | `REQ-OUT-004` (Max Retry) | `OutboxIT.shouldStopRetryingAfterMaxAttempts()` | N/A | Exceeds 10 retries $\to$ status `DEAD` |
 | `REQ-OUT-007` (Dedup) | `OutboxIT.shouldNotDuplicateOutboxEventsForSameOperation()` | Duplicate `operation_id` $\to$ `IdempotencyException` | Replayed request $\to$ exactly 1 outbox record |
+| `REQ-OUT-011` / `012` (Egress Boundary) | `ExternalOutboxIsolationIT` | Listener failure $\to$ Outbox publishes anyway | In-process listener depending on NATS $\to$ `NoInternalEventNatsDependencyTest` |
 
 ---
 
@@ -77,3 +86,4 @@ Establish a resilient **Transactional Outbox Pattern** guaranteeing at-least-onc
 - [x] Batch claim uses PostgreSQL CTE with `SKIP LOCKED` (`OutboxDao.claimBatch`).
 - [x] Relay schedules retries via $2^{\text{retry\_count}}$ exponential backoff (`OutboxEventProcessorTest`).
 - [x] Outbox integration suite passes green with Testcontainers NATS & PostgreSQL (`OutboxIT`).
+- [x] Outbox egress cleanly decoupled from intra-process Modulith event publication (`ExternalOutboxIsolationIT`, `NoInternalEventNatsDependencyTest`).

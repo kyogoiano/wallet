@@ -18,6 +18,7 @@
 | `REQ-OUT-006` | `OutboxIT.shouldNotProcessBeforeRetryTime()` | `TASK-3.3` |
 | `REQ-OUT-007`, `I-DEDUP-001` | `OutboxIT.shouldNotDuplicateOutboxEventsForSameOperation()` | `TASK-4.1` |
 | `REQ-OUT-008` | `OutboxIT.shouldHandleInvalidPayloadGracefully()` | `TASK-3.4` |
+| `REQ-OUT-011`, `REQ-OUT-012`, `I-OUTBOX-002` | `ExternalOutboxIsolationIT`, `NoInternalEventNatsDependencyTest` | `TASK-4.3` |
 
 ---
 
@@ -41,3 +42,4 @@
 ### Phase 4: NATS JetStream Publishing & Deduplication [MUST]
 - [x] `TASK-4.1`: Implement `NatsEventPublisher` with `Nats-Msg-Id` header for server-side deduplication.
 - [x] `TASK-4.2`: Integration test complete lifecycle using Testcontainers PostgreSQL and NATS JetStream (`OutboxIT`).
+- [x] `TASK-4.3`: Demarcate external egress boundary; verify intra-Core listeners do not depend on NATS `events.*` and decommission legacy `AbstractEventConsumer` (`ExternalOutboxIsolationIT`, `NoInternalEventNatsDependencyTest`).

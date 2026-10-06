@@ -107,3 +107,39 @@ Every domain event is published to subject `eventType.getSubject()` with `expect
 Nats-Msg-Id: <eventType.name()>-<aggregateId>
 ```
 If NATS JetStream receives a duplicate message within its configured deduplication window, it responds with an acknowledgement indicating deduplication without storing or propagating duplicate messages.
+
+---
+
+## 6. System Boundaries & Dual Durability Demarcation (`I-OUTBOX-002`)
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Wallet Service (Core JVM)                       │
+│                                                                        │
+│   ┌─────────────────────┐                                              │
+│   │ Ledger Domain Write │                                              │
+│   └──────────┬──────────┘                                              │
+│              │                                                         │
+│     ┌────────┴──────────────────────────┐                              │
+│     ▼ (In-Process Modulith Event)       ▼ (Transactional Outbox Write) │
+│ ┌───────────────────────────┐      ┌───────────────────────────────┐   │
+│ │ event_publication table   │      │ outbox table                  │   │
+│ └────────────┬──────────────┘      └───────────────┬───────────────┘   │
+│              │                                     │ (OutboxRelay)     │
+│              ▼                                     ▼                   │
+│ ┌───────────────────────────┐      ┌───────────────────────────────┐   │
+│ │ @ApplicationModuleListener│      │ NatsEventPublisher            │   │
+│ │ - SavingsEventListener    │      └───────────────┬───────────────┘   │
+│ │ - FraudGraphListener      │                      │                   │
+│ │ - FraudEventListener      │                      │                   │
+│ └───────────────────────────┘                      │                   │
+└────────────────────────────────────────────────────┼───────────────────┘
+                                                     ▼
+                                      ┌───────────────────────────────┐
+                                      │ NATS JetStream (events.*)     │
+                                      │ (External Sinks & Audit ONLY) │
+                                      └───────────────────────────────┘
+```
+
+1. **Intra-Core Consumers**: Listen via Spring Modulith `@ApplicationModuleListener` backed by the PostgreSQL `event_publication` table.
+2. **External Consumers**: Listen via NATS JetStream `events.*` published asynchronously by `OutboxRelay`. Zero intra-Core components subscribe to `events.*` (preventing the legacy "NATS Boomerang" anti-pattern; `AbstractEventConsumer` and subclasses decommissioned).

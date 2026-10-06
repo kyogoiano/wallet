@@ -16,6 +16,7 @@ This reverse-engineered specification formalizes the transactional outbox messag
 3. **Exponential Backoff Retries**: Transient network or broker failures trigger exponential retry delays ($2^{\text{retry\_count} + 1}\text{s}$), preventing broker hammering (`I-RETRY-001`).
 4. **Permanent Dead-Letter Quarantine**: Records exceeding 10 retries are transitioned to `DEAD` status without crashing the relay worker (`I-RETRY-002`).
 5. **NATS JetStream Deduplication**: Events carry `Nats-Msg-Id: <eventType>-<aggregateId>` ensuring duplicate deliveries are dropped cleanly by the broker (`I-DEDUP-001`).
+6. **External Egress Boundary & Zero Internal Boomerang**: The `outbox` table and NATS `events.*` stream are strictly an external system egress and audit boundary (`I-OUTBOX-002`). Intra-Core bounded contexts (`savings`, `goals`, `fraud`) do NOT subscribe to NATS `events.*` and consume events in-process via Spring Modulith (`@ApplicationModuleListener`) backed by the PostgreSQL `event_publication` registry. Unused legacy `AbstractEventConsumer` has been decommissioned.
 
 ---
 
@@ -24,6 +25,7 @@ This reverse-engineered specification formalizes the transactional outbox messag
 | Invariant | Description | Verification Test | Status |
 | :--- | :--- | :--- | :---: |
 | `I-OUTBOX-001` | Atomic Outbox Write Boundary | `OutboxIT.shouldProcessOutboxEvents()` | 🟢 PASS |
+| `I-OUTBOX-002` | External Egress Demarcation & Zero Internal Boomerang | `ExternalOutboxIsolationIT`, `NoInternalEventNatsDependencyTest` | 🟢 PASS |
 | `I-CONCURRENCY-002`| Non-Blocking `SKIP LOCKED` Claiming | `OutboxRelayTest.shouldClaimBatchAndDelegateToEventProcessor()` | 🟢 PASS |
 | `I-RETRY-001` | Deterministic Exponential Backoff | `OutboxEventProcessorTest.shouldMarkFailedWithBackoffOnPublisherException()` | 🟢 PASS |
 | `I-RETRY-002` | Retries Capped at 10 $\to$ DEAD | `OutboxEventProcessorTest.shouldMarkAsDeadWhenRetriesExhausted()` | 🟢 PASS |

@@ -7,6 +7,9 @@ import br.com.wallet.ledger.internal.persistence.WalletOperationsDao;
 import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Service;
 
+import org.springframework.transaction.annotation.Propagation;
+import org.springframework.transaction.annotation.Transactional;
+
 import java.util.Optional;
 import java.util.UUID;
 
@@ -29,11 +32,13 @@ public class OperationStateService implements OperationStateUseCase, OperationQu
         markOperationCompleted(operationId, "tenant-alpha");
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     @Override
     public void markOperationFailed(@NonNull final UUID operationId, final String errorMessage, final String failureType, @NonNull final String tenantId) {
         walletOperationsDao.failOperation(operationId, errorMessage, failureType, tenantId);
     }
 
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
     @Override
     public void markOperationFailed(@NonNull final UUID operationId, final String errorMessage, final String failureType) {
         markOperationFailed(operationId, errorMessage, failureType, "tenant-alpha");

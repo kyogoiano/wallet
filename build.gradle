@@ -86,6 +86,7 @@ subprojects {
 
 	tasks.withType(Test).configureEach {
 		jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
+		systemProperty 'otel.sdk.disabled', 'true'
 		finalizedBy 'jacocoTestReport'
 	}
 
@@ -143,6 +144,8 @@ dependencies {
 	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
 	testImplementation 'org.springframework.modulith:spring-modulith-docs'
 	implementation 'org.springframework.modulith:spring-modulith-events-api'
+	implementation 'org.springframework.modulith:spring-modulith-events-jdbc'
+	implementation 'org.springframework.modulith:spring-modulith-events-jackson'
 
 	// ArchUnit & ASM for Java 27 bytecode support (major version 71)
 	testImplementation "com.tngtech.archunit:archunit:${archunitVersion}"
@@ -161,6 +164,7 @@ tasks.named('test') {
 		excludeTags 'integration-slm'
 	}
 	jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
+	systemProperty 'otel.sdk.disabled', 'true'
 	def snapTmp = new File("${System.getProperty('user.home')}/snap/antigravity-cli/common/tmp")
 	if (snapTmp.isDirectory()) {
 		jvmArgs "-Djava.io.tmpdir=${snapTmp.absolutePath}", "-Djna.tmpdir=${snapTmp.absolutePath}"

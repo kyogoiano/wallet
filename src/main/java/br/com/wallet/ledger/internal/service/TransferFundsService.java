@@ -74,7 +74,7 @@ public class TransferFundsService implements TransferFundsUseCase {
      * @param transfer transfer object
      */
     @Traceable("wallet.transfer")
-    @Transactional(noRollbackFor = TenantMismatchException.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, noRollbackFor = {TenantMismatchException.class, InsufficientFundsException.class})
     @Override
     public void handle(@NonNull final Transfer transfer) {
 
@@ -145,6 +145,7 @@ public class TransferFundsService implements TransferFundsUseCase {
         if (fromBalance.balance().compareTo(transfer.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",
                     transfer.from(), fromBalance, transfer.amount());
+            operationsDao.failOperation(transfer.operationId(), "Insufficient funds", "INSUFFICIENT_FUNDS", expectedTenant);
             throw new InsufficientFundsException();
         }
 

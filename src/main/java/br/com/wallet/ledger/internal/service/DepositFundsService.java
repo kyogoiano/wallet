@@ -51,7 +51,7 @@ public class DepositFundsService implements DepositFundsUseCase {
     }
 
     @Traceable("wallet.deposit")
-    @Transactional(noRollbackFor = TenantMismatchException.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, noRollbackFor = {TenantMismatchException.class, AccountBlockedException.class})
     @Override
     public void handle(@NonNull final Deposit deposit) {
 
@@ -64,6 +64,7 @@ public class DepositFundsService implements DepositFundsUseCase {
                 .orElseThrow(AccountNotFoundException::new);
         if (!account.isActive()) {
             log.warn("Deposit rejected: account is not active. walletId={}, status={}", deposit.walletId(), account.status());
+            operationsDao.failOperation(deposit.operationId(), "Account is not active", "ACCOUNT_BLOCKED", deposit.tenantId());
             throw new AccountBlockedException(deposit.walletId(), account.blockedReason());
         }
 

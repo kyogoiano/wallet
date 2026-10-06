@@ -1,53 +1,56 @@
-# 📐 Architecture Plan: PLAN-000.12 — Modulith Ingress Decentralization & Intra-Core Event Alignment
+# 📐 Architecture Plan: PLAN-000.12 — Intra-Core Bounded Context Event Alignment & Modulith Streaming
 
 - **Associated Spec**: [`../SPEC-000.12-modulith-bounded-context-streaming.md`](file:///.spec/SPEC-000.12-modulith-bounded-context-streaming.md)
-- **Status**: 📝 **Draft**
+- **Status**: 📝 **Draft (Rev. 7 — Aligned with AbstractCommandsConsumer Bounded Contexts)**
 - **Author**: Antigravity Platform Architecture & Messaging Guild
-- **Date**: 2026-10-03
+- **Date**: 2026-10-06
 - **Target Modules**:
-  - `:edge` (`br.com.wallet.edge.ingress`, `br.com.wallet.edge.command`)
-  - `ledger` (`br.com.wallet.ledger.internal.messaging.consumer`)
-  - `fraud` (`br.com.wallet.fraud.internal.listener`)
-  - `infrastructure` (`br.com.wallet.infrastructure.messaging`)
-- **Architectural Scope**: Pure refactoring of ingress command routing and intra-core event propagation; zero new business features.
+  - `ledger` (`br.com.wallet.ledger.internal.listener`, `br.com.wallet.ledger.internal.service`, `br.com.wallet.ledger.api.context`, `br.com.wallet.ledger.api.event`)
+  - `infrastructure` (`br.com.wallet.infrastructure.internal.listener`, `br.com.wallet.infrastructure.rest.controller`, `br.com.wallet.infrastructure.messaging.consumer.business` — decommissioning legacy NATS consumers)
+  - `savings` (`br.com.wallet.savings.internal.listener` — existing baseline)
+  - `fraud` (retained pure risk engine, dependency-free from ledger)
+- **Strictly Out of Scope**: Edge Gateway, `commands.wallet.*`, `CoreCommandConsumer`, external command DLQ, and `OutboxRelayWorker` (remain untouched).
 
 ---
 
 ## 1. Technical Strategy & Architectural Overview
 
-`PLAN-000.12` establishes the **Process Structure** boundary for the Wallet platform, demarcating inter-process communications over NATS JetStream from intra-process events over Spring Modulith:
+`PLAN-000.12` addresses all internal bounded context communication within `wallet-core`, eliminating the NATS boomerang anti-pattern for both intra-process domain events and bounded context commands while preserving Outbox Relay for external egress:
 
 ```mermaid
 flowchart TD
-    subgraph EdgeProcess["wallet-edge (Independent Ingress Process)"]
-        EdgeController["EdgeOperationsController"]
-        RouteMap["CommandRoute Map"]
-        EdgePub["NatsEdgeCommandPublisher"]
-        EdgeController --> RouteMap --> EdgePub
-    end
-
-    subgraph NATS["NATS JetStream (Inter-Process Boundary)"]
-        SubjTransfer["commands.ledger.transfer"]
-        SubjDeposit["commands.ledger.deposit"]
-        SubjWithdraw["commands.ledger.withdraw"]
-        SubjStatus["status.*"]
-        SubjOutbox["events.* (External Egress)"]
+    subgraph IngressBoundary["Ingress Boundary (SPEC-000.11 - Completed & Untouched)"]
+        Edge["wallet-edge"] -->|NATS commands.wallet.*| CoreConsumer["CoreCommandConsumer"]
     end
 
     subgraph CoreProcess["wallet-core (Modular Monolith Process)"]
-        subgraph LedgerModule["br.com.wallet.ledger"]
-            TransferConsumer["TransferCommandConsumer"]
-            DepositConsumer["DepositCommandConsumer"]
-            WithdrawConsumer["WithdrawCommandConsumer"]
-            LedgerTx["Ledger Transaction Boundary"]
+        subgraph RESTControllers["br.com.wallet.infrastructure.rest.controller"]
+            OpCtrl["OperationsController"]
+            WallCtrl["WalletController"]
         end
 
-        subgraph ModulithBus["Spring Modulith Event Bus (In-Process)"]
+        subgraph ModulithCore["Spring Modulith Core + Registry"]
+            EventRegistry["Event Publication Registry (PostgreSQL event_publication)"]
+            CmdTransfer["Transfer"]
+            CmdDeposit["Deposit"]
+            CmdWithdraw["Withdraw"]
+            CmdWallet["Wallet"]
             EvtTransfer["TransferCompletedEvent"]
             EvtFraud["FraudEvent"]
         end
 
-        subgraph FraudModule["br.com.wallet.fraud"]
+        subgraph LedgerModule["br.com.wallet.ledger"]
+            subgraph CommandListeners["br.com.wallet.ledger.internal.listener"]
+                TransferListener["TransferCommandListener (@ApplicationModuleListener)"]
+                DepositListener["DepositCommandListener (@ApplicationModuleListener)"]
+                WithdrawListener["WithdrawCommandListener (@ApplicationModuleListener)"]
+                WalletListener["CreateWalletCommandListener (@ApplicationModuleListener)"]
+            end
+            LedgerTx["Ledger Transaction Boundary"]
+            OutboxTable["outbox Table (PostgreSQL)"]
+        end
+
+        subgraph InfraListeners["br.com.wallet.infrastructure.internal.listener"]
             GraphListener["FraudGraphListener (@ApplicationModuleListener)"]
             TimelineListener["FraudEventListener (@ApplicationModuleListener)"]
         end
@@ -56,131 +59,124 @@ flowchart TD
             SavingsListener["SavingsEventListener (@ApplicationModuleListener)"]
         end
 
-        subgraph OutboxModule["br.com.wallet.ledger.internal.service"]
+        subgraph OutboxModule["br.com.wallet.ledger.internal.service (Untouched)"]
             OutboxRelay["OutboxRelayWorker"]
         end
     end
 
-    EdgePub -->|publish| SubjTransfer
-    EdgePub -->|publish| SubjDeposit
-    EdgePub -->|publish| SubjWithdraw
+    subgraph ExternalNATS["External NATS JetStream (External Egress Only)"]
+        SubjOutbox["events.* (Audit / Data Lake / Webhooks)"]
+    end
 
-    SubjTransfer --> TransferConsumer
-    SubjDeposit --> DepositConsumer
-    SubjWithdraw --> WithdrawConsumer
+    OpCtrl -->|in-process publish| CmdTransfer
+    OpCtrl -->|in-process publish| CmdDeposit
+    OpCtrl -->|in-process publish| CmdWithdraw
+    WallCtrl -->|in-process publish| CmdWallet
 
-    TransferConsumer --> LedgerTx
-    DepositConsumer --> LedgerTx
-    WithdrawConsumer --> LedgerTx
+    CmdTransfer --> TransferListener
+    CmdDeposit --> DepositListener
+    CmdWithdraw --> WithdrawListener
+    CmdWallet --> WalletListener
 
-    LedgerTx -.->|emits| EvtTransfer
-    LedgerTx -.->|writes| OutboxRelay
+    TransferListener -->|executes| LedgerTx
+    DepositListener -->|executes| LedgerTx
+    WithdrawListener -->|executes| LedgerTx
+    WalletListener -->|executes| LedgerTx
+    CoreConsumer -->|executes| LedgerTx
+
+    LedgerTx -->|in-tx publish| EvtTransfer
+    LedgerTx -->|in-tx publish| EvtFraud
+    LedgerTx -->|in-tx write| OutboxTable
 
     EvtTransfer --> GraphListener
     EvtTransfer --> SavingsListener
     EvtFraud --> TimelineListener
 
-    OutboxRelay -->|external egress| SubjOutbox
+    OutboxTable --> OutboxRelay
+    OutboxRelay -->|external egress only| SubjOutbox
 ```
 
-### Core Design Decisions
-1. **Demarcation Rule**: NATS JetStream is strictly reserved for crossing OS process boundaries (Edge $\to$ Core ingress, Core $\to$ Edge status, and Outbox $\to$ External egress).
-2. **Intra-Core Elimination of NATS Boomerang**: `FraudGraphConsumer` and `FraudConsumer` are migrated to native Spring Modulith `@ApplicationModuleListener` listeners reacting directly to in-process domain events, eliminating double serialization, network roundtrips, and broker overhead.
-3. **Decentralized Ingress Consumers**: The monolithic `CoreCommandConsumer` is replaced by dedicated, single-responsibility consumers located inside the owning capability (`br.com.wallet.ledger.internal.messaging.consumer.*`).
-4. **Durable Handoff Preservation**: Ingress consumers continue to obey the normative durable handoff contract from `SPEC-000.11` (`I-TDLQ-009`):
-   $$\text{ACK}(m) \implies \text{DurableHandoff}(m) = \text{committed}$$
+### Core Architectural Decisions (ADRs)
+
+1. **ADR-1: Intra-Core Event & Command Transport via Spring Modulith**:
+   - Intra-Core bounded context communication (`ledger` $\to$ `fraud`, `ledger` $\to$ `savings`, and `rest` $\to$ `ledger` bounded context commands) is handled exclusively via Spring Modulith in-process events (`@ApplicationModuleListener`).
+   - Network hops through NATS for intra-process events and commands are strictly eliminated.
+2. **ADR-2: Event Durability via PostgreSQL Event Publication Registry**:
+   - Event durability inside `wallet-core` is provided by Spring Modulith's **Event Publication Registry** with PostgreSQL persistence (`event_publication` table).
+   - Incomplete publications remain in PostgreSQL and are eligible for republication/recovery according to the Registry lifecycle.
+3. **ADR-3: At-Least-Once Delivery & Event Identity Idempotency (`I-STREAM-003`)**:
+   - Delivery semantics are at-least-once; exactly-once processing MUST NOT be assumed.
+   - Listeners MUST be idempotent based on canonical event identity (`eventId` / `operationId`).
+4. **ADR-4: Dual Durability Demarcation — Registry $\neq$ Outbox (Outbox Relay Untouched)**:
+   - Event Publication Registry guarantees **intra-Core event/command delivery**.
+   - Outbox guarantees **external process/system egress**. `OutboxRelayWorker` is strictly untouched.
+5. **ADR-5: The DLQ Exception for Internal Bounded Context Events & Commands (Registry $\neq$ DLQ)**:
+   - Internal NATS DLQ topics (`commands.dlq.transfer`, `commands.dlq.deposit`, `commands.dlq.withdraw`, `commands.dlq.wallet`) are **explicitly removed**.
+   - Persistent listener failures remain observable as incomplete publications in `event_publication` with diagnostic metadata.
+6. **ADR-6: Behavioral Preservation Guarantee (`I-STREAM-005`)**:
+   - Existing externally observable business semantics MUST be preserved.
+7. **ADR-7: Spring Modulith & Spring Boot Compatibility Evolution Clause (`I-STREAM-006`)**:
+   - Baseline is 2.2.0-M2, revalidated before final Wallet V4 release.
+8. **ADR-8: Migration of Bounded Context Commands (`AbstractCommandsConsumer` Extensions)**:
+   - All extensions of `AbstractCommandsConsumer` (`TransferCommandConsumer`, `DepositCommandConsumer`, `WithdrawCommandConsumer`, `CreateWalletCommandConsumer`) are decommissioned from NATS and replaced with in-process `@ApplicationModuleListener` components in `br.com.wallet.ledger.internal.listener`.
+   - `OperationsController` and `WalletController` publish in-process via `ApplicationEventPublisher`.
 
 ---
 
-## 2. Ingress Command Routing Architecture (Pillar A)
+## 2. Intra-Core Messaging Alignment & Modulith Listeners
 
-### 2.1 Canonical CommandRoute Specification
-Located in `br.com.wallet.edge.command`:
+### 2.1 Bounded Context Commands & Domain Events Flow
 
-```java
-public record CommandRoute(
-        @NonNull CommandType type,
-        @NonNull String capability,
-        @NonNull String subject,
-        @NonNull String durableName
-) {
-    public static final CommandRoute TRANSFER = new CommandRoute(
-            CommandType.TRANSFER, "ledger", "commands.ledger.transfer", "ledger-transfer-consumer");
-    public static final CommandRoute DEPOSIT = new CommandRoute(
-            CommandType.DEPOSIT, "ledger", "commands.ledger.deposit", "ledger-deposit-consumer");
-    public static final CommandRoute WITHDRAW = new CommandRoute(
-            CommandType.WITHDRAW, "ledger", "commands.ledger.withdraw", "ledger-withdraw-consumer");
+| Symbol / Message | Emitting Component | Listener Component | Target Module | Mode | Durability Mechanism |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| `Transfer` | `OperationsController` | `TransferCommandListener` | `ledger` | `@ApplicationModuleListener` | Event Publication Registry |
+| `Deposit` | `OperationsController` | `DepositCommandListener` | `ledger` | `@ApplicationModuleListener` | Event Publication Registry |
+| `Withdraw` | `OperationsController` | `WithdrawCommandListener` | `ledger` | `@ApplicationModuleListener` | Event Publication Registry |
+| `Wallet` | `WalletController` | `CreateWalletCommandListener` | `ledger` | `@ApplicationModuleListener` | Event Publication Registry |
+| `TransferCompletedEvent` | `TransferFundsService` | `FraudGraphListener` | `infrastructure` | `@ApplicationModuleListener` | Event Publication Registry |
+| `TransferCompletedEvent` | `TransferFundsService` | `SavingsEventListener` | `savings` | `@ApplicationModuleListener` | Event Publication Registry |
+| `FraudEvent` | `FraudCheckHelper` | `FraudEventListener` | `infrastructure` | `@ApplicationModuleListener` | Event Publication Registry |
 
-    public static CommandRoute forType(@NonNull CommandType type) {
-        return switch (type) {
-            case TRANSFER -> TRANSFER;
-            case DEPOSIT -> DEPOSIT;
-            case WITHDRAW -> WITHDRAW;
-        };
-    }
-}
-```
+### 2.2 Listener Implementation Details
 
-### 2.2 Decentralized Ingress Consumer Hierarchy
-Located in `br.com.wallet.ledger.internal.messaging.consumer`:
+#### Bounded Context Command Listeners (`br.com.wallet.ledger.internal.listener`)
+- `TransferCommandListener`: Consumes `Transfer`, invokes `TransferFundsUseCase.handle(transfer)`.
+- `DepositCommandListener`: Consumes `Deposit`, invokes `DepositFundsUseCase.handle(deposit)`.
+- `WithdrawCommandListener`: Consumes `Withdraw`, invokes `WithdrawFundsUseCase.handle(withdraw)`.
+- `CreateWalletCommandListener`: Consumes `Wallet`, invokes `CreateWalletUseCase.handle(wallet)`.
 
-```text
-br.com.wallet.ledger.internal.messaging.consumer
-├── AbstractLedgerCommandConsumer (Shared transport security, crypto unwrap, DLQ handoff)
-├── TransferCommandConsumer (Subject: commands.ledger.transfer, Consumer: ledger-transfer-consumer)
-├── DepositCommandConsumer (Subject: commands.ledger.deposit, Consumer: ledger-deposit-consumer)
-└── WithdrawCommandConsumer (Subject: commands.ledger.withdraw, Consumer: ledger-withdraw-consumer)
-```
-
-Each consumer:
-- Extends `AbstractLedgerCommandConsumer` (or injects a shared `CommandIngressSupport` delegate).
-- Validates transport security (`tenant_id`, `principal_id`, `key_id`, `publisher_id`).
-- Unwraps `CryptoEnvelope` via KMS.
-- Dispatches strictly to its own dedicated use case (`TransferFundsUseCase`, `DepositFundsUseCase`, `WithdrawFundsUseCase`).
-- On failure, commits durable DLQ handoff before ACKing NATS (`I-TDLQ-009`).
+#### Domain Event Listeners (`br.com.wallet.infrastructure.internal.listener` & `br.com.wallet.savings.internal.listener`)
+- `FraudGraphListener`: Consumes `TransferCompletedEvent`, projects relational graph (`infrastructure.internal.listener`).
+- `FraudEventListener`: Consumes `FraudEvent`, enriches short-term timeline memory (`infrastructure.internal.listener`).
+- `SavingsEventListener`: Consumes `TransferCompletedEvent` and `DepositCompletedEvent`, executes savings sweep rules (`savings.internal.listener`).
 
 ---
 
-## 3. Intra-Core Event Alignment (Pillar B)
-
-### 3.1 Domain Event Flow
-Within the single JVM process of `wallet-core`:
-
-| Event Symbol | Emitting Module | Listener Symbol | Listening Module | Execution Mode |
-| :--- | :--- | :--- | :--- | :--- |
-| `TransferCompletedEvent` | `br.com.wallet.ledger` | `FraudGraphListener` | `br.com.wallet.fraud` | Async (`@ApplicationModuleListener`) |
-| `TransferCompletedEvent` | `br.com.wallet.ledger` | `SavingsEventListener` | `br.com.wallet.savings` | Async (`@ApplicationModuleListener`) |
-| `FraudEvent` | `br.com.wallet.fraud` | `FraudEventListener` | `br.com.wallet.fraud` | Async (`@ApplicationModuleListener`) |
-
-### 3.2 Removal of NATS Consumers for Internal Events
-The following classes in `br.com.wallet.infrastructure.messaging.consumer` are decommissioned:
-- `FraudGraphConsumer` (previously subscribed to NATS `events.transfer.completed`).
-- `FraudConsumer` (previously subscribed to NATS `events.fraud`).
-- Legacy duplicate consumers under `infrastructure.messaging.consumer.business.*`.
-
-Outbox Relay continues to publish domain events to NATS JetStream, serving purely as an **External Egress Bridge** for off-cluster audit systems, data lakes, or partner integrations.
-
----
-
-## 4. Decommissioning & Cleanup Strategy
+## 3. Decommissioning & Cleanup Strategy
 
 | Target Artifact | Action | Justification |
 | :--- | :--- | :--- |
-| `CoreCommandConsumer` | **Delete** | Replaced by `TransferCommandConsumer`, `DepositCommandConsumer`, `WithdrawCommandConsumer`. |
+| `TransferCommandConsumer` | **Delete** | Replaced by `TransferCommandListener` (`@ApplicationModuleListener`). |
+| `DepositCommandConsumer` | **Delete** | Replaced by `DepositCommandListener` (`@ApplicationModuleListener`). |
+| `WithdrawCommandConsumer` | **Delete** | Replaced by `WithdrawCommandListener` (`@ApplicationModuleListener`). |
+| `CreateWalletCommandConsumer` | **Delete** | Replaced by `CreateWalletCommandListener` (`@ApplicationModuleListener`). |
+| `AbstractCommandsConsumer` | **Delete** | All extensions migrated to Spring Modulith; no longer needed. |
 | `FraudGraphConsumer` | **Delete** | Replaced by `FraudGraphListener` (`@ApplicationModuleListener`). |
 | `FraudConsumer` | **Delete** | Replaced by `FraudEventListener` (`@ApplicationModuleListener`). |
-| `br.com.wallet.infrastructure.messaging.consumer.business.*` | **Delete** | Obsolete legacy consumer shims. |
-| `commands_dlq` Stream Subject Shims | **Clean** | Standardized to `commands.dlq.*`. |
+| Internal DLQ topics (`commands.dlq.*`) | **Delete** | Handled exclusively by PostgreSQL Event Publication Registry. |
+| `OutboxRelayWorker` | **Untouched** | Continues publishing external egress to NATS `events.*`. |
 
 ---
 
-## 5. Architectural Invariants Verification (`I-SDD-003`)
+## 4. Architectural Invariants Verification (`I-SDD-003`)
 
 1. **Spring Modulith DAG Integrity**:
-   - Running `./gradlew test --tests ModulithArchitectureTest` asserts:
-     - `ledger.internal.messaging.consumer` depends only on `ledger` use cases, `dlq.api`, `core`, and `security`.
-     - `fraud.internal.listener` depends only on `fraud` and published domain events.
-     - Zero circular dependencies.
-2. **Bi-directional Equivalence**:
-   - 100% compliance with `I-STREAM-001` through `I-STREAM-008`.
-   - Zero spec drift between `SPEC-000.12`, `PLAN-000.12`, and implementation.
+   - `ModulithArchitectureTest.verifyArchitecture()` asserts zero violations, zero cycles, clean DAG.
+   - `FraudGraphListener` & `FraudEventListener` reside in `infrastructure.internal.listener` to preserve the acyclic dependency structure `infrastructure -> ledger -> fraud -> core` without introducing cycles between `fraud` and `ledger`.
+2. **Negative Architectural Tests**:
+   - `NoInternalEventNatsDependencyTest` asserts zero dependencies on NATS classes in internal listeners.
+3. **Integration Verification**:
+   - `EventPublicationRegistryIT`: in-process publications committed and completed in PostgreSQL.
+   - `EventPublicationRecoveryIT`: failure retention (`completion_date IS NULL`) and idempotent replay.
+   - `LedgerCommandListenersIT`: in-process execution of `Transfer`, `Deposit`, `Withdraw`, `Wallet` commands with PostgreSQL registry tracking.
+   - `ExternalOutboxIsolationIT`: isolated registry vs outbox lifecycles.

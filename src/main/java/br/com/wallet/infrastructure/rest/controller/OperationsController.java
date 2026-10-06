@@ -6,7 +6,6 @@ import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.ledger.api.context.Deposit;
 import br.com.wallet.ledger.api.context.Transfer;
 import br.com.wallet.ledger.api.context.Withdraw;
-import br.com.wallet.infrastructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.infrastructure.rest.api.OperationsApi;
 import br.com.wallet.infrastructure.rest.dto.DepositCommand;
 import br.com.wallet.infrastructure.rest.dto.TransferCommand;
@@ -14,6 +13,7 @@ import br.com.wallet.infrastructure.rest.dto.WithdrawCommand;
 import jakarta.validation.Valid;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,14 +25,14 @@ import java.util.concurrent.CompletableFuture;
 public class OperationsController implements OperationsApi {
 
     private static final Logger log = LoggerFactory.getLogger(OperationsController.class);
-    private final NatsCommandPublisher natsCommandPublisher;
+    private final ApplicationEventPublisher eventPublisher;
     private final FraudCheckHelper fraudCheckHelper;
     private final OperationQueryUseCase operationQueryUseCase;
 
-    public OperationsController(final NatsCommandPublisher natsCommandPublisher,
+    public OperationsController(final ApplicationEventPublisher eventPublisher,
                                 final FraudCheckHelper fraudCheckHelper,
                                 final OperationQueryUseCase operationQueryUseCase) {
-        this.natsCommandPublisher = natsCommandPublisher;
+        this.eventPublisher = eventPublisher;
         this.fraudCheckHelper = fraudCheckHelper;
         this.operationQueryUseCase = operationQueryUseCase;
     }
@@ -61,8 +61,8 @@ public class OperationsController implements OperationsApi {
 
         fraudCheckHelper.performFraudCheck(transfer);
 
-        return natsCommandPublisher.publishAsync("commands.transfer", transfer)
-                .thenAccept(ack -> log.debug("Transfer command ACKed by NATS: seq={}", ack.getSeqno()));
+        eventPublisher.publishEvent(transfer);
+        return CompletableFuture.completedFuture(null);
     }
 
     @PostMapping("/deposit")
@@ -79,8 +79,8 @@ public class OperationsController implements OperationsApi {
 
         fraudCheckHelper.performFraudCheck(deposit);
 
-        return natsCommandPublisher.publishAsync("commands.deposit", deposit)
-                .thenAccept(ack -> log.debug("Deposit command ACKed by NATS: seq={}", ack.getSeqno()));
+        eventPublisher.publishEvent(deposit);
+        return CompletableFuture.completedFuture(null);
     }
 
     @PostMapping("/withdraw")
@@ -97,7 +97,7 @@ public class OperationsController implements OperationsApi {
 
         fraudCheckHelper.performFraudCheck(withdraw);
 
-        return natsCommandPublisher.publishAsync("commands.withdraw", withdraw)
-                .thenAccept(ack -> log.debug("Withdraw command ACKed by NATS: seq={}", ack.getSeqno()));
+        eventPublisher.publishEvent(withdraw);
+        return CompletableFuture.completedFuture(null);
     }
 }

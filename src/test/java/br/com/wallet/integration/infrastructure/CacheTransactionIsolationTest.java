@@ -30,6 +30,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.context.annotation.Import;
 import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.GenericContainer;
@@ -85,6 +86,7 @@ public class CacheTransactionIsolationTest extends DockerProperties {
         AccountDao mockAccountDao = mock(AccountDao.class);
         OutboxDao mockOutboxDao = mock(OutboxDao.class);
         TransferFundsUseCase mockTransferUseCase = mock(TransferFundsUseCase.class);
+        ApplicationEventPublisher mockApplicationEventPublisher = mock(ApplicationEventPublisher.class);
 
         when(mockGate.authorize(any(), any()))
                 .thenReturn(GateAuthorizationResult.allow("ALLOWED"));
@@ -93,8 +95,7 @@ public class CacheTransactionIsolationTest extends DockerProperties {
                 .thenReturn(new FraudResponse(FraudDecision.ALLOW, 0, Collections.emptyList()));
 
         FraudCheckHelper helper = new FraudCheckHelper(
-                mockFraudService, mockOutboxDao, mockAccountDao, Clock.systemUTC(), mockGate
-        );
+                mockFraudService, mockOutboxDao, mockAccountDao, Clock.systemUTC(), mockGate, mockApplicationEventPublisher);
 
         UUID fromWallet = UUID.randomUUID();
         UUID toWallet = UUID.randomUUID();
@@ -121,14 +122,14 @@ public class CacheTransactionIsolationTest extends DockerProperties {
         FraudService mockFraudService = mock(FraudService.class);
         AccountDao mockAccountDao = mock(AccountDao.class);
         OutboxDao mockOutboxDao = mock(OutboxDao.class);
+        ApplicationEventPublisher mockApplicationEventPublisher = mock(ApplicationEventPublisher.class);
 
         // Simulate FraudGate V4 with empty cache -> authorizes through to deterministic rules
         when(mockFraudService.check(any(FraudContext.class)))
                 .thenReturn(new FraudResponse(FraudDecision.BLOCK, 100, List.of(br.com.wallet.fraud.domain.RuleType.GLOBAL_VELOCITY)));
 
         FraudCheckHelper helper = new FraudCheckHelper(
-                mockFraudService, mockOutboxDao, mockAccountDao, Clock.systemUTC(), fraudGate
-        );
+                mockFraudService, mockOutboxDao, mockAccountDao, Clock.systemUTC(), fraudGate,  mockApplicationEventPublisher);
 
         UUID unmaterializedUser = UUID.randomUUID();
         UUID opId = UUID.randomUUID();

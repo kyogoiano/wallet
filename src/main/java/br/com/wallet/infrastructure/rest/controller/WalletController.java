@@ -4,7 +4,6 @@ import br.com.wallet.ledger.api.guard.FraudCheckHelper;
 import br.com.wallet.ledger.api.*;
 import br.com.wallet.ledger.api.domain.Account;
 import br.com.wallet.ledger.api.context.Wallet;
-import br.com.wallet.infrastructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.infrastructure.rest.api.WalletApi;
 import br.com.wallet.infrastructure.rest.dto.*;
 import br.com.wallet.infrastructure.rest.mapper.LedgerMapper;
@@ -12,6 +11,7 @@ import jakarta.validation.Valid;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -28,7 +28,7 @@ import java.util.concurrent.CompletableFuture;
 public class WalletController implements WalletApi {
 
     private static final Logger log = LoggerFactory.getLogger(WalletController.class);
-    private final NatsCommandPublisher natsCommandPublisher;
+    private final ApplicationEventPublisher eventPublisher;
     private final BalanceUseCase balanceUseCase;
     private final CreateWalletUseCase createWalletUseCase;
     private final LedgerUseCase ledgerUseCase;
@@ -36,14 +36,14 @@ public class WalletController implements WalletApi {
     private final AccountUseCase accountUseCase;
     private final FraudCheckHelper fraudCheckHelper;
 
-    public WalletController(final NatsCommandPublisher natsCommandPublisher,
+    public WalletController(final ApplicationEventPublisher eventPublisher,
                             final BalanceUseCase balanceUseCase,
                             final CreateWalletUseCase createWalletUseCase,
                             final LedgerUseCase ledgerUseCase,
                             final ReplayWalletUseCase replayWalletUseCase,
                             final AccountUseCase accountUseCase,
                             final FraudCheckHelper fraudCheckHelper) {
-        this.natsCommandPublisher = natsCommandPublisher;
+        this.eventPublisher = eventPublisher;
         this.balanceUseCase = balanceUseCase;
         this.createWalletUseCase = createWalletUseCase;
         this.ledgerUseCase = ledgerUseCase;
@@ -125,12 +125,11 @@ public class WalletController implements WalletApi {
 
         fraudCheckHelper.performFraudCheck(wallet);
 
-        return natsCommandPublisher.publishAsync("commands.wallet", wallet)
-                .thenApply(ack -> {
-                    log.debug("Create wallet command ACKed by NATS: seq={}", ack.getSeqno());
-                    return ResponseEntity.status(HttpStatus.ACCEPTED)
-                            .body(new CreateWalletResponse(walletId));
-                });
+        eventPublisher.publishEvent(wallet);
+        return CompletableFuture.completedFuture(
+                ResponseEntity.status(HttpStatus.ACCEPTED)
+                        .body(new CreateWalletResponse(walletId))
+        );
     }
 
     @GetMapping("/{walletId}/ledger")

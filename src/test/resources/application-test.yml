@@ -1,8 +1,41 @@
 management:
+  tracing:
+    enabled: false
+  opentelemetry:
+    metrics:
+      export:
+        otlp:
+          enabled: false
+    tracing:
+      export:
+        otlp:
+          enabled: false
+    logging:
+      export:
+        otlp:
+          enabled: false
   otlp:
     metrics:
       export:
         enabled: false
+    tracing:
+      export:
+        enabled: false
+    logging:
+      export:
+        enabled: false
+
+logging:
+  opentelemetry:
+    enabled: false
+
+spring:
+  modulith:
+    events:
+      jdbc-schema-initialization:
+        enabled: false
+      completion-mode: UPDATE
+      republish-outstanding-events-on-restart: false
 
 redis:
   socket:

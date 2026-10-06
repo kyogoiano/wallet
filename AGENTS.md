@@ -73,6 +73,7 @@ To protect the orchestrator's context window from pollution, delegate work acros
 - [`onprem-infrastructure`](file:///.agents/skills/onprem-infrastructure/SKILL.md) — Rancher, SUSE Virtualization (Harvester HCI), vCluster, and HCI add-on orchestration for on-premises Wallet appliances.
 - [`typed-decision-algebra`](file:///.agents/skills/typed-decision-algebra/SKILL.md) — Native Java typed decision algebra, generic question-outcome binding, anti-coercion composition, machine-verifiable evidence hashing, and Five-Gate semantic evaluation protocol.
 - [`financial-cryptographic-security`](file:///.agents/skills/financial-cryptographic-security/SKILL.md) — Application-layer envelope encryption, AEAD with canonical AAD, secure key material lifecycle, replay protection algebra, zero-plaintext journals, telemetry non-emission, and Spring Modulith cryptographic isolation.
+- [`durable-modulith-events`](file:///.agents/skills/durable-modulith-events/SKILL.md) — Spring Modulith Event Publication Registry, PostgreSQL persistence, automatic lifecycle tracking, and in-process crash recovery.
 
 
 ### Workflows ([`.agents/workflows/`](file:///.agents/workflows/))

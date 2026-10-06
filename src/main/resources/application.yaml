@@ -21,6 +21,12 @@ spring:
   sql:
     init:
       mode: always
+  modulith:
+    events:
+      jdbc-schema-initialization:
+        enabled: false
+      completion-mode: UPDATE
+      republish-outstanding-events-on-restart: true
   data:
     redis:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
@@ -59,23 +65,23 @@ management:
     metrics:
       export:
         otlp:
-          endpoint: http://otel-collector:4318/v1/metrics
+          endpoint: ${OTEL_EXPORTER_OTLP_METRICS_ENDPOINT:${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/metrics}
     tracing:
       sampling:
         probability: 1.0 # Use 1.0 para testes, depois volte para 0.1
       export:
         otlp:
-          endpoint: http://otel-collector:4318/v1/traces
+          endpoint: ${OTEL_EXPORTER_OTLP_TRACES_ENDPOINT:${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/traces}
     # Novo no SB4: suporte nativo para logs via OTLP
     logging:
       export:
         otlp:
-          enabled: true
-          endpoint: http://otel-collector:4318/v1/logs
+          enabled: ${OTEL_LOGGING_EXPORT_ENABLED:true}
+          endpoint: ${OTEL_EXPORTER_OTLP_LOGS_ENDPOINT:${OTEL_EXPORTER_OTLP_ENDPOINT:http://localhost:4318}/v1/logs}
 
 logging:
   opentelemetry:
-    enabled: true
+    enabled: ${LOGGING_OPENTELEMETRY_ENABLED:true}
   level:
     root: INFO
     br.com.wallet: DEBUG

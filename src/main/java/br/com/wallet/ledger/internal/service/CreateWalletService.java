@@ -58,7 +58,7 @@ public class CreateWalletService implements CreateWalletUseCase {
      * @param wallet object to be created, where initial balance > 0, and operationId is not null
      */
     @Traceable("wallet.createWithInitialBalance")
-    @Transactional
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW)
     @Override
     public void handle(@NonNull final Wallet wallet) {
         walletOperationsDao.startOperation(wallet.operationId(), wallet.tenantId());

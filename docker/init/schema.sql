@@ -553,4 +553,29 @@ CREATE TABLE IF NOT EXISTS fraud_analyst_reviews (
 CREATE INDEX IF NOT EXISTS idx_fraud_reviews_checkpoint 
     ON fraud_analyst_reviews (checkpoint_id);
 
+-- =========================================================================
+-- Spring Modulith Event Publication Registry Schema (SPEC-000.12, REQ-STRM-004)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS event_publication (
+    id UUID NOT NULL,
+    listener_id TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    serialized_event TEXT NOT NULL,
+    publication_date TIMESTAMP WITH TIME ZONE NOT NULL,
+    completion_date TIMESTAMP WITH TIME ZONE,
+    status TEXT,
+    completion_attempts    INT,
+    last_resubmission_date TIMESTAMP WITH TIME ZONE,
+    PRIMARY KEY (id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_event_publication_incomplete
+    ON event_publication (listener_id, completion_date)
+    WHERE completion_date IS NULL;
+
+CREATE INDEX IF NOT EXISTS event_publication_serialized_event_hash_idx ON event_publication USING hash(serialized_event);
+
+CREATE INDEX IF NOT EXISTS event_publication_by_completion_date_idx 
+    ON event_publication (completion_date);
+
 --TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

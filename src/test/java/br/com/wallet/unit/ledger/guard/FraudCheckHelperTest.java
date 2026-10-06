@@ -20,6 +20,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -47,6 +48,8 @@ class FraudCheckHelperTest {
     private Clock clock;
     @Mock
     private FraudGate fraudGate;
+    @Mock
+    private ApplicationEventPublisher applicationEventPublisher;
 
     private FraudCheckHelper fraudCheckHelper;
 
@@ -58,7 +61,7 @@ class FraudCheckHelperTest {
 
     @BeforeEach
     void setUp() {
-        fraudCheckHelper = new FraudCheckHelper(fraudService, outboxDao, accountDao, clock, fraudGate);
+        fraudCheckHelper = new FraudCheckHelper(fraudService, outboxDao, accountDao, clock, fraudGate, applicationEventPublisher);
         lenient().when(clock.instant()).thenReturn(fixedInstant);
         lenient().when(fraudGate.authorize(any(), any())).thenReturn(GateAuthorizationResult.allow("AUTHORIZED"));
     }

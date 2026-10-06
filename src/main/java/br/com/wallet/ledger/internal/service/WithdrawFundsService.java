@@ -48,7 +48,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
     }
 
     @Traceable("wallet.withdraw")
-    @Transactional(noRollbackFor = TenantMismatchException.class)
+    @Transactional(propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW, noRollbackFor = {TenantMismatchException.class, InsufficientFundsException.class})
     @Override
     public void handle(@NonNull final Withdraw withdraw) {
 
@@ -91,6 +91,7 @@ public class WithdrawFundsService implements WithdrawFundsUseCase {
         if (userBalance.balance().compareTo(withdraw.amount()) < 0) {
             log.warn("Insufficient funds. walletId={}, balance={}, amount={}",
                     withdraw.walletId(), userBalance, withdraw.amount());
+            operationsDao.failOperation(withdraw.operationId(), "Insufficient funds", "INSUFFICIENT_FUNDS", expectedTenant);
             throw new InsufficientFundsException();
         }
 

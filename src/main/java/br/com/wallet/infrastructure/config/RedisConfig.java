@@ -115,9 +115,8 @@ public class RedisConfig {
                         String host = env.getProperty("spring.data.redis.host", "localhost");
                         int port = env.getProperty("spring.data.redis.port", Integer.class, 6379);
                         log.warn("Failed to connect to Unix Domain Socket after 5 attempts. Falling back to TCP at {}:{}", host, port);
-                        client.shutdown();
                         final RedisURI tcpUri = RedisURI.create("redis://" + host + ":" + port);
-                        final RedisClient tcpClient = RedisClient.create(tcpUri);
+                        final RedisClient tcpClient = RedisClient.create(client.getResources(), tcpUri);
                         long commandTimeoutMs = env.getProperty("redis.command.timeout-ms", Long.class, 20L);
                         tcpClient.setOptions(ClientOptions.builder()
                                 .autoReconnect(true)
@@ -125,6 +124,7 @@ public class RedisConfig {
                                 .pingBeforeActivateConnection(true)
                                 .protocolVersion(ProtocolVersion.RESP3)
                                 .replayFilter(cmd -> false)
+                                .socketOptions(SocketOptions.builder().connectTimeout(Duration.ofSeconds(2)).build())
                                 .timeoutOptions(TimeoutOptions.builder().fixedTimeout(Duration.ofMillis(commandTimeoutMs)).build())
                                 .build());
                         return new ManagedRedisConnection(tcpClient);

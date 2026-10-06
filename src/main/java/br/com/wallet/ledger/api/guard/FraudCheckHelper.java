@@ -15,6 +15,7 @@ import br.com.wallet.ledger.internal.persistence.OutboxDao;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 
 import java.time.Clock;
@@ -30,19 +31,22 @@ public class FraudCheckHelper {
     private final AccountDao accountDao;
     private final Clock clock;
     private final FraudGate fraudGate;
+    private final ApplicationEventPublisher publisher;
 
     public FraudCheckHelper(
             final FraudService fraudService,
             final OutboxDao<FraudEvent> outboxDao,
             final AccountDao accountDao,
             final Clock clock,
-            final FraudGate fraudGate
+            final FraudGate fraudGate,
+            final ApplicationEventPublisher publisher
     ) {
         this.fraudService = Objects.requireNonNull(fraudService, "fraudService cannot be null");
         this.outboxDao = Objects.requireNonNull(outboxDao, "outboxDao cannot be null");
         this.accountDao = Objects.requireNonNull(accountDao, "accountDao cannot be null");
         this.clock = Objects.requireNonNull(clock, "clock cannot be null");
         this.fraudGate = Objects.requireNonNull(fraudGate, "fraudGate cannot be null");
+        this.publisher = publisher;
     }
 
     public void performFraudCheck(@NonNull final FraudCheckable operation) {
@@ -84,7 +88,7 @@ public class FraudCheckHelper {
 
         final var fraudResponse = fraudService.check(fraudContext);
 
-        outboxDao.save(new FraudEvent(
+        final FraudEvent fraudEvent = new FraudEvent(
                 fraudContext.userId(),
                 fraudContext.targetUserId(),
                 operation.amount(),
@@ -94,7 +98,11 @@ public class FraudCheckHelper {
                 fraudResponse.riskScore(),
                 fraudResponse.triggeredRules(),
                 tenantId
-        ));
+        );
+        outboxDao.save(fraudEvent);
+        if (publisher != null) {
+            publisher.publishEvent(fraudEvent);
+        }
 
         if (fraudResponse.fraudDecision().equals(FraudDecision.BLOCK)) {
             log.warn("Operation blocked by fraud rules: operationId={}, userId={}", operation.operationId(), operation.sourceUserIdForFraudCheck());

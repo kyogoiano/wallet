@@ -5,13 +5,13 @@ import br.com.wallet.ledger.api.domain.LedgerEntry;
 import br.com.wallet.ledger.api.domain.LedgerType;
 import br.com.wallet.ledger.api.context.Wallet;
 import br.com.wallet.ledger.api.guard.FraudCheckHelper;
-import br.com.wallet.infrastructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.infrastructure.rest.controller.WalletController;
-import io.nats.client.api.PublishAck;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -21,8 +21,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
@@ -39,7 +39,7 @@ class WalletControllerTest {
     MockMvc mockMvc;
 
     @MockitoBean
-    NatsCommandPublisher natsCommandPublisher;
+    ApplicationEventPublisher eventPublisher;
 
     @MockitoBean
     BalanceUseCase balanceUseCase;
@@ -59,10 +59,12 @@ class WalletControllerTest {
     @MockitoBean
     FraudCheckHelper fraudCheckHelper;
 
+    @Autowired
+    WalletController walletController;
+
     @BeforeEach
     void setup() {
-        lenient().when(natsCommandPublisher.publishAsync(anyString(), any()))
-                .thenReturn(CompletableFuture.completedFuture(mock(PublishAck.class)));
+        org.springframework.test.util.ReflectionTestUtils.setField(walletController, "eventPublisher", eventPublisher);
     }
 
     @Test
@@ -84,7 +86,7 @@ class WalletControllerTest {
                 .andExpect(jsonPath("$.walletId").exists());
 
         verify(createWalletUseCase).handle(any(UUID.class), eq(userId));
-        verifyNoInteractions(natsCommandPublisher);
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -110,9 +112,12 @@ class WalletControllerTest {
                 .andExpect(status().isAccepted())
                 .andExpect(jsonPath("$.walletId").exists());
 
-        verify(natsCommandPublisher).publishAsync(eq("commands.wallet"), argThat(cmd ->
-                cmd instanceof Wallet w && w.initialBalance().equals(new BigDecimal("100")) && w.operationId().equals(opId)
-        ));
+        ArgumentCaptor<Object> eventCaptor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(eventCaptor.capture());
+        assertThat(eventCaptor.getValue()).isInstanceOf(Wallet.class);
+        Wallet capturedWallet = (Wallet) eventCaptor.getValue();
+        assertThat(capturedWallet.initialBalance()).isEqualByComparingTo(new BigDecimal("100"));
+        assertThat(capturedWallet.operationId()).isEqualTo(opId);
         verifyNoInteractions(createWalletUseCase);
     }
 

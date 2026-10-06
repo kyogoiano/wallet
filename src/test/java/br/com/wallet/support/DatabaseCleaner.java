@@ -28,6 +28,7 @@ public class DatabaseCleaner {
             "ledger",
             "accounts",
             "outbox",
+            "event_publication",
             "wallet_operations"
     );
 

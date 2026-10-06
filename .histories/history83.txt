@@ -1,0 +1,429 @@
+Sim. Com base no **PLAN-000.12 Rev. 5** que você trouxe, ele incorporou praticamente todas as correções da nossa revisão da SPEC.
+
+Minha avaliação: **a arquitetura está correta, mas eu não liberaria o PLAN para TASKS ainda sem 5 pequenos ajustes técnicos**. E há um ponto importante: o plano introduziu algumas afirmações de comportamento do Spring Modulith que precisamos tratar como **hipóteses a verificar na implementação**, não como fatos já garantidos pela SPEC.
+
+## 1. O que ficou muito bom
+
+A separação de responsabilidades está excelente:
+
+```text
+000.11
+Edge → NATS → CoreCommandConsumer
+          │
+          ▼
+     financial command
+
+
+000.12
+Ledger
+  │
+  ▼
+Spring Modulith
+  │
+  ├── FraudGraphListener
+  ├── FraudEventListener
+  └── SavingsEventListener
+```
+
+E o plano explicitamente preserva o Outbox para egress externo.
+
+Especialmente importantes:
+
+* **ADR-1** elimina NATS interno.
+* **ADR-2** estabelece o Event Publication Registry como mecanismo de durabilidade intra-Core.
+* **ADR-3** fixa at-least-once e rejeita exactly-once.
+* **ADR-4** separa Registry de Outbox.
+* **ADR-5** impede a criação de uma segunda DLQ interna.
+* **ADR-7** já contempla a evolução M2 → GA + Spring Boot compatível.
+
+Isso está muito alinhado com o que decidimos.
+
+---
+
+# 2. Primeiro ajuste: `eventId / operationId` voltou a ficar ambíguo
+
+Na ADR-3 você corrigiu muito bem:
+
+> canonical identity ... (`eventId`). Where domain semantics require command-level deduplication, `operation_id` MAY additionally be used.
+
+Mas depois, em `FraudGraphListener`:
+
+> `eventId` / `operationId`
+
+E no `FraudEventListener` acontece o mesmo.
+
+Isso reintroduz a ambiguidade.
+
+### Eu mudaria para:
+
+```text
+Deduplicates using canonical event identity (eventId).
+operationId MAY be used as an additional domain-level idempotency key where required.
+```
+
+Assim o PLAN fica exatamente coerente com a ADR.
+
+---
+
+# 3. Segundo ajuste: “Once all listeners complete”
+
+Aqui temos uma questão importante.
+
+O plano diz:
+
+> “Once all `@ApplicationModuleListener` handlers complete successfully, the event publication is marked completed...”
+
+Precisamos tomar cuidado com essa formulação.
+
+A semântica que queremos verificar é a da **publicação individual/listener**, não necessariamente assumir uma espécie de:
+
+```text
+Event
+ ├── Fraud ──┐
+ ├── Savings ├── ALL MUST FINISH
+ └── X ──────┘
+```
+
+antes de haver qualquer completion.
+
+Isso depende da implementação/configuração do Modulith.
+
+### Eu escreveria:
+
+> **Each event publication is considered complete only after its associated listener invocation has completed successfully. The exact completion/republication lifecycle MUST be verified against the selected Spring Modulith 2.2.x version.**
+
+Isso evita congelar um detalhe interno do framework no PLAN.
+
+---
+
+# 4. Terceiro ajuste — e este é o mais importante: `AFTER_COMMIT`
+
+No diagrama temos:
+
+```text
+AppPublisher -.->|in-process dispatch AFTER_COMMIT|
+```
+
+
+
+Eu **não deixaria `AFTER_COMMIT` hardcoded no PLAN** sem uma decisão explícita.
+
+Porque estamos justamente tentando preservar a semântica:
+
+```text
+Ledger transaction
+       │
+       ├── domain state
+       └── event publication registry
+```
+
+e precisamos saber exatamente qual comportamento o Spring Modulith 2.2 fornece para:
+
+* `@ApplicationModuleListener`
+* transaction phase
+* publication registry
+* transaction synchronization
+* restart recovery.
+
+A própria linha 86 já usa a formulação mais segura:
+
+> eligible for republication/recovery according to the Registry lifecycle.
+
+Então eu faria o diagrama dizer simplesmente:
+
+```text
+AppPublisher --> Event Publication Registry
+AppPublisher -.-> Modulith event dispatch
+```
+
+E deixaria o **transaction phase como implementação a verificar**, a menos que nossa skill `durable-modulith-events` determine explicitamente `AFTER_COMMIT`.
+
+---
+
+# 5. Quarto ajuste: “100% functionally equivalent”
+
+ADR-6 diz:
+
+> transaction boundaries, idempotency, graph projections, timeline enrichment, and Outbox external egress remain **100% functionally equivalent**.
+
+Para uma refatoração, a intenção está certa.
+
+Mas “100%” é difícil de transformar em acceptance criterion.
+
+Eu prefiro:
+
+> **No intentional behavioral change is introduced. Existing externally observable business semantics MUST be preserved.**
+
+E depois os testes verificam concretamente:
+
+* transaction boundary;
+* idempotency;
+* graph projection;
+* timeline enrichment;
+* outbox behavior;
+* failure semantics.
+
+Isso fica mais testável.
+
+---
+
+# 6. Quinto ajuste: `REQ-STRM-008` precisa desaparecer do PLAN como “DLQ deletion” se não existe no código
+
+O plano diz:
+
+> Internal Event DLQ Mechanisms (`dlq.events.*`) → Delete.
+
+Tudo bem **se esses mecanismos realmente existem**.
+
+Mas se eles já foram removidos ou são apenas parte da arquitetura anterior, a TASK não deveria inventar uma implementação de “delete”.
+
+Precisamos distinguir:
+
+```text
+Código existente:
+    deletar
+```
+
+de:
+
+```text
+Arquitetura/spec antiga:
+    garantir que não exista
+```
+
+Se o código atual ainda tem `dlq.events.*`, então `[MUST] DELETE`.
+
+Se não tem, a tarefa deve ser:
+
+> verify absence of internal event DLQ mechanisms.
+
+Isso é exatamente o tipo de coisa que eu gostaria que o Antigravity verificasse antes de gerar TASKS.
+
+---
+
+# 7. O maior gap atual: falta testar crash/recovery de verdade
+
+Temos:
+
+```text
+EventPublicationRegistryIT
+```
+
+que verifica:
+
+> publication committed to PostgreSQL
+> marked complete upon listener completion.
+
+
+
+Isso é necessário, mas insuficiente.
+
+A arquitetura depende justamente de:
+
+```text
+COMMIT
+  ↓
+Core crash
+  ↓
+incomplete publication
+  ↓
+recovery
+  ↓
+republication
+  ↓
+listener
+```
+
+Então eu adicionaria obrigatoriamente:
+
+### `EventPublicationRecoveryIT`
+
+Testar pelo menos:
+
+**A. Listener failure**
+
+```text
+publish
+→ listener throws
+→ completion_date IS NULL
+→ recovery/republication
+→ success
+→ completion recorded
+```
+
+**B. Crash/restart equivalent**
+
+```text
+publish
+→ publication persisted
+→ process unavailable
+→ restart
+→ publication recovered
+→ listener executes
+```
+
+**C. Idempotent replay**
+
+```text
+event
+→ listener executes
+→ completion not persisted
+→ same event delivered again
+→ no duplicate business effect
+```
+
+Esse terceiro caso é especialmente importante porque é a materialização de:
+
+> at-least-once ≠ exactly-once.
+
+---
+
+# 8. Também falta testar o “não-NATS”
+
+Hoje temos:
+
+> `FraudGraphListenerIT` ... without NATS broker interaction.
+> `FraudEventListenerIT` ... without NATS broker interaction.
+
+Muito bom.
+
+Eu transformaria isso em um **architectural negative test**, porque é uma regra muito importante:
+
+```text
+Internal event
+     │
+     ├── MUST → Modulith
+     │
+     └── MUST NOT → NATS
+```
+
+Por exemplo:
+
+```text
+NoInternalEventNatsDependencyTest
+```
+
+que verifica que os listeners não dependem de:
+
+```text
+NatsConnection
+NatsPublisher
+JetStream
+OutboxRelay
+```
+
+Isso protege a arquitetura contra regressão futura.
+
+---
+
+# 9. E falta um teste para Registry ≠ Outbox
+
+Essa separação é uma decisão arquitetural central do plano.
+
+Eu colocaria uma integração:
+
+```text
+ExternalOutboxIsolationIT
+```
+
+que demonstre:
+
+```text
+TransferCompletedEvent
+    │
+    ├── Modulith → Fraud
+    │
+    └── Outbox → external NATS
+```
+
+e que uma falha em um caminho não seja acidentalmente tratada como o outro.
+
+Não precisa criar uma grande suíte; basta proteger a boundary.
+
+---
+
+# 10. Um ponto que eu questionaria no próprio diagrama
+
+Temos:
+
+```text
+TransferCompletedEvent
+    │
+    ├── FraudGraphListener
+    └── SavingsEventListener
+
+FraudEvent
+    │
+    └── FraudEventListener
+```
+
+Isso está coerente com o plano.
+
+Mas:
+
+> `FraudEvent → FraudEventListener` dentro do mesmo bounded context `fraud`
+
+precisa ser justificado.
+
+Se `FraudEventListener` é apenas uma projeção interna do próprio Fraud, talvez ele nem precise atravessar uma **module boundary** do Modulith.
+
+Isso não significa que esteja errado — pode ser um event-driven internal projection legítimo — mas o PLAN deveria dizer por que ele continua sendo evento em vez de chamada direta.
+
+Eu não mudaria agora sem olhar o código, mas colocaria como **implementation discovery task**.
+
+---
+
+# 11. E eu mudaria o final do PLAN
+
+Hoje temos:
+
+> `100% compliance with I-STREAM-001 through I-STREAM-008`
+
+Só que nossa SPEC Rev. 5 pode acabar adicionando invariants além de 008.
+
+Então não colocaria o número congelado.
+
+Melhor:
+
+> **100% compliance with all ratified `I-STREAM-*` invariants defined by SPEC-000.12 Rev. 5.**
+
+Isso evita quebrar o PLAN cada vez que adicionarmos um invariant antes de congelar a especificação.
+
+---
+
+# Minha proposta para o PLAN Rev. 6
+
+Eu **não reescreveria o documento inteiro**. Faria uma pequena revisão cirúrgica:
+
+### MUST antes de TASKS
+
+1. Remover `AFTER_COMMIT` do diagrama, ou marcar como **to be verified**.
+2. Corrigir `eventId / operationId` nos listener implementation details.
+3. Substituir “100% functionally equivalent” por “no intentional behavioral change”.
+4. Não afirmar detalhes internos do lifecycle do Registry além do que será verificado contra 2.2.x.
+5. Adicionar `EventPublicationRecoveryIT`.
+6. Adicionar teste de **at-least-once / duplicate delivery**.
+7. Adicionar teste arquitetural **No Internal Event → NATS**.
+8. Adicionar teste de isolamento **Registry vs Outbox**.
+9. Determinar se `FraudEventListener` é realmente cross-module ou apenas intra-module.
+10. Trocar `I-STREAM-001 through I-STREAM-008` por **all ratified I-STREAM invariants**.
+
+### E uma decisão importante
+
+Eu **não criaria ainda TASKS para código** antes de verificarmos a `durable-modulith-events` skill e, principalmente, a implementação atual do projeto.
+
+Porque neste momento o PLAN está correto em arquitetura, mas algumas coisas como:
+
+```text
+@ApplicationModuleListener
+event_publication
+completion lifecycle
+restart recovery
+schema
+```
+
+precisam ser confrontadas com **o código real + a skill + Spring Modulith 2.2.0-M2**.
+
+**Então eu classificaria o PLAN atual como `Draft — Architecture Approved / Implementation Preconditions Pending`.**
+
+A próxima etapa ideal é justamente essa: **antes de gerar TASKS, auditar o estado atual do código e da skill `durable-modulith-events` contra este PLAN**, para que as TASKS sejam delta real e não uma lista genérica de implementação.

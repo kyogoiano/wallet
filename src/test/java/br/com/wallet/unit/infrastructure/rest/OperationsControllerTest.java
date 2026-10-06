@@ -1,25 +1,26 @@
 package br.com.wallet.unit.infrastructure.rest;
 
 import br.com.wallet.core.context.OperationOrigin;
+import br.com.wallet.ledger.api.OperationQueryUseCase;
 import br.com.wallet.ledger.api.context.Deposit;
+import br.com.wallet.ledger.api.context.Transfer;
 import br.com.wallet.ledger.api.context.Withdraw;
 import br.com.wallet.ledger.api.guard.FraudCheckHelper;
-import br.com.wallet.infrastructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.infrastructure.rest.controller.OperationsController;
-import io.nats.client.api.PublishAck;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
-import java.util.Objects;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -32,20 +33,21 @@ class OperationsControllerTest {
     @Autowired
     MockMvc mockMvc;
 
+    @Autowired
+    OperationsController operationsController;
+
     @MockitoBean
-    NatsCommandPublisher natsCommandPublisher;
+    ApplicationEventPublisher eventPublisher;
 
     @MockitoBean
     FraudCheckHelper fraudCheckHelper;
 
     @MockitoBean
-    br.com.wallet.ledger.api.OperationQueryUseCase operationQueryUseCase;
+    OperationQueryUseCase operationQueryUseCase;
 
     @BeforeEach
     void setup() {
-        // By default, make the mock return a completed future to avoid NullPointerException in controller
-        lenient().when(natsCommandPublisher.publishAsync(anyString(), any()))
-                .thenReturn(CompletableFuture.completedFuture(mock(PublishAck.class)));
+        org.springframework.test.util.ReflectionTestUtils.setField(operationsController, "eventPublisher", eventPublisher);
     }
 
     @Test
@@ -65,7 +67,9 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isAccepted());
 
-        verify(natsCommandPublisher).publishAsync(anyString(), any());
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue()).isInstanceOf(Transfer.class);
     }
 
     @Test
@@ -85,7 +89,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isBadRequest());
 
-        verifyNoInteractions(natsCommandPublisher);
+        verifyNoInteractions(eventPublisher);
     }
 
     @Test
@@ -129,12 +133,15 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isAccepted());
 
-        verify(natsCommandPublisher).publishAsync(eq("commands.deposit"), argThat(cmd ->
-                cmd instanceof Deposit(
-                        UUID id, UUID userId, BigDecimal amount, UUID operationId, OperationOrigin origin, String tenantId
-                ) && id.equals(walletId) && Objects.requireNonNull(userId).equals(user) && amount.equals(new BigDecimal("100"))
-                        && operationId.equals(opId) && origin.equals(OperationOrigin.USER)
-        ));
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue()).isInstanceOf(Deposit.class);
+        Deposit deposit = (Deposit) captor.getValue();
+        assertThat(deposit.walletId()).isEqualTo(walletId);
+        assertThat(deposit.userId()).isEqualTo(user);
+        assertThat(deposit.amount()).isEqualByComparingTo(new BigDecimal("100"));
+        assertThat(deposit.operationId()).isEqualTo(opId);
+        assertThat(deposit.origin()).isEqualTo(OperationOrigin.USER);
     }
 
     @Test
@@ -192,14 +199,13 @@ class OperationsControllerTest {
     }
 
     @Test
-    void shouldReturn500WhenNatsInitializationFails() throws Exception {
+    void shouldReturn500WhenPublishFails() throws Exception {
 
         UUID walletId = UUID.randomUUID();
         UUID opId = UUID.randomUUID();
 
-        // Simulate a failure before returning the future (e.g., connection issue)
-        when(natsCommandPublisher.publishAsync(anyString(), any()))
-                .thenThrow(new RuntimeException("NATS Down"));
+        doThrow(new RuntimeException("Publisher error"))
+                .when(eventPublisher).publishEvent(any(Object.class));
 
         var body = """
                     {
@@ -234,8 +240,13 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isAccepted());
 
-        verify(natsCommandPublisher).publishAsync(eq("commands.withdraw"), argThat(cmd ->
-                cmd instanceof Withdraw));
+        ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+        verify(eventPublisher).publishEvent(captor.capture());
+        assertThat(captor.getValue()).isInstanceOf(Withdraw.class);
+        Withdraw withdraw = (Withdraw) captor.getValue();
+        assertThat(withdraw.walletId()).isEqualTo(walletId);
+        assertThat(withdraw.amount()).isEqualByComparingTo(new BigDecimal("50"));
+        assertThat(withdraw.operationId()).isEqualTo(opId);
     }
 
     @Test

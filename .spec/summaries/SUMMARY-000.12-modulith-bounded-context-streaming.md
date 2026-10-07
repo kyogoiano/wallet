@@ -113,42 +113,65 @@ Execute the following commands on the host environment:
 
 Inspect the `event_publication` table to verify event registration and listener completion:
 
-```sql
+```bash
+docker exec -i wallet-appliance-postgres psql -U wallet -d wallet <<'EOF'
 -- 1. Verify Completed Publications
-SELECT id, listener_id, event_type, publication_date, completion_date
+SELECT *
 FROM event_publication
 WHERE completion_date IS NOT NULL
 ORDER BY publication_date DESC
 LIMIT 10;
+EOF
+``` 
 
+```bash
+docker exec -i wallet-appliance-postgres psql -U wallet -d wallet <<'EOF'
 -- 2. Verify Incomplete Publications (Awaiting Recovery)
-SELECT id, listener_id, event_type, publication_date, serialized_event
+SELECT *
 FROM event_publication
 WHERE completion_date IS NULL
 ORDER BY publication_date ASC;
+EOF
+``` 
 
+```bash
+docker exec -i wallet-appliance-postgres psql -U wallet -d wallet <<'EOF'
 -- 3. Assert Dual Durability: Verify Both Registry and Outbox Records for an Operation
 SELECT ep.event_type AS modulith_event,
        ep.completion_date AS modulith_completed,
        o.status AS outbox_status,
-       o.topic AS outbox_topic
+       o.aggregate_type AS aggregate_type,
+       o.partition_key as partition_key,
+       o.retry_count as retry_count,
+       o.processed_at as processed_at,
+       o.created_at as created_at
 FROM event_publication ep
 JOIN outbox o ON o.aggregate_id::text = (
     SELECT (json_extract_path_text(ep.serialized_event::json, 'operationId'))
 )
-WHERE ep.serialized_event LIKE '%<operation-id>%';
+--WHERE ep.serialized_event LIKE '%<operation-id>%';
+EOF
 ```
 
 ### 3.3 Redis Verification Commands (DragonflyDB)
 
 Verify short-term memory timeline enrichment written by `FraudEventListener`:
+```bash
+docker exec -i wallet-appliance-postgres psql -U wallet -d wallet -c "
+SELECT id, user_id, status, blocked_reason 
+FROM accounts;
+--WHERE user_id = 'u2000000-0000-0000-0000-000000000001';"
+```
 
 ```bash
 # 1. Inspect Transaction Timeline for a User
-redis-cli -h localhost -p 6379 ZRANGE "user:tenant-alpha:<user-id>:tx_timeline" 0 -1 WITHSCORES
+docker exec -i wallet-appliance-dragonfly redis-cli -h localhost -p 6379 ZRANGE "user:tenant-alpha:b0000000-0000-0000-0000-000000000001:tx_timeline" 0 -1 WITHSCORES
+```
+
 
 # 2. Verify Review Counter and Risk Score Projections
-redis-cli -h localhost -p 6379 MGET "user:tenant-alpha:<user-id>:review_count" "user:tenant-alpha:<user-id>:risk_score" "user:tenant-alpha:<user-id>:blocked"
+```bash
+docker exec -i wallet-appliance-dragonfly redis-cli -h localhost -p 6379 MGET "user:tenant-alpha:b0000000-0000-0000-0000-000000000001:review_count" "user:tenant-alpha:b0000000-0000-0000-0000-000000000001:risk_score" "user:tenant-alpha:b0000000-0000-0000-0000-000000000001:blocked"
 ```
 
 ---

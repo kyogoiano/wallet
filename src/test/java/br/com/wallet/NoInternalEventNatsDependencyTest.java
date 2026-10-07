@@ -40,4 +40,18 @@ class NoInternalEventNatsDependencyTest {
 
         rule.check(allProductionClasses);
     }
+
+    @Test
+    @DisplayName("REQ-INTEL-007, I-INTEL-002: Intelligence module must have zero dependencies on NATS or Outbox Relay")
+    void intelligenceModuleMustNotDependOnNatsOrOutboxRelay() {
+        ArchRule rule = noClasses()
+                .that().resideInAPackage("br.com.wallet.intelligence..")
+                .should().dependOnClassesThat().resideInAnyPackage(
+                        "io.nats..",
+                        "br.com.wallet.infrastructure.messaging..",
+                        "br.com.wallet.ledger.internal.outbox.."
+                );
+
+        rule.check(allProductionClasses);
+    }
 }

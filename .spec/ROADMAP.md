@@ -527,13 +527,20 @@ gantt
 ---
 
 ### 🔹 Phase 3: Subscription & Spending Intelligence
-**Spec Identifier**: `SPEC-003-spending-and-subscription-intelligence`  
+**Bounded Context**: `Spending Intelligence, Recurring Patterns & Cashflow Forecasting (br.com.wallet.intelligence)`  
 **Status**: ⚪ Planned (Next Milestone)  
-**Core Abstraction**: `Spending Intelligence, Recurring Patterns & Cashflow Forecasting (br.com.wallet.intelligence)`
 
-- **Intent**: Asynchronously observe financial transactions, detect recurring subscriptions and obligations (periodicity, variance, merchant clustering), forecast forward liquidity liabilities (7/14/30-day calendar projections), automatically feed inferred `monthlyIncome` and `monthlyCommittedExpenses` into `CashflowProfile` (`br.com.wallet.goals`), and enrich behavioral vectors (`fraud_behavioral_profiles`) without direct ledger mutation.
-- **Spec Kit Artifacts**:
-  - `.spec/SPEC-003-spending-and-subscription-intelligence.md` (Pending Specification)
+- **Intent**: Asynchronously observe financial transactions, detect recurring subscriptions and obligations (periodicity, variance, merchant clustering), forecast forward liquidity liabilities (7/14/30-day calendar projections), automatically feed inferred `monthlyIncome` and `monthlyCommittedExpenses` into `CashflowProfile` (`br.com.wallet.goals`), and enrich behavioral vectors without direct ledger mutation.
+- **Milestone Breakdown & Spec Kit Artifacts**:
+  - **Phase 3.0 — Module Scaffolding & Macro Architecture**:
+    - [`.spec/SPEC-003-spending-and-subscription-intelligence.md`](file:///.spec/SPEC-003-spending-and-subscription-intelligence.md) (Ratified)
+    - Sets up `br.com.wallet.intelligence` Spring Modulith module boundaries, architecture verification, event listener idempotency, analytical domain models, and PostgreSQL persistence baseline.
+  - **Phase 3.1 — Recurring Pattern & Subscription Detection Slice**:
+    - [`.spec/SPEC-003.1-recurring-pattern-and-subscription-detection.md`](file:///.spec/SPEC-003.1-recurring-pattern-and-subscription-detection.md) (Ratified)
+    - Implements deterministic pattern engine, cadence intervals, cycle counting, confidence scoring, price spike detection, and `GET /api/v1/intelligence/subscriptions/{walletId}`.
+  - **Phase 3.2 — Forward Cashflow Forecasting & Goals Integration Slice**:
+    - [`.spec/SPEC-003.2-cashflow-forecasting-and-goals-integration.md`](file:///.spec/SPEC-003.2-cashflow-forecasting-and-goals-integration.md) (Ratified)
+    - Implements 7/14/30-day forward liability calendars, deficit warnings, semantic installment partitioning, and asynchronous `CashflowProfile` sync to `br.com.wallet.goals`.
 
 ---
 

@@ -578,4 +578,13 @@ CREATE INDEX IF NOT EXISTS event_publication_serialized_event_hash_idx ON event_
 CREATE INDEX IF NOT EXISTS event_publication_by_completion_date_idx 
     ON event_publication (completion_date);
 
+-- =========================================================================
+-- Spending & Subscription Intelligence Schema Conventions (SPEC-003, REQ-INTEL-006)
+-- Foundation migration conventions mandating tenant_id VARCHAR(64) NOT NULL
+-- and composite tenant indexes for all downstream analytical capability tables.
+-- Concrete capability tables:
+-- - SPEC-003.1: subscriptions (subscription_id, tenant_id, wallet_id, counterparty_id, ...)
+-- - SPEC-003.2: cashflow_forecasts (forecast_id, tenant_id, wallet_id, as_of, ...)
+-- =========================================================================
+
 --TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

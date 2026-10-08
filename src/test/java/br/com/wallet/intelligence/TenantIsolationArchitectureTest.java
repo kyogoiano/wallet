@@ -25,7 +25,11 @@ class TenantIsolationArchitectureTest {
     @Test
     @DisplayName("I-INTEL-010: Intelligence listeners must preserve strict multi-tenant partitioning across separate tenants")
     void listenerMustPreserveTenantPartitioning() {
-        var listener = new SpendingEventListener();
+        var dao = org.mockito.Mockito.mock(br.com.wallet.intelligence.internal.persistence.SubscriptionDao.class);
+        org.mockito.Mockito.when(dao.tryRecordProcessedEvent(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        var engine = new br.com.wallet.intelligence.internal.engine.RecurrencePatternEngine();
+        var publisher = org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class);
+        var listener = new SpendingEventListener(dao, engine, publisher);
 
         // Process tenant-A event
         var eventA = new TransferCompletedEvent(

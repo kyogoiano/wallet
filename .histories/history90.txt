@@ -1,0 +1,151 @@
+Sim. Com essa versão, eu consideraria o **PLAN-003.1 arquiteturalmente fechado e pronto para derivarmos o TASKS-003.1**.
+
+O ponto mais importante é que o PLAN agora está coerente com as decisões que fechamos na revisão da SPEC:
+
+* **Determinístico é a autoridade** para recorrência, cadência, confiança, lifecycle e price spike.
+* **Semantic Decision é apenas enriquecimento**, sem autoridade sobre `ACTIVE`.
+* `DecisionUnavailable<T>` e `DecisionAnswer(UNKNOWN)` estão semanticamente separados.
+* `eventId`/`operationId` não estão sendo usados para inventar uma nova semântica dentro do PLAN.
+* `tenantId` está presente na série e no acesso REST é derivado do contexto autenticado.
+* `PRICE_SPIKE_DETECTED` foi corretamente separado de `SubscriptionStatus`.
+* O baseline de preço exclui explicitamente `A_new`.
+* `N` está definido como número de **observações**, não intervalos.
+* Desvio padrão está explicitamente definido como **populacional**.
+* `nextExpectedAt` está deterministicamente definido.
+* Cancelamento é restrito a `ACTIVE + non-IRREGULAR`.
+* O módulo continua sem NATS e sem mutação do ledger.
+* A topologia não está antecipando a implementação dos evaluators do `000.8.1`.
+
+### Há apenas 3 pequenos pontos que eu fecharia antes dos TASKS
+
+Não vejo nenhum deles como motivo para reabrir o PLAN, mas são bons candidatos a serem explicitados nos TASKS.
+
+**1. `WithdrawCompletedEvent`**
+
+O PLAN resolve perfeitamente `TransferCompletedEvent`:
+
+> `walletId = from`, `counterpartyId = to`
+
+Mas ainda precisamos garantir no TASKS como `WithdrawCompletedEvent` fornece o `counterpartyId`.
+
+Isso é particularmente importante porque a SPEC já estabeleceu que **não existe série sem identidade canônica de contraparte**.
+
+Eu colocaria uma tarefa explícita:
+
+```text
+[MUST] Define and implement the canonical outflow mapping for
+WithdrawCompletedEvent. Events without a resolvable stable counterpartyId
+MUST NOT enter subscription clustering.
+```
+
+Sem criar novo requisito — isso é implementação de `I-SUB-011`.
+
+---
+
+**2. `observed_cycles`**
+
+Existe uma pequena ambiguidade entre:
+
+```text
+N = number of qualifying observations
+```
+
+e o campo:
+
+```sql
+observed_cycles INT
+```
+
+Pelo modelo atual, eu interpretaria:
+
+```text
+observed_cycles = N
+```
+
+ou seja:
+
+* 1ª observação → `1`
+* 2ª → `2`
+* 3ª → `3`
+* ...
+
+Isso deve ser explicitamente testado, porque "cycles" matematicamente poderia ser interpretado como `N - 1` intervalos.
+
+Eu manteria **N = observed_cycles**, porque está alinhado com a fórmula de confidence:
+
+```text
+Confidence = N / 3 × ...
+```
+
+---
+
+**3. Reactivation**
+
+O PLAN diz:
+
+> cancelled series → CANDIDATE for re-verification
+
+Isso está correto, mas o TASKS precisa definir se a nova observação:
+
+```text
+CANCELLED_INFERRED
+        ↓
+new observation
+        ↓
+CANDIDATE
+```
+
+**recalcula imediatamente toda a série histórica**, ou se começa uma nova janela de observação.
+
+Minha leitura do PLAN atual é **recalcular a série histórica existente**, porque a série é definida por `(tenantId, walletId, counterpartyId)` e não existe nenhuma regra de reset de histórico.
+
+Eu manteria assim, mas transformaria em teste de comportamento.
+
+---
+
+## O mais importante: o PLAN já está suficientemente fechado para TASKS
+
+Eu não adicionaria mais arquitetura agora.
+
+A sequência correta passa a ser:
+
+```text
+SPEC-003
+    │
+    └── SPEC-003.1
+          │
+          └── PLAN-003.1  ← estamos aqui
+                │
+                ▼
+          TASKS-003.1
+                │
+                ├── [MUST] domain/contracts
+                ├── [MUST] event observation
+                ├── [MUST] recurrence engine
+                ├── [MUST] persistence
+                ├── [MUST] price spike
+                ├── [MUST] tenant isolation
+                ├── [MUST] REST
+                └── [MUST] integration/architecture tests
+                         │
+                         ▼
+                    implementation
+```
+
+E eu manteria a disciplina que estamos usando no restante do V4:
+
+> **Nenhum `[SHOULD]` ou `[COULD]` começa antes de todos os `[MUST]` estarem verdes.**
+
+Também evitaria colocar no TASKS qualquer implementação concreta de ONNX/Ollama. O máximo necessário aqui é a **seam/interface para `DecisionQuestion<SubscriptionClassification>`**; a implementação dos evaluators continua pertencendo ao `SPEC-000.8.1`.
+
+### Veredito
+
+**PLAN-003.1: ✅ Approved / Ready for Tasks**
+
+Não vejo mais nenhum conflito arquitetural relevante entre:
+
+`SPEC-003 → SPEC-003.1 → PLAN-003 → PLAN-003.1 → 000.8.1 → 000.12`.
+
+Os três pontos acima são **fechamentos de implementação/teste**, não mudanças de arquitetura.
+
+O próximo passo natural é gerar o **TASKS-003.1**, preservando exatamente os `REQ-*`, `I-*` e `I-TDD-*` existentes e separando rigorosamente `[MUST]` de `[SHOULD]/[COULD]`.

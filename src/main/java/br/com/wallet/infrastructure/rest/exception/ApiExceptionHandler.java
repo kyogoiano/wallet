@@ -39,6 +39,13 @@ public class ApiExceptionHandler {
                 .body(new ApiError(ErrorCode.BAD_REQUEST, ex.getMessage()));
     }
 
+    @ExceptionHandler(br.com.wallet.core.exceptions.TenantContextMissingException.class)
+    public ResponseEntity<ApiError> handleTenantContextMissing(br.com.wallet.core.exceptions.TenantContextMissingException ex) {
+        log.warn("Tenant context missing: {}", ex.getMessage());
+        return ResponseEntity.badRequest()
+                .body(new ApiError(ErrorCode.BAD_REQUEST, ex.getMessage()));
+    }
+
     @ExceptionHandler(java.util.NoSuchElementException.class)
     public ResponseEntity<ApiError> handleNotFound(java.util.NoSuchElementException ex) {
         log.warn("Resource not found: {}", ex.getMessage());

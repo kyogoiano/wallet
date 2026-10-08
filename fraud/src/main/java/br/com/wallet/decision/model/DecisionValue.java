@@ -5,5 +5,5 @@ package br.com.wallet.decision.model;
  * Permits only deterministic, validated domain decision types.
  */
 public sealed interface DecisionValue
-    permits BooleanDecision, ScoreDecision, CategoryDecision, TextDecision, MultiSelectDecision {
+    permits BooleanDecision, ScoreDecision, CategoryDecision, TextDecision, MultiSelectDecision, SubscriptionClassification {
 }

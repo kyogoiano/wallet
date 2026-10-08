@@ -1,0 +1,366 @@
+Sim. Revendo **TASKS-003.1 contra o PLAN-003.1 que você acabou de fornecer**, eu considero a decomposição muito boa e, em princípio, **executável**. Mas antes de mandar o Antigravity executar, há alguns pontos que eu corrigiria porque podem gerar implementação incorreta mesmo com os requisitos aparentemente cobertos.
+
+## Veredito
+
+**TASKS-003.1: 🟡 quase Ready for Execution**
+
+A estrutura TDD está boa, a rastreabilidade está boa e os `[MUST]` estão claramente separados dos `[SHOULD]`.
+
+Eu faria **5 ajustes antes da execução**.
+
+---
+
+## 1. 🔴 `TASK-3.1.9` precisa definir a origem do `WithdrawCompletedEvent`
+
+Este é o principal ponto que ainda ficou parcialmente aberto.
+
+A task diz:
+
+> `WithdrawCompletedEvent without resolvable external counterparty is discarded`
+
+Isso é correto, mas não define **como** determinar o `counterpartyId` quando ele existe.
+
+Para `TransferCompletedEvent`, temos:
+
+```text
+walletId       = from
+counterpartyId = to
+```
+
+Para `WithdrawCompletedEvent`, o TASKS deveria exigir explicitamente que o listener use o **campo/contrato canônico existente** do evento, e não faça parsing de descriptor, nome, texto etc.
+
+Eu mudaria a task para algo conceitualmente assim:
+
+```text
+WithdrawCompletedEvent MUST enter clustering only when its canonical
+external counterparty identity is present/resolvable according to the
+existing event contract. No free-form descriptor may be promoted to
+counterpartyId inside SPEC-003.1.
+```
+
+Isso evita que o Antigravity invente uma normalização própria.
+
+**Não criaria novo REQ.** Continua sendo `I-SUB-011`.
+
+---
+
+## 2. 🔴 `TASK-3.1.10` está misturando ingestão, engine e persistência
+
+Hoje:
+
+> inject `RecurrencePatternEngine` and `SubscriptionDao`, persisting updated subscription state...
+
+Isso pode resultar em um `SpendingEventListener` fazendo:
+
+```text
+event
+ ↓
+filter
+ ↓
+dedupe
+ ↓
+cluster
+ ↓
+calculate statistics
+ ↓
+persist
+```
+
+e virar justamente o tipo de orchestration class que queremos evitar.
+
+Eu deixaria a responsabilidade assim:
+
+```text
+SpendingEventListener
+    ↓
+qualify / map observation
+    ↓
+RecurrencePatternEngine
+    ↓
+SubscriptionProjection / result
+    ↓
+SubscriptionDao
+```
+
+O listener **não deve conter matemática nem lifecycle logic**.
+
+A task precisa dizer isso explicitamente.
+
+---
+
+## 3. 🔴 `eventId` deduplication precisa de persistência durable
+
+Esse é o ponto mais importante de consistência.
+
+A task diz:
+
+> Idempotent deduplication via canonical `eventId`
+
+Mas o DDL de `subscriptions` **não possui eventId processado**.
+
+Se o listener fizer algo como:
+
+```java
+Set<UUID> processedEvents
+```
+
+isso falha em restart.
+
+E o `ApplicationModuleListener` trabalha em cenário de entrega **at-least-once**, então:
+
+```text
+event
+  ↓
+persist subscription
+  ↓
+process crashes
+  ↓
+event redelivered
+  ↓
+N incrementa novamente
+```
+
+é exatamente o bug que `I-SUB-008` pretende evitar.
+
+### Eu colocaria isso como MUST antes da implementação
+
+Precisamos de uma decisão concreta sobre o mecanismo de dedupe.
+
+Por exemplo, uma tabela interna:
+
+```text
+intelligence_event_processing
+-----------------------------
+event_id
+tenant_id
+processed_at
+```
+
+com:
+
+```sql
+UNIQUE (event_id)
+```
+
+ou equivalente integrado à estratégia de persistência.
+
+**Não estou dizendo que essa tabela é obrigatoriamente a solução** — o ponto é que o TASKS precisa exigir **durable idempotency**, não apenas dedupe em memória.
+
+Isso é especialmente importante porque o PLAN-003 já estabeleceu:
+
+> eventId primary, operationId business-level dedupe.
+
+---
+
+## 4. 🟡 `TASK-3.1.13` deveria testar o evento de price spike de forma explícita
+
+A task diz:
+
+> publishes event
+
+Mas a arquitetura tem:
+
+```text
+SubscriptionPriceSpikeEvent
+```
+
+e o PLAN diz explicitamente:
+
+```text
+emit SubscriptionPriceSpikeEvent
+```
+
+Eu faria o teste verificar pelo menos:
+
+```text
+event emitted
+eventId preserved/canonical
+tenantId preserved
+walletId preserved
+counterpartyId preserved
+previous/baseline amount
+new amount
+```
+
+**Não inventaria os campos do evento agora** se eles não estiverem na SPEC/PLAN.
+
+Mas o TASKS deveria exigir que o evento publicado seja **semanticamente verificável**, e não apenas que algum `ApplicationEventPublisher.publishEvent()` tenha sido chamado.
+
+---
+
+## 5. 🟡 `TASK-3.1.16` está correta, mas o "full test suite" deveria vir depois da implementação
+
+Não é um erro grave.
+
+A sequência atual:
+
+```text
+MUST
+...
+TASK-3.1.16
+Run architecture + full suite + audit + summary
+```
+
+está correta como **gate final**.
+
+Só reforçaria que:
+
+```text
+TASK-3.1.16
+```
+
+não é uma task de implementação.
+
+É um:
+
+> **Final Convergence Gate**
+
+Isso ajuda o agente a não interpretar `SUMMARY` como algo que precisa ser produzido antes dos testes finais.
+
+---
+
+# Um detalhe importante: `TASK-3.1.1`
+
+Eu também faria uma pequena correção de arquitetura aqui.
+
+A task diz:
+
+> Create API models ... `SubscriptionPriceSpikeEvent`
+
+Mas `SubscriptionPriceSpikeEvent` é um **domain event**, enquanto:
+
+```text
+SubscriptionResponse
+```
+
+é DTO REST.
+
+Colocar ambos em:
+
+```text
+br.com.wallet.intelligence.api
+```
+
+não é necessariamente errado, mas eu manteria a organização que o PLAN já estabeleceu:
+
+```text
+api
+├── dto
+│   └── SubscriptionResponse
+├── event
+│   └── SubscriptionPriceSpikeEvent
+└── model
+    ├── Cadence
+    ├── PriceState
+    ├── SubscriptionStatus
+    └── VarianceType
+```
+
+Ou seja, **não deixar o agente nivelar tudo no mesmo package**.
+
+O próprio PLAN já fornece a topologia correta.
+
+---
+
+# O que está particularmente bom
+
+### Matemática
+
+Está muito bem especificada.
+
+Especialmente estes testes:
+
+```text
+N=3, CV=0       → confidence 1.00 → ACTIVE
+N=3, CV=0.30    → confidence 0.70 → ACTIVE
+N=3, CV>0.30    → confidence <.70 → CANDIDATE
+```
+
+Isso elimina uma enorme quantidade de interpretação subjetiva.
+
+### Price spike
+
+Também ficou excelente:
+
+```text
+historical observations
+        ↓
+      μ_A(t)
+        ↓
+A_new >= μ_A(t) * 1.05
+        ↓
+PRICE_SPIKE_DETECTED
+        ↓
+ACTIVE continua ACTIVE
+```
+
+E o teste:
+
+> `$A_new included in baseline → test assertion fails`
+
+é exatamente o tipo de teste anti-regressão que queremos.
+
+### Tenant isolation
+
+Também está corretamente espalhado entre:
+
+```text
+event
+ ↓
+series key
+ ↓
+DAO
+ ↓
+REST
+```
+
+em vez de tratar tenant apenas como filtro SQL.
+
+---
+
+# Um ponto que eu NÃO mudaria
+
+Eu **não adicionaria `operationId` como chave de deduplicação primária**.
+
+O TASKS está correto em manter:
+
+```text
+eventId → idempotência de entrega/evento
+```
+
+e deixar `operationId` como semântica de negócio quando necessário.
+
+Isso está alinhado com o desenho do Modulith e com o que já definimos em `SPEC-003`.
+
+---
+
+# Minha classificação final
+
+| Área                           | Status                |
+| ------------------------------ | --------------------- |
+| Traceability                   | 🟢                    |
+| TDD order                      | 🟢                    |
+| MUST/SHOULD separation         | 🟢                    |
+| Recurrence mathematics         | 🟢                    |
+| Price baseline                 | 🟢                    |
+| Lifecycle                      | 🟢                    |
+| Tenant isolation               | 🟢                    |
+| REST boundary                  | 🟢                    |
+| AI/Decision boundary           | 🟢                    |
+| Withdraw mapping               | 🟡 precisa fechar     |
+| Listener responsibility        | 🟡 precisa explicitar |
+| `eventId` durability           | 🔴 precisa fechar     |
+| Price-spike event verification | 🟡 recomendável       |
+| Final convergence gate         | 🟢                    |
+
+### Portanto:
+
+**Eu não mandaria executar ainda.**
+
+Faria primeiro uma pequena revisão do `TASKS-003.1` para fechar principalmente o **`I-SUB-008` durable idempotency**. Esse é o único ponto que considero realmente capaz de produzir uma implementação aparentemente correta, mas arquiteturalmente errada.
+
+Depois disso, o fluxo pode ser:
+
+**TASKS-003.1 → Antigravity executa somente `[MUST]` → `./gradlew test` → architecture test → bi-directional audit → só então `[SHOULD]`.**
+
+Se quiser manter o processo rigoroso que estamos usando no V4, a próxima ação é justamente **ajustar somente esses pontos no TASKS, sem reabrir a SPEC ou o PLAN**.

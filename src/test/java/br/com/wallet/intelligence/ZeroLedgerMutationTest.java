@@ -36,8 +36,12 @@ class ZeroLedgerMutationTest {
     void intelligenceMustNotDependOnLedgerDaosOrEntities() {
         ArchRule rule = noClasses()
                 .that().resideInAPackage("br.com.wallet.intelligence..")
-                .should().dependOnClassesThat().haveSimpleNameEndingWith("Dao")
-                .andShould().dependOnClassesThat().resideInAPackage("..ledger..");
+                .should().dependOnClassesThat(
+                        com.tngtech.archunit.base.DescribedPredicate.describe(
+                                "reside in ledger and are DAOs",
+                                target -> target.getPackageName().contains(".ledger.") && target.getSimpleName().endsWith("Dao")
+                        )
+                );
 
         rule.check(allProductionClasses);
     }

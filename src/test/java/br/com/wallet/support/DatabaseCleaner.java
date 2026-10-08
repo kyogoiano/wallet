@@ -20,6 +20,8 @@ public class DatabaseCleaner {
             "fraud_relationships",
             "fraud_entities",
             "dlq_operations",
+            "subscriptions",
+            "intelligence_processed_events",
             "goals",
             "cashflow_profiles",
             "savings_execution_history",

@@ -1,0 +1,882 @@
+Sim. Esta `SPEC-003.1` está **bem próxima de ficar Ratified/Ready**, e a separação com `SPEC-003` ficou muito melhor. Mas aqui aparecem alguns pontos que eu considero **MUST antes do PLAN/TASKS**, principalmente porque agora estamos entrando na matemática e no modelo de domínio real.
+
+Minha avaliação: **🟡 REVIEW REQUIRED — arquitetura correta, contrato matemático ainda precisa de fechamento.**
+
+## 1. 🔴 MUST — definir exatamente o que é uma transação observável
+
+Hoje temos:
+
+```text
+REQ-SUB-001
+TransferCompletedEvent
+WithdrawCompletedEvent
+origin == USER
+```
+
+e:
+
+```text
+REQ-SUB-002
+(tenantId, walletId, counterpartyId)
+```
+
+Mas o próprio exemplo do evento anterior mostra algo como:
+
+```text
+TransferCompletedEvent
+(tenantId, from, to, amount, eventId)
+```
+
+Ainda falta definir:
+
+> **Como o `walletId` e o `counterpartyId` são derivados de cada tipo de evento?**
+
+Por exemplo:
+
+```text
+USER wallet A
+      │
+      │ R$ 39,90
+      ▼
+merchant/account B
+```
+
+Para `TransferCompletedEvent`:
+
+```text
+walletId       = from
+counterpartyId = to
+```
+
+presumivelmente.
+
+Para:
+
+```text
+WithdrawCompletedEvent
+(tenantId, walletId, amount, ...)
+```
+
+não existe `counterpartyId` no contrato mostrado.
+
+Então temos um gap real.
+
+### Eu adicionaria um invariant
+
+```text
+I-SUB-011 — Outflow Observation Contract
+
+Only completed USER-originated outflows are eligible for recurrence
+detection.
+
+For TransferCompletedEvent, the observed wallet is the debit/source
+wallet and the counterparty is the transfer destination.
+
+For WithdrawCompletedEvent, the event MUST provide or resolve a stable
+counterparty identity before participating in recurrence clustering.
+
+Credits, inbound transfers, non-USER operations and events without a
+resolvable counterparty MUST NOT enter a subscription series.
+```
+
+Isso é fundamental para o algoritmo não começar a agrupar coisas erradas.
+
+---
+
+# 2. 🔴 MUST — fechar o `counterpartyId`
+
+A especificação assume:
+
+```text
+(tenantId, walletId, counterpartyId)
+```
+
+mas não define a natureza do `counterpartyId`.
+
+Precisamos decidir se é:
+
+* account ID;
+* merchant ID;
+* beneficiary ID;
+* external counterparty ID;
+* canonical normalized counterparty identifier.
+
+Eu recomendo:
+
+```text
+counterpartyId = stable canonical identity of the debit destination
+```
+
+e **não** usar descriptor textual diretamente.
+
+Por exemplo:
+
+```text
+NETFLIX BRASIL LTDA
+Netflix
+NETFLIX.COM
+NETFLIX*1234
+```
+
+não deveriam criar automaticamente quatro séries diferentes.
+
+Mas isso pode ficar fora de 003.1 se já existir um canonical counterparty contract em outro SPEC. Se não existir, precisamos explicitamente declarar a dependência.
+
+---
+
+# 3. 🔴 MUST — corrigir a semântica de `DecisionUnavailable` vs `UNKNOWN`
+
+Temos:
+
+```text
+I-SUB-005
+optional evaluator fails
+→ DecisionUnavailable<T>
+```
+
+mas depois:
+
+> Inconclusive evaluation yields `DecisionAnswer(UNKNOWN)`.
+
+Isso **pode estar correto**, mas precisamos distinguir os dois casos.
+
+Eu escreveria:
+
+```text
+Evaluator unavailable / timeout / infrastructure failure
+    → DecisionUnavailable<T>
+
+Evaluator executed successfully but cannot establish a classification
+    → DecisionAnswer(UNKNOWN)
+```
+
+Assim:
+
+```text
+DecisionUnavailable
+≠
+UNKNOWN
+```
+
+E isso está perfeitamente alinhado com o 000.8.1.
+
+---
+
+# 4. 🔴 MUST — `Rule/ONNX/Ollama` ainda está parcialmente dentro desta SPEC
+
+A separação melhorou bastante, mas:
+
+```text
+REQ-SUB-011 [SHOULD]
+Support ONNX Micro-ML evaluator
+```
+
+e:
+
+```text
+REQ-SUB-012 [COULD]
+Nearline Ollama SLM evaluator
+```
+
+fazem `003.1` parecer dono desses evaluators.
+
+Nós acabamos de decidir no `PLAN-003` que:
+
+> concrete rule/ONNX/Ollama evaluators are owned by `SPEC-000.8.1`.
+
+Portanto eu mudaria esses requirements.
+
+### Em vez de:
+
+```text
+REQ-SUB-011 [SHOULD]
+Support ONNX Micro-ML evaluator
+```
+
+usar:
+
+```text
+REQ-SUB-011 [SHOULD]
+Expose subscription classification context through the
+SPEC-000.8.1 DecisionQuestion<SubscriptionClassification> contract.
+Concrete evaluator implementations are owned by SPEC-000.8.1.
+```
+
+E o Ollama:
+
+```text
+REQ-SUB-012 [COULD]
+Support nearline semantic classification when a compatible
+SPEC-000.8.1 evaluator is available.
+
+SPEC-003.1 MUST NOT depend on Ollama availability for deterministic
+recurrence detection or lifecycle transitions.
+```
+
+Assim 003.1 **consome a algebra**, mas não vira dono dos providers.
+
+---
+
+# 5. 🔴 MUST — o baseline do price spike precisa ser explicitamente histórico
+
+Hoje:
+
+```text
+A_new >= μ_A × 1.05
+```
+
+Mas qual `μ_A`?
+
+Se incluirmos `A_new` no cálculo da média antes de testar:
+
+```text
+39.90
+39.90
+39.90
+100.00
+```
+
+a média vira:
+
+```text
+54.925
+```
+
+e o aumento de 100 sobre a média ainda é detectado, mas a semântica do baseline já foi contaminada.
+
+Pior ainda em aumentos menores.
+
+Precisamos definir:
+
+```text
+μ_A(t) = mean of qualifying observations strictly before t
+```
+
+Então:
+
+```text
+A_new >= μ_A(t) × 1.05
+```
+
+Eu faria isso explicitamente:
+
+```text
+I-SUB-003
+
+For an observed amount A_new at timestamp t, the price-spike baseline
+μ_A(t) MUST be calculated exclusively from qualifying observations
+strictly preceding t.
+
+The current observation MUST NOT participate in its own baseline.
+```
+
+Isso também reforça `I-SUB-009`.
+
+---
+
+# 6. 🔴 MUST — definir o que acontece depois de `PRICE_SPIKE_DETECTED`
+
+Hoje temos:
+
+```text
+DISCOVERED
+CANDIDATE
+ACTIVE
+PRICE_SPIKE_DETECTED
+CANCELLED_INFERRED
+```
+
+Mas não temos uma state machine completa.
+
+Por exemplo:
+
+```text
+ACTIVE
+   ↓
+PRICE_SPIKE_DETECTED
+```
+
+E depois chega outra cobrança:
+
+```text
+R$ 45,90
+```
+
+Qual estado?
+
+```text
+ACTIVE?
+PRICE_SPIKE_DETECTED?
+```
+
+Se continuar `PRICE_SPIKE_DETECTED`, a assinatura fica permanentemente nesse estado.
+
+Eu recomendaria separar **lifecycle status** de **alert condition**.
+
+Por exemplo:
+
+```text
+SubscriptionStatus:
+DISCOVERED
+CANDIDATE
+ACTIVE
+CANCELLED_INFERRED
+```
+
+e:
+
+```text
+PriceSpike:
+NONE
+DETECTED
+```
+
+ou então definir explicitamente `PRICE_SPIKE_DETECTED` como estado transitório/eventual.
+
+Arquiteturalmente, eu prefiro:
+
+```text
+Subscription
+    status = ACTIVE
+    priceSpikeDetected = true
+```
+
+porque:
+
+> uma assinatura não deixa de ser ACTIVE só porque aumentou de preço.
+
+Isso também combina melhor com o requisito:
+
+> `< 5% → remains ACTIVE`
+
+Portanto este é um ponto que eu **corrigiria antes de implementar**.
+
+---
+
+# 7. 🔴 MUST — `Confidence` precisa definir qual CV é usado
+
+A fórmula está boa:
+
+$$
+Confidence =
+\min(1,
+\frac{N}{3}(1-\min(0.50,CV_A)))
+$$
+
+Mas precisamos dizer se:
+
+```text
+CV_A
+```
+
+é calculado sobre:
+
+* todas as observações;
+* apenas observações anteriores;
+* população ou amostra;
+* média/variância antes ou depois do novo evento.
+
+Eu definiria:
+
+```text
+For N qualifying observations:
+
+μ_A = arithmetic mean
+σ_A = population standard deviation
+CV_A = σ_A / μ_A
+```
+
+e:
+
+```text
+CV_A(t)
+```
+
+usa somente observações `<= t`, porque aqui a observação corrente **pode** fazer parte da própria confidence, diferentemente do price spike baseline.
+
+Essa diferença precisa ser intencional.
+
+---
+
+# 8. 🟡 `N` precisa ser definido
+
+Hoje:
+
+```text
+N = cycle count
+```
+
+mas não está formalmente definido.
+
+Eu mudaria para:
+
+```text
+N = number of qualifying debit observations in the series
+```
+
+Então:
+
+```text
+N = 1 → DISCOVERED
+N = 2 → CANDIDATE
+N >= 3 + confidence >= .70 → ACTIVE
+```
+
+Isso elimina qualquer ambiguidade entre:
+
+```text
+3 transactions
+```
+
+e:
+
+```text
+3 intervals
+```
+
+Porque matematicamente:
+
+```text
+3 transactions = 2 intervals
+```
+
+---
+
+# 9. 🔴 MUST — `nextExpectedAt` precisa de fórmula
+
+Temos:
+
+```text
+REQ-SUB-004
+projected next renewal date
+```
+
+mas nenhuma fórmula.
+
+Se:
+
+```text
+t_last
+```
+
+é o último evento e:
+
+```text
+Δt̄
+```
+
+é o intervalo médio:
+
+```text
+nextExpectedAt = t_last + Δt̄
+```
+
+provavelmente.
+
+Mas isso levanta outro problema:
+
+### IRREGULAR
+
+Se:
+
+```text
+Cadence = IRREGULAR
+```
+
+temos `nextExpectedAt`?
+
+Eu recomendaria:
+
+```text
+nextExpectedAt = null
+```
+
+para `IRREGULAR`.
+
+Para cadence determinística:
+
+```text
+nextExpectedAt = t_last + rounded(meanInterval)
+```
+
+Precisamos também definir timezone/precision temporal.
+
+---
+
+# 10. 🟡 Cancellation inference precisa de uma definição operacional
+
+Hoje:
+
+$$
+t - t_{last} > 1.5 \times \bar{\Delta t}
+$$
+
+Boa regra.
+
+Mas ela precisa deixar claro:
+
+```text
+Only ACTIVE subscriptions are eligible.
+```
+
+e:
+
+```text
+IRREGULAR subscriptions are not eligible.
+```
+
+Além disso:
+
+```text
+what happens if the subscription is CANCELLED_INFERRED
+and a new qualifying transaction arrives?
+```
+
+Eu recomendo:
+
+```text
+CANCELLED_INFERRED
+      +
+new matching observation
+      ↓
+CANDIDATE
+```
+
+ou eventualmente:
+
+```text
+DISCOVERED
+```
+
+dependendo do domínio.
+
+Mas precisamos escolher.
+
+---
+
+# 11. 🟡 `BI_WEEKLY` deveria talvez ser `BIWEEKLY`
+
+Isso é puramente naming, não arquitetura.
+
+Você está usando:
+
+```text
+BI_WEEKLY
+```
+
+Se o projeto já adotou essa convenção, mantenha.
+
+Não vale mudar agora só por estética.
+
+---
+
+# 12. 🟢 Tenant isolation está excelente
+
+Esta parte ficou boa:
+
+```text
+I-SUB-010
+(tenantId, walletId, counterpartyId)
+```
+
+e:
+
+```text
+UNIQUE (tenant_id, wallet_id, counterparty_id)
+```
+
+É exatamente o tipo de proteção que queremos.
+
+Eu só adicionaria explicitamente:
+
+> `tenantId` is not accepted as a trusted query parameter/header to select another tenant.
+
+Para o endpoint:
+
+```text
+GET /api/v1/intelligence/subscriptions/{walletId}
+```
+
+o tenant deve vir do contexto autenticado/confiável.
+
+Não:
+
+```text
+?tenantId=tenant-beta
+```
+
+---
+
+# 13. 🔴 API precisa definir o tenant source
+
+O endpoint está:
+
+```http
+GET /api/v1/intelligence/subscriptions/{walletId}
+```
+
+Isso é bom.
+
+Mas:
+
+> "scoped to tenant"
+
+precisa especificar **como**.
+
+Dado o nosso `SPEC-000.9.3`, eu colocaria:
+
+```text
+The tenant scope MUST be derived from the authenticated security context
+established at the system boundary.
+
+The endpoint MUST NOT accept tenantId as a client-controlled selector.
+```
+
+Isso preserva:
+
+```text
+credential
+   ↓
+tenant
+   ↓
+Core context
+   ↓
+query
+```
+
+e não:
+
+```text
+HTTP tenantId
+   ↓
+trust
+```
+
+---
+
+# 14. 🟡 REST response: `confidence: 0.95` conflita com BigDecimal policy
+
+O JSON:
+
+```json
+"confidence": 0.95
+```
+
+é perfeitamente válido como representação JSON, mas internamente precisamos manter:
+
+```text
+BigDecimal
+```
+
+Isso já está implícito.
+
+Eu adicionaria:
+
+```text
+API serialization MUST preserve the declared precision semantics and
+MUST NOT use binary floating-point internally.
+```
+
+Não precisa alterar o JSON.
+
+---
+
+# 15. 🟡 Falta definir o desvio padrão
+
+A fórmula usa:
+
+$$
+\sigma_A
+$$
+
+mas não define:
+
+```text
+population σ
+```
+
+ou:
+
+```text
+sample s
+```
+
+Isso pode alterar `CV` e portanto `Confidence`.
+
+Como estamos com apenas 3 observações no activation gate, essa diferença pode ser relevante.
+
+Eu escolheria **population standard deviation** porque estamos descrevendo o conjunto de observações da série conhecida, e não estimando uma população estatística maior.
+
+Então:
+
+$$
+\sigma =
+\sqrt{\frac{1}{N}\sum_{i=1}^{N}(A_i-\mu)^2}
+$$
+
+e:
+
+$$
+CV = \frac{\sigma}{\mu}
+$$
+
+---
+
+# 16. 🟢 Testes estão bons, mas falta um teste matemático importante
+
+Hoje temos:
+
+```text
+3 monthly transfers → ACTIVE
+```
+
+Eu acrescentaria um teste explícito:
+
+```text
+3 observations
+CV = 0
+→ Confidence = 1.00
+→ ACTIVE
+```
+
+E outro:
+
+```text
+3 observations
+CV = 0.30
+→ Confidence = 0.70
+→ ACTIVE
+```
+
+e:
+
+```text
+3 observations
+CV > 0.30
+→ Confidence < 0.70
+→ CANDIDATE
+```
+
+Isso transforma a fórmula em contrato verificável.
+
+---
+
+# 17. 🟢 Teste de price spike precisa testar o baseline
+
+O teste atual:
+
+```text
+39.90 → 45.90
+```
+
+é bom, mas eu adicionaria:
+
+```text
+39.90
+39.90
+39.90
+45.90
+```
+
+e verificar:
+
+```text
+baseline = 39.90
+45.90 / 39.90 - 1 >= 5%
+→ spike
+```
+
+E principalmente:
+
+```text
+39.90
+39.90
+41.00
+```
+
+para provar que a nova observação não altera o baseline antes da comparação.
+
+---
+
+# Minha recomendação de estrutura final
+
+Eu manteria a SPEC praticamente como está, mas faria estes ajustes:
+
+### MUST
+
+1. **I-SUB-011** — definir observação de outflow e mapping `walletId/counterpartyId`.
+2. Definir `counterpartyId` canonical.
+3. Separar `DecisionUnavailable` de `DecisionAnswer(UNKNOWN)`.
+4. Retirar ownership dos evaluators de 003.1 → 000.8.1.
+5. Definir price-spike baseline **antes da observação atual**.
+6. Definir state machine depois de `PRICE_SPIKE_DETECTED`.
+7. Definir `N` como número de qualifying observations.
+8. Definir `σ` como population standard deviation.
+9. Definir fórmula de `nextExpectedAt`.
+10. Definir comportamento de `IRREGULAR`.
+11. Definir recovery de `CANCELLED_INFERRED`.
+12. Definir origem confiável do tenant no REST API.
+
+### SHOULD
+
+13. Testes de fronteira matemática para confidence.
+14. Teste explícito de baseline de price spike.
+15. Definir precisão temporal/timezone.
+
+---
+
+## E há uma decisão de domínio que eu considero especialmente importante
+
+Eu realmente recomendo **não usar `PRICE_SPIKE_DETECTED` como `SubscriptionStatus`**.
+
+Ficaria:
+
+```text
+SubscriptionStatus
+├── DISCOVERED
+├── CANDIDATE
+├── ACTIVE
+└── CANCELLED_INFERRED
+```
+
+e:
+
+```text
+SubscriptionPriceState
+├── NORMAL
+└── PRICE_SPIKE_DETECTED
+```
+
+Porque:
+
+```text
+ACTIVE + price increase
+```
+
+continua sendo uma subscription ativa.
+
+Caso contrário criamos um estado que mistura **lifecycle** com **alert/event condition**, e isso vai complicar bastante o `003.2` quando ele precisar consumir as assinaturas ativas.
+
+Com essa alteração, a separação ficaria muito limpa:
+
+```text
+                    SPEC-003.1
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+       Recurrence Lifecycle    Price Observation
+              │                     │
+       DISCOVERED              NORMAL
+       CANDIDATE                   │
+       ACTIVE                 PRICE_SPIKE
+       CANCELLED                    │
+              │                     │
+              └──────────┬──────────┘
+                         ▼
+                 Subscription
+                         │
+                         ▼
+                 SPEC-003.2
+```
+
+**No estado atual eu não liberaria ainda para PLAN-003.1**, mas não por um problema estrutural. A arquitetura está correta; precisamos agora fechar os **contratos matemáticos e de domínio** para evitar que Antigravity tenha liberdade demais na implementação.

@@ -577,4 +577,41 @@ CREATE INDEX IF NOT EXISTS event_publication_serialized_event_hash_idx ON event_
 
 CREATE INDEX IF NOT EXISTS event_publication_by_completion_date_idx
     ON event_publication (completion_date);
+
+-- =========================================================================
+-- Phase 3.1: Recurring Pattern & Subscription Detection (SPEC-003.1, REQ-SUB-007)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id UUID PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    wallet_id UUID NOT NULL,
+    counterparty_id UUID NOT NULL,
+    cadence VARCHAR(32) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    price_state VARCHAR(32) NOT NULL DEFAULT 'NORMAL',
+    classification VARCHAR(32) NOT NULL DEFAULT 'UNKNOWN',
+    average_amount NUMERIC(19, 2) NOT NULL,
+    last_amount NUMERIC(19, 2) NOT NULL,
+    confidence NUMERIC(7, 6) NOT NULL,
+    observed_cycles INT NOT NULL DEFAULT 1,
+    last_observed_at TIMESTAMPTZ NOT NULL,
+    next_expected_at TIMESTAMPTZ,
+    variance_type VARCHAR(16) NOT NULL DEFAULT 'FIXED',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    CONSTRAINT uk_subscriptions_tenant_series UNIQUE (tenant_id, wallet_id, counterparty_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_tenant_wallet ON subscriptions (tenant_id, wallet_id);
+
+-- Durable In-Process Event Idempotency (I-SUB-008)
+CREATE TABLE IF NOT EXISTS intelligence_processed_events (
+    event_id UUID PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_intel_processed_events_tenant ON intelligence_processed_events (tenant_id);
+
 --TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

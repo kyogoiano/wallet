@@ -43,7 +43,11 @@ class DecisionSeamIsolationTest {
     @Test
     @DisplayName("I-INTEL-007: Seam Failure Isolation - Evaluator errors do not disrupt listener event consumption")
     void listenerExecutionRemainsResilientUnderSeamInteractions() {
-        var listener = new SpendingEventListener();
+        var dao = org.mockito.Mockito.mock(br.com.wallet.intelligence.internal.persistence.SubscriptionDao.class);
+        org.mockito.Mockito.when(dao.tryRecordProcessedEvent(org.mockito.ArgumentMatchers.any(), org.mockito.ArgumentMatchers.any())).thenReturn(true);
+        var engine = new br.com.wallet.intelligence.internal.engine.RecurrencePatternEngine();
+        var publisher = org.mockito.Mockito.mock(org.springframework.context.ApplicationEventPublisher.class);
+        var listener = new SpendingEventListener(dao, engine, publisher);
         var event = new TransferCompletedEvent(
                 UUID.randomUUID(),
                 UUID.randomUUID(),

@@ -1,36 +1,52 @@
 package br.com.wallet.intelligence.internal.listener;
 
+import br.com.wallet.core.context.OperationOrigin;
 import br.com.wallet.core.exceptions.TenantContextMissingException;
+import br.com.wallet.intelligence.internal.engine.RecurrencePatternEngine;
+import br.com.wallet.intelligence.internal.persistence.SubscriptionDao;
 import br.com.wallet.ledger.api.event.TransferCompletedEvent;
 import br.com.wallet.ledger.api.event.WithdrawCompletedEvent;
 import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.modulith.events.ApplicationModuleListener;
 import org.springframework.stereotype.Component;
 
+import java.time.Instant;
 import java.util.Objects;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Spring Modulith in-process listener for Spending & Subscription Intelligence (Phase 3.0 Module Foundation).
- * Observes financial events in-process without NATS dependencies (I-INTEL-002, I-STREAM-001)
- * and without mutating ledger or account balances (I-INTEL-001).
- * Enforces strict multi-tenant isolation (I-INTEL-010) and eventId idempotency (I-INTEL-008).
+ * Spring Modulith in-process listener for Spending & Subscription Intelligence.
+ * Pure ingress adapter (TASK-3.1.10):
+ * - Qualifies outflows (USER origin only, I-SUB-011).
+ * - Enforces durable eventId idempotency via SubscriptionDao (I-SUB-008).
+ * - Clusters series by (tenantId, walletId, counterpartyId) (REQ-SUB-002, I-SUB-010).
+ * - Delegates mathematical modeling to RecurrencePatternEngine (I-SUB-001..003).
+ * - Persists projections via SubscriptionDao and publishes spike events (REQ-SUB-006).
  */
 @Component
 public class SpendingEventListener {
 
     private static final Logger log = LoggerFactory.getLogger(SpendingEventListener.class);
 
-    private final Set<UUID> processedEventIds = ConcurrentHashMap.newKeySet();
+    private final SubscriptionDao subscriptionDao;
+    private final RecurrencePatternEngine recurrencePatternEngine;
+    private final ApplicationEventPublisher eventPublisher;
+
     private final AtomicInteger processedEventCount = new AtomicInteger(0);
     private volatile String lastProcessedTenantId;
 
-    public SpendingEventListener() {
+    public SpendingEventListener(
+            @NonNull final SubscriptionDao subscriptionDao,
+            @NonNull final RecurrencePatternEngine recurrencePatternEngine,
+            @NonNull final ApplicationEventPublisher eventPublisher
+    ) {
+        this.subscriptionDao = Objects.requireNonNull(subscriptionDao, "subscriptionDao cannot be null");
+        this.recurrencePatternEngine = Objects.requireNonNull(recurrencePatternEngine, "recurrencePatternEngine cannot be null");
+        this.eventPublisher = Objects.requireNonNull(eventPublisher, "eventPublisher cannot be null");
     }
 
     @ApplicationModuleListener
@@ -38,13 +54,43 @@ public class SpendingEventListener {
         Objects.requireNonNull(event, "event cannot be null");
         validateTenant(event.tenantId());
 
-        if (!processedEventIds.add(event.aggregateId())) {
+        // I-SUB-011: Outflow observation contract - only USER origin participates in subscription clustering
+        if (event.origin() != OperationOrigin.USER) {
+            log.debug("Discarding non-USER TransferCompletedEvent from subscription clustering: eventId={}, origin={}",
+                    event.aggregateId(), event.origin());
+            return;
+        }
+
+        // I-SUB-008: Durable idempotency check
+        if (!subscriptionDao.tryRecordProcessedEvent(event.aggregateId(), event.tenantId())) {
             log.info("Duplicate TransferCompletedEvent ignored by SpendingEventListener: eventId={}", event.aggregateId());
             return;
         }
 
-        log.info("Processing TransferCompletedEvent in SpendingEventListener: eventId={}, tenantId={}, amount={}",
-                event.aggregateId(), event.tenantId(), event.amount());
+        // REQ-SUB-002: Series clustering (T, W, C) where W = from, C = to
+        UUID walletId = event.from();
+        UUID counterpartyId = event.to();
+        var existing = subscriptionDao.findBySeries(event.tenantId(), walletId, counterpartyId);
+
+        // Delegate to RecurrencePatternEngine
+        var result = recurrencePatternEngine.processObservation(
+                existing,
+                event.tenantId(),
+                walletId,
+                counterpartyId,
+                event.amount(),
+                Instant.now(),
+                event.aggregateId()
+        );
+
+        subscriptionDao.upsert(result.subscription());
+
+        result.spikeEvent().ifPresent(spikeEvent -> {
+            log.warn("Price spike detected on subscription {}: baseline={}, new={}",
+                    spikeEvent.subscriptionId(), spikeEvent.baselineAmount(), spikeEvent.observedAmount());
+            eventPublisher.publishEvent(spikeEvent);
+        });
+
         this.lastProcessedTenantId = event.tenantId();
         this.processedEventCount.incrementAndGet();
     }
@@ -54,13 +100,16 @@ public class SpendingEventListener {
         Objects.requireNonNull(event, "event cannot be null");
         validateTenant(event.tenantId());
 
-        if (!processedEventIds.add(event.aggregateId())) {
+        // I-SUB-008: Durable idempotency check
+        if (!subscriptionDao.tryRecordProcessedEvent(event.aggregateId(), event.tenantId())) {
             log.info("Duplicate WithdrawCompletedEvent ignored by SpendingEventListener: eventId={}", event.aggregateId());
             return;
         }
 
-        log.info("Processing WithdrawCompletedEvent in SpendingEventListener: eventId={}, tenantId={}, amount={}",
-                event.aggregateId(), event.tenantId(), event.amount());
+        // I-SUB-011: WithdrawCompletedEvent has no canonical counterparty; discard from subscription clustering
+        log.debug("WithdrawCompletedEvent does not have canonical counterparty; skipping subscription clustering: eventId={}",
+                event.aggregateId());
+
         this.lastProcessedTenantId = event.tenantId();
         this.processedEventCount.incrementAndGet();
     }

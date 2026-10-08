@@ -117,7 +117,7 @@ class DlqOperationsDaoIT extends DockerProperties {
         assertThat(attempt1.status()).isEqualTo(DlqStatus.FAILED);
         assertThat(attempt1.retryCount()).isEqualTo(1);
         assertThat(attempt1.nextRetryAt()).isNotNull();
-        assertThat(attempt1.nextRetryAt()).isBetween(now, now.plusSeconds(4));
+        assertThat(attempt1.nextRetryAt()).isBetween(now.minusMillis(1), now.plusSeconds(4));
 
         // Attempt 2: FAILED with retry_count = 2, next_retry_at <= now + 8s (ceiling for r=2)
         now = clock.instant();

@@ -122,9 +122,9 @@ GET /api/v1/intelligence/subscriptions/{walletId}?status=ACTIVE
 Response (200 OK):
 [
   {
-    "id": "s1000000-0000-0000-0000-000000000001",
+    "id": "f1000000-0000-0000-0000-000000000001",
     "tenantId": "tenant-alpha",
-    "walletId": "w1000000-0000-0000-0000-000000000001",
+    "walletId": "a1000000-0000-0000-0000-000000000001",
     "counterpartyId": "c1000000-0000-0000-0000-000000000001",
     "cadence": "MONTHLY",
     "status": "ACTIVE",

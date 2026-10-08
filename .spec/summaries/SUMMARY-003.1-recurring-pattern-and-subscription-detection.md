@@ -151,7 +151,7 @@ To inspect detected subscriptions and verify durable event deduplication:
 SELECT id, tenant_id, wallet_id, counterparty_id, cadence, status, price_state, 
        average_amount, last_amount, confidence, observed_cycles, next_expected_at
 FROM subscriptions
-WHERE tenant_id = 'tenant-alpha' AND wallet_id = 'w1000000-0000-0000-0000-000000000001';
+WHERE tenant_id = 'tenant-alpha' AND wallet_id = 'a1000000-0000-0000-0000-000000000001';
 
 -- 2. Verify Durable Ingested Event Deduplication
 SELECT event_id, tenant_id, processed_at

@@ -1,0 +1,592 @@
+Sim. A **SPEC-003.2** está bem alinhada com a direção que fechamos para `SPEC-003`, mas aqui eu faria uma revisão mais rigorosa antes de partir para `PLAN-003.2`.
+
+A ideia central está correta:
+
+> **003.1 descobre compromissos → 003.2 projeta liquidez futura → Goals consome a projeção para atualizar `CashflowProfile`.**
+
+Porém, vejo **alguns pontos semânticos importantes que precisam ser fechados na SPEC**, principalmente porque cashflow forecasting é mais sensível a dupla contagem e a temporalidade do que 003.1.
+
+---
+
+# Veredito inicial
+
+**SPEC-003.2: 🟡 Architecturally sound, but not yet ready for PLAN**
+
+Eu fecharia **7 pontos** antes.
+
+---
+
+## 1. 🔴 `L_H` está usando `averageAmount`, mas o forecast precisa usar a próxima ocorrência
+
+O maior problema está aqui:
+
+```text
+L_H(T,W) =
+Σ ActiveSubscriptions
+where t0 <= NextExpectedAt <= t0+H
+averageAmount
+```
+
+A ideia é correta para uma recorrência simples, mas o modelo atual tem uma questão:
+
+### E se existirem duas ocorrências dentro de 30 dias?
+
+Exemplo:
+
+```text
+WEEKLY
+averageAmount = 50
+t0 = 01/10
+H = 30
+```
+
+Temos aproximadamente:
+
+```text
+08/10 → 50
+15/10 → 50
+22/10 → 50
+29/10 → 50
+```
+
+Logo:
+
+```text
+L30 = 200
+```
+
+Mas a fórmula atual parece somar cada **subscription** uma única vez, porque cada subscription possui apenas um `nextExpectedAt`.
+
+Então a fórmula precisa ser baseada em **projected occurrences**, não apenas subscriptions.
+
+Eu mudaria conceitualmente:
+
+```text
+ActiveSubscription
+        ↓
+generate occurrences within H
+        ↓
+sum projected amount
+```
+
+Isso é fundamental para `WEEKLY`, `BI_WEEKLY` e potencialmente `MONTHLY`.
+
+---
+
+# 2. 🔴 Precisamos definir a projeção de recorrência
+
+Relacionado ao ponto anterior.
+
+`SPEC-003.1` fornece:
+
+```text
+nextExpectedAt = lastObservedAt + avgInterval
+```
+
+Mas `003.2` precisa definir como gerar:
+
+```text
+nextExpectedAt
+nextExpectedAt + avgInterval
+nextExpectedAt + 2*avgInterval
+...
+```
+
+até:
+
+```text
+<= t0 + H
+```
+
+Portanto precisamos de uma regra como:
+
+```text
+ProjectedOccurrence_1 = nextExpectedAt
+ProjectedOccurrence_n =
+    ProjectedOccurrence_(n-1) + cadenceInterval
+```
+
+e cada ocorrência gera:
+
+```text
+averageAmount
+```
+
+para o liability calendar.
+
+Sem isso, o forecast pode subestimar drasticamente despesas semanais.
+
+---
+
+# 3. 🔴 `t0` precisa ser explicitamente definido
+
+Temos:
+
+```text
+evaluation timestamp t0
+```
+
+Mas quem fornece `t0`?
+
+Para uma API:
+
+```http
+GET /cashflow/{walletId}/projections
+```
+
+a interpretação natural seria:
+
+```text
+t0 = request evaluation timestamp
+```
+
+Mas precisamos definir se:
+
+* é `Instant.now()` no servidor;
+* pode ser informado para simulação;
+* é arredondado para início do dia;
+* respeita timezone do tenant/wallet;
+* `NextExpectedAt` é comparado como `Instant`.
+
+Eu recomendo:
+
+```text
+t0 = server-side evaluation Instant
+```
+
+para a primeira versão.
+
+E **não permitir `t0` controlável pelo cliente**, porque isso pode transformar a API em um mecanismo de consulta temporal arbitrária.
+
+Para testes, obviamente usamos `Clock`.
+
+Isso também facilita muito os testes determinísticos:
+
+```java
+Clock fixedClock
+```
+
+---
+
+# 4. 🔴 O modelo de `INSTALLMENT` precisa de uma regra temporal mais forte
+
+A SPEC diz:
+
+> Finite obligations (`INSTALLMENT`) accrue to forward liabilities `L_H`
+
+Isso é correto.
+
+Mas `Subscription` hoje possui:
+
+```text
+status
+classification
+nextExpectedAt
+averageAmount
+```
+
+Não possui:
+
+```text
+remainingInstallments
+endDate
+```
+
+Portanto, como sabemos que um installment ainda existe dentro de `L30`?
+
+Se `003.1` classifica:
+
+```text
+INSTALLMENT
+```
+
+mas não conhece sua data final, então o 003.2 pode projetá-lo indefinidamente.
+
+Isso contradiz justamente a semântica:
+
+> finite obligations
+
+### Precisamos decidir uma destas opções:
+
+**A.** `003.1` precisa fornecer um limite temporal para installments.
+
+**B.** `003.2` trata `INSTALLMENT` como finite apenas semanticamente, mas continua projetando enquanto `nextExpectedAt` existir.
+
+**C.** A classificação `INSTALLMENT` não é suficiente para determinar término; outra informação precisa existir.
+
+Eu **não escolheria silenciosamente nenhuma das três**.
+
+Esse ponto precisa ser fechado na SPEC porque afeta diretamente a matemática.
+
+---
+
+# 5. 🔴 `monthlyCommittedExpenses` e `L_H` precisam de uma regra explícita contra dupla contagem
+
+Temos dois conceitos:
+
+```text
+Forward liabilities
+```
+
+e
+
+```text
+monthlyCommittedExpenses
+```
+
+Isso está correto conceitualmente.
+
+Mas precisamos dizer explicitamente:
+
+```text
+L_H
+```
+
+é um **calendário de obrigações futuras**, enquanto:
+
+```text
+monthlyCommittedExpenses
+```
+
+é uma **normalização mensal de compromissos recorrentes indefinidos**.
+
+Ou seja, uma subscription:
+
+```text
+MONTHLY $100
+```
+
+pode aparecer:
+
+```text
+L30 = $100
+monthlyCommittedExpenses = $100
+```
+
+Isso **não é dupla contagem**, porque são métricas com finalidades diferentes.
+
+Mas o contrato deveria declarar isso.
+
+Caso contrário, uma implementação pode tentar somar:
+
+```text
+L30 + monthlyCommittedExpenses
+```
+
+para calcular shortfall.
+
+Isso estaria errado.
+
+---
+
+# 6. 🔴 `Balance(T,W)` precisa estar temporalmente definido
+
+A fórmula atual:
+
+```text
+Shortfall_H = max(0, L_H - Balance(T,W))
+```
+
+é válida para uma primeira aproximação, mas existe uma diferença importante:
+
+```text
+current balance = 150
+```
+
+e:
+
+```text
+liabilities30 = 250
+```
+
+não necessariamente significa que haverá déficit.
+
+Porque podem existir:
+
+```text
+incoming deposits
+salary
+transfers
+```
+
+durante esses 30 dias.
+
+A SPEC atualmente define explicitamente:
+
+> current balance
+
+Portanto **não devemos transformar isso em um forecast de saldo futuro ainda**.
+
+Eu manteria o modelo simples, mas renomearia semanticamente:
+
+```text
+current-balance coverage shortfall
+```
+
+ou deixaria muito explícito:
+
+> Shortfall is a liability coverage warning against the balance observed at `t0`, not a complete future balance forecast.
+
+Isso é importante porque o `REQ-CASH-007` de inferred income é apenas `[COULD]`.
+
+Não podemos usar future income para o cálculo MUST.
+
+---
+
+# 7. 🟡 O `sync-goals` merece uma definição transacional
+
+Este ponto é arquitetural.
+
+A SPEC diz:
+
+```text
+intelligence
+    ↓
+CashflowProfileUseCase
+    ↓
+goals
+```
+
+Isso é bom.
+
+Mas precisamos deixar claro que:
+
+* `intelligence` **não acessa repository interno de goals**;
+* não conhece tabela de goals;
+* usa apenas `goals::api`;
+* não altera `minimumSafetyBuffer`;
+* não altera `monthlyIncome`;
+* tenant é propagado pelo contrato.
+
+E principalmente:
+
+### Quem é o owner do `CashflowProfile`?
+
+Pelo desenho existente:
+
+```text
+goals owns CashflowProfile
+```
+
+Portanto:
+
+```text
+intelligence → goals API
+```
+
+e nunca:
+
+```text
+intelligence → goals DB
+```
+
+Eu colocaria isso como invariant explícito ou requisito.
+
+---
+
+# Um ponto que está muito bom: sem locking
+
+`I-CASH-006` está exatamente na direção correta:
+
+```text
+BalanceUseCase.getBalance
+        ↓
+projection
+        ↓
+NO SELECT FOR UPDATE
+```
+
+Isso preserva:
+
+```text
+forecast ≠ financial authorization
+```
+
+e mantém `003.2` completamente fora do hot path financeiro.
+
+Eu reforçaria também:
+
+> **003.2 MUST NOT invoke any ledger command/use case that mutates state.**
+
+Mas isso já está implicitamente coberto por `I-INTEL-001`.
+
+---
+
+# Tenant isolation
+
+Está muito boa.
+
+A regra correta é:
+
+```text
+(tenantId, walletId)
+```
+
+e não simplesmente:
+
+```text
+walletId
+```
+
+Além disso, seguindo o que fizemos em `003.1`:
+
+```text
+tenantId
+```
+
+deve vir do **trusted authenticated context**, não de:
+
+```http
+X-Tenant-Id
+```
+
+nem de query parameter.
+
+Eu colocaria isso explicitamente no `REQ-CASH-004` e `REQ-CASH-005`.
+
+---
+
+# Eu faria também uma pequena mudança no endpoint
+
+Hoje:
+
+```http
+POST /cashflow/{walletId}/sync-goals
+```
+
+faz sentido como operação de sincronização.
+
+Mas ela precisa ser **idempotente**.
+
+Se o usuário chamar:
+
+```text
+POST
+POST
+POST
+```
+
+não podemos gerar três efeitos diferentes.
+
+O comportamento desejado deveria ser:
+
+```text
+calculate deterministic profile
+        ↓
+save same values
+        ↓
+same resulting CashflowProfile
+```
+
+Isso é particularmente importante porque estamos trabalhando com arquitetura at-least-once em várias partes do V4.
+
+---
+
+# `CashflowShortfallAlertEvent`
+
+Também vale uma decisão.
+
+A SPEC coloca:
+
+```text
+REQ-CASH-006 [SHOULD]
+```
+
+Isso está correto.
+
+Mas o evento deveria ser disparado:
+
+```text
+every GET?
+```
+
+ou:
+
+```text
+only when state transitions
+SURPLUS → DEFICIT_WARNING
+```
+
+Eu recomendo **transition-based**, porque emitir evento a cada consulta REST seria semanticamente errado e poderia produzir spam.
+
+Algo como:
+
+```text
+previous status = SURPLUS
+current status  = DEFICIT_WARNING
+             ↓
+emit event
+```
+
+Se ainda não houver estado persistido do forecast, esse SHOULD pode simplesmente ficar fora do primeiro implementation slice.
+
+---
+
+# Minha proposta de fechamento da SPEC
+
+Antes do PLAN, eu fecharia estes contratos:
+
+### MUST fechar
+
+1. **Projected occurrences**, não apenas `nextExpectedAt`.
+2. Fórmula para gerar múltiplas ocorrências por subscription.
+3. Definição de `t0`.
+4. Regra temporal para `INSTALLMENT`.
+5. Separação semântica entre `L_H` e `monthlyCommittedExpenses`.
+6. `Shortfall` explicitamente baseado em **current balance**, não projected balance.
+7. Goals API como único boundary de escrita.
+8. `sync-goals` idempotente.
+9. Tenant sempre derivado do authenticated context.
+10. Regra de emissão do shortfall event, mesmo que continue `[SHOULD]`.
+
+---
+
+## E tem uma questão estrutural interessante
+
+Eu **não criaria uma `cashflow_forecasts` table automaticamente**.
+
+A própria acceptance criteria diz:
+
+> `cashflow_forecasts table if materialized`
+
+Isso está correto.
+
+Para V1, eu tenderia a:
+
+```text
+Subscriptions
+      ↓
+Forecast Engine
+      ↓
+ephemeral deterministic projection
+      ↓
+REST
+```
+
+sem persistir forecast.
+
+Só materializaria se tivermos uma necessidade concreta de:
+
+* histórico de previsões;
+* auditoria;
+* alertas assíncronos;
+* comparação forecast vs actual;
+* analytics.
+
+Isso mantém `003.2` simples e evita transformar uma projeção derivada em uma nova fonte de verdade.
+
+---
+
+### Conclusão
+
+A **direção da SPEC-003.2 está correta**, e a integração com `003.1`, `goals` e `ledger::api` está bem posicionada.
+
+Mas eu **não passaria para PLAN-003.2 ainda**.
+
+O ponto mais crítico é este:
+
+> **`L_H` precisa representar ocorrências projetadas, e não simplesmente subscriptions que possuem um `nextExpectedAt`.**
+
+Sem essa correção, uma subscription semanal de R$50 poderia aparecer como apenas R$50 em `L30`, quando deveria representar aproximadamente quatro ocorrências.
+
+Depois disso, os outros fechamentos — `t0`, installments, idempotência do sync e boundary do Goals — deixam a SPEC pronta para PLAN.

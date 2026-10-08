@@ -9,6 +9,7 @@ import br.com.wallet.exceptions.InsufficientFundsException;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,7 +29,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class TransferFundsIT {
+class TransferFundsIT extends RegisterNatsProperties {
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -75,11 +76,13 @@ class TransferFundsIT {
     void shouldTransferFundsAndUpdateBothBalances(
             TransferScenario scenario) {
         // given
-        UUID from = createWalletUseCase.execute(new Wallet(scenario.initialFrom(), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // when
-        transferFundsUseCase.execute(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
 
         // then
         testDataHelper.assertBalance(from, scenario.expectedFrom());
@@ -89,33 +92,37 @@ class TransferFundsIT {
     @Test
     void shouldFailWhenInsufficientBalance() {
         // given
-        UUID from = createWalletUseCase.execute(new Wallet(BigDecimal.TEN, UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // when / then
         assertThatThrownBy(() ->
-                transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID()))
+                transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID()))
         ).isInstanceOf(InsufficientFundsException.class);
     }
 
     @Test
     void shouldNotAllowTransferToSameWallet() {
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
 
         assertThatThrownBy(() ->
-                transferFundsUseCase.execute(new Transfer(wallet, wallet, BigDecimal.TEN, UUID.randomUUID()))
+                transferFundsUseCase.handle(new Transfer(from, from, BigDecimal.TEN, UUID.randomUUID()))
         ).isInstanceOf(IllegalArgumentException.class);
     }
 
     @Test
     void shouldInsertOutboxEventOnTransfer() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         UUID opId = UUID.randomUUID();
 
-        transferFundsUseCase.execute(new Transfer(from, to, new BigDecimal("50"), opId));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("50"), opId));
 
         var count = testDataHelper.countProcessedOutbox(opId);
 
@@ -124,14 +131,15 @@ class TransferFundsIT {
 
     @Test
     void shouldNotDuplicateOutboxEventOnRetry() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute(new Wallet(BigDecimal.ONE, UUID.randomUUID()));
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, UUID.randomUUID()));
 
         UUID opId = UUID.randomUUID();
         var transfer = new Transfer(from, to, new BigDecimal("50"), opId);
-        transferFundsUseCase.execute(transfer);
-        assertThatThrownBy(() -> transferFundsUseCase.execute(transfer)).isInstanceOf(IdempotencyException.class); // retry
+        transferFundsUseCase.handle(transfer);
+        assertThatThrownBy(() -> transferFundsUseCase.handle(transfer)).isInstanceOf(IdempotencyException.class); // retry
 
         var count = testDataHelper.countProcessedOutbox(opId);
 
@@ -140,16 +148,17 @@ class TransferFundsIT {
 
     @Test
     void shouldHaveStrictlyIncreasingSequence() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
+        transferFundsUseCase.handle(transfer50);
+        var transfer10 = new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID());
+        transferFundsUseCase.handle(transfer10);
 
-        var transfer50 = new Transfer(wallet, to, new BigDecimal("50"), UUID.randomUUID());
-        transferFundsUseCase.execute(transfer50);
-        var transfer10 = new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID());
-        transferFundsUseCase.execute(transfer10);
-
-        var entries = testDataHelper.getLedgerEntries(wallet);
+        var entries = testDataHelper.getLedgerEntries(from);
 
         assertThat(entries.get(0).sequence()).isEqualTo(1);
         assertThat(entries.get(1).sequence()).isEqualTo(2);

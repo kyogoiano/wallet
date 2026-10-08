@@ -4,6 +4,7 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,7 +23,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class CreateWalletIT {
+class CreateWalletIT extends RegisterNatsProperties {
 
     @Autowired
     JdbcTemplate jdbc;
@@ -71,8 +72,9 @@ class CreateWalletIT {
 
     @Test
     void shouldCreateWalletWithZeroBalance() {
+        var walletId = UUID.randomUUID();
         // when
-        var walletId = createWalletUseCase.execute();
+         createWalletUseCase.handle(walletId);
 
         // then
         testDataHelper.assertWalletExists(walletId);
@@ -84,7 +86,8 @@ class CreateWalletIT {
     @ParameterizedTest
     @MethodSource("initialBalances")
     void shouldCreateWalletWithGivenInitialBalance(BigDecimal initialBalance) {
-        var walletId = createWalletUseCase.execute(new Wallet(initialBalance, UUID.randomUUID()));
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(walletId, initialBalance, UUID.randomUUID()));
 
         testDataHelper.assertBalance(walletId, initialBalance);
     }

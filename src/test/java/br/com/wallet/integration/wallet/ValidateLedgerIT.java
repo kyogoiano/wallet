@@ -8,6 +8,7 @@ import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -27,7 +28,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-class ValidateLedgerIT {
+class ValidateLedgerIT extends RegisterNatsProperties {
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -76,12 +77,13 @@ class ValidateLedgerIT {
     @ParameterizedTest
     @MethodSource("transferScenarios")
     void shouldValidateLedgerIntegrity(TransferScenario scenario) {
-
-        UUID from = createWalletUseCase.execute(new Wallet(scenario.initialFrom(), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // simulate transactions
-        transferFundsUseCase.execute(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
 
 
         var fromResult = validateLedgerUseCase.execute(from);
@@ -99,19 +101,20 @@ class ValidateLedgerIT {
 
     @Test
     void shouldValidateLedgerAfterMultipleTransfers() {
-
-        UUID from = createWalletUseCase.execute(new Wallet(new BigDecimal("300"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("300"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
         var transfer100 = new Transfer(from, to, new BigDecimal("100"), UUID.randomUUID());
 
-        transferFundsUseCase.execute(transfer50);
-        transferFundsUseCase.execute(transfer100);
+        transferFundsUseCase.handle(transfer50);
+        transferFundsUseCase.handle(transfer100);
         //NOTE: reload uuid, so this is not a repeated transfer
         transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
 
-        transferFundsUseCase.execute(transfer50);
+        transferFundsUseCase.handle(transfer50);
 
         var fromResult = validateLedgerUseCase.execute(from);
         var toResult = validateLedgerUseCase.execute(to);
@@ -125,16 +128,18 @@ class ValidateLedgerIT {
 
     @Test
     void shouldDetectTamperedLedger() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-
-        transferFundsUseCase.execute(new Transfer(wallet, createWalletUseCase.execute(),
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 fraud
-        testDataHelper.tamperFirstLedgerEntry(wallet, new BigDecimal("999"));
+        testDataHelper.tamperFirstLedgerEntry(from, new BigDecimal("999"));
 
-        var result = validateLedgerUseCase.execute(wallet);
+        var result = validateLedgerUseCase.execute(from);
 
         assertThat(result.valid()).isFalse();
         assertThat(result.corruptedDataSize()).isEqualTo(1);
@@ -147,15 +152,16 @@ class ValidateLedgerIT {
      */
     @Test
     void shouldDetectBrokenSequence() {
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
-
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("50"), UUID.randomUUID()));
 
         // 💥 trying to break sequence
-        assertThatThrownBy(()-> testDataHelper.tamperSequence(wallet, 1L, 99L))
+        assertThatThrownBy(()-> testDataHelper.tamperSequence(from, 1L, 99L))
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
@@ -169,16 +175,17 @@ class ValidateLedgerIT {
      */
     @Test
     void shouldDetectBrokenHashChain() {
-
-        UUID fromWallet = createWalletUseCase.execute(new Wallet(new BigDecimal("200"), UUID.randomUUID()));
-        UUID toWallet = createWalletUseCase.execute();
+        var fromWallet = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(fromWallet, new BigDecimal("200"), UUID.randomUUID()));
+        var toWallet = UUID.randomUUID();
+        createWalletUseCase.handle(toWallet);
 
         var opId1 = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(fromWallet, toWallet,
+        transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
                 new BigDecimal("50"), opId1));
 
         var opId2 = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(fromWallet, toWallet,
+        transferFundsUseCase.handle(new Transfer(fromWallet, toWallet,
                 new BigDecimal("50"), opId2));
 
         // 💥 broke chaining (second entry) -- on the credit operation for opId1
@@ -196,11 +203,12 @@ class ValidateLedgerIT {
      */
     @Test
     void shouldDetectTamperedAmount() {
-
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var wallet = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
         UUID opId = UUID.randomUUID();
-        transferFundsUseCase.execute(new Transfer(wallet, to,
+        transferFundsUseCase.handle(new Transfer(wallet, to,
                 new BigDecimal("50"), opId));
 
         testDataHelper.tamperAmount(wallet, 2L, new BigDecimal("999"), opId);
@@ -220,12 +228,14 @@ class ValidateLedgerIT {
      */
     @Test
     void shouldDetectChainLinkBroken() {
-        UUID wallet = createWalletUseCase.execute(new Wallet(new BigDecimal("100"), UUID.randomUUID()));
-        UUID to = createWalletUseCase.execute();
+        var from = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var to = UUID.randomUUID();
+        createWalletUseCase.handle(to);
 
         // Entry 1: Genesis (Sequence 1)
         // Entry 2: Transfer (Sequence 2)
-        transferFundsUseCase.execute(new Transfer(wallet, to, new BigDecimal("10"), UUID.randomUUID()));
+        transferFundsUseCase.handle(new Transfer(from, to, new BigDecimal("10"), UUID.randomUUID()));
 
         // We need to manipulate the DB such that:
         // 1. findCorruptedEntries returns empty (all individual hashes are valid)
@@ -242,9 +252,9 @@ class ValidateLedgerIT {
         // to be valid for that new previous_hash, then findCorruptedEntries stays empty, but checkChainBroken triggers.
 
         // Let's use a specialized tamper method for this "consistent lie".
-        testDataHelper.tamperConsistentChainBreak(wallet, 2L);
+        testDataHelper.tamperConsistentChainBreak(from, 2L);
 
-        var result = validateLedgerUseCase.execute(wallet);
+        var result = validateLedgerUseCase.execute(from);
 
         assertThat(result.valid()).isFalse();
         assertThat(result.corruptedDataSize()).isEqualTo(0);

@@ -3,6 +3,7 @@ package br.com.wallet.application.service;
 import br.com.wallet.application.aspects.tracing.Traceable;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.exceptions.IdempotencyException;
+import br.com.wallet.infrasctructure.operation.OperationStatus;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
 import br.com.wallet.infrasctructure.persistence.WalletOperationsDao;
 import br.com.wallet.application.core.WalletOperationService;
@@ -69,7 +70,30 @@ public class TransferFundsService implements TransferFundsUseCase {
     @Traceable("wallet.transfer")
     @Transactional
     @Override
-    public void execute(@NonNull final Transfer transfer) {
+    public void handle(@NonNull final Transfer transfer) {
+
+        final boolean started = operationsDao.startOperation(transfer.operationId());
+
+        if (!started) {
+            final var status = operationsDao.getStatus(transfer.operationId());
+
+            if (status == OperationStatus.COMPLETED) {
+                log.info("Idempotent skip {}", transfer.operationId());
+                throw new IdempotencyException("Operation already processed: " + transfer.operationId());
+            }
+
+            log.warn("Recovering operation {}", transfer.operationId());
+        }
+
+        this.execute(transfer);
+        outboxDao.save(
+                new TransferCompletedEvent(transfer.from(), transfer.to(), transfer.amount(), transfer.operationId())
+        );
+
+        operationsDao.completeOperation(transfer.operationId());
+    }
+
+    protected void execute(@NonNull final Transfer transfer) {
 
         // validations
         Validations.validatePositiveAmount(transfer.amount());
@@ -77,11 +101,6 @@ public class TransferFundsService implements TransferFundsUseCase {
         if (transfer.from().equals(transfer.to())) {
             log.warn("Invalid transfer: same wallet. walletId={}", transfer.from());
             throw new IllegalArgumentException("Cannot transfer to same wallet");
-        }
-
-        if (operationsDao.registerOperation(transfer.operationId())) {
-            log.info("Idempotent operation ignored. operationId={}", transfer.operationId());
-            throw new IdempotencyException("Operation already processed: " + transfer.operationId());
         }
 
         // 🔒 lock ordering (avoid deadlocks: no circular wait)
@@ -112,9 +131,6 @@ public class TransferFundsService implements TransferFundsUseCase {
         // 🧾 ledger entries
         log.info("Transfer completed. from={}, to={}, amount={}, operationId={}",
                 transfer.from(), transfer.to(), transfer.amount(), transfer.operationId());
-        outboxDao.save(
-                new TransferCompletedEvent(transfer.from(), transfer.to(), transfer.amount(), transfer.operationId())
-        );
     }
 
 }

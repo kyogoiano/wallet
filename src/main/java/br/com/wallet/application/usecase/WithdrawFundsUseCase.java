@@ -2,6 +2,7 @@ package br.com.wallet.application.usecase;
 
 import br.com.wallet.domain.context.Withdraw;
 
-public interface WithdrawFundsUseCase {
-    void execute(Withdraw withdraw);
+public interface WithdrawFundsUseCase extends UseCase<Withdraw> {
+    @Override
+    void handle(Withdraw withdraw);
 }

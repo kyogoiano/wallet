@@ -17,6 +17,7 @@ import br.com.wallet.domain.context.Transfer;
  * 8- commit
  * -----------------------------------
  */
-public interface TransferFundsUseCase {
-    void execute(Transfer transfer);
+public interface TransferFundsUseCase extends UseCase<Transfer> {
+    @Override
+    void handle(Transfer transfer);
 }

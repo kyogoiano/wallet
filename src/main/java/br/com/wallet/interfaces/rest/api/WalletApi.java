@@ -14,6 +14,7 @@ import org.springframework.http.ResponseEntity;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 public interface WalletApi {
 
@@ -37,13 +38,20 @@ public interface WalletApi {
             Instant at
     );
 
-    @Operation(summary = "Create wallet")
+    @Operation(summary = "Create a simple empty wallet (Synchronous)")
     @ApiResponses({
-            @ApiResponse(responseCode = "200", description = "Success"),
-            @ApiResponse(responseCode = "400", description = "Invalid request"),
-            @ApiResponse(responseCode = "404", description = "Wallet not found")
+            @ApiResponse(responseCode = "201", description = "Created"),
+            @ApiResponse(responseCode = "400", description = "Invalid request")
     })
-    ResponseEntity<CreateWalletResponse> createWallet(
+    ResponseEntity<CreateWalletResponse> create();
+
+    @Operation(summary = "Create wallet with initial deposit (Asynchronous)")
+    @ApiResponses({
+            @ApiResponse(responseCode = "202", description = "Accepted"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "422", description = "Validation error")
+    })
+    CompletableFuture<ResponseEntity<CreateWalletResponse>> createWithDeposit(
             UUID operationId,
             @Valid CreateWalletCommand command
     );
@@ -53,10 +61,10 @@ public interface WalletApi {
             @ApiResponse(responseCode = "200", description = "Success"),
             @ApiResponse(responseCode = "400", description = "Invalid request"),
             @ApiResponse(responseCode = "404", description = "Wallet not found"),
-            @ApiResponse(responseCode = "422", description = "Limit too high! Choose a smaller limit (< 1000) ")
+            @ApiResponse(responseCode = "422", description = "Limit too high!")
     })
     ResponseEntity<List<LedgerEntryResponse>> getLedger(
-            UUID walletId, @Max(value = 1000, message = "Limit too high! Choose a smaller limit (< 1000) ") Integer limit
+            UUID walletId, @Max(value = 1000) Integer limit
     );
 
     @Operation(summary = "Replay wallet balance")

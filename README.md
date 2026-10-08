@@ -3,7 +3,6 @@
 ## 📌 Overview
 
 This project is a **wallet service** built with **Spring Boot 4**, designed to demonstrate:
-- Strong domain modeling
 - Clean architecture principles
 - Test-Driven Development (TDD)
 - Production-oriented thinking (idempotency, auditability, resilience)

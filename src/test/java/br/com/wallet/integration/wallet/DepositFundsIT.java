@@ -9,6 +9,7 @@ import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
+import br.com.wallet.support.RegisterNatsProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +25,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 @SpringBootTest
 @Import(IntegrationTestBase.class)
-public class DepositFundsIT {
+public class DepositFundsIT extends RegisterNatsProperties {
     @Autowired
     private DepositFundsUseCase depositFundsUseCase;
 
@@ -48,12 +49,13 @@ public class DepositFundsIT {
     @Test
     void shouldDepositFundsAndUpdateBalance() {
         // given
-        UUID walletId = createWalletUseCase.execute();
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(walletId);
         BigDecimal depositAmount = new  BigDecimal("100.00");
         UUID operationId =  UUID.randomUUID();
 
         // when
-        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId));
+        depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId));
 
         // then
         testDataHelper.assertBalance(walletId, depositAmount);
@@ -64,13 +66,14 @@ public class DepositFundsIT {
     @Test
     void shouldBeIdempotentWhenSameOperationIdIsUsed() {
         // given
-        UUID walletId = createWalletUseCase.execute(new Wallet(BigDecimal.TEN, UUID.randomUUID()));
+        var walletId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(walletId, BigDecimal.TEN, UUID.randomUUID()));
         BigDecimal depositAmount = new BigDecimal("50.00");
         UUID operationId = UUID.randomUUID();
 
         // when
-        depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId));
-        assertThatThrownBy(() -> depositFundsUseCase.execute(new Deposit(walletId, depositAmount, operationId))).isInstanceOf(IdempotencyException.class); // retry
+        depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId));
+        assertThatThrownBy(() -> depositFundsUseCase.handle(new Deposit(walletId, depositAmount, operationId))).isInstanceOf(IdempotencyException.class); // retry
 
         // then
         // Initial 10 + one deposit of 50 = 60

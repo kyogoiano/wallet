@@ -1,9 +1,9 @@
 package br.com.wallet.domain.event;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
+import java.util.Objects;
 import java.util.UUID;
 
 /**
@@ -15,11 +15,17 @@ import java.util.UUID;
  * @param operationId
  */
 public record TransferCompletedEvent(
-        @JsonProperty(value = "from", required = true) UUID from,
-        @JsonProperty(value = "to", required = true) UUID to,
-        @JsonProperty(value = "amount", required = true) BigDecimal amount,
-        @JsonProperty(value = "operationId", required = true) UUID operationId
+        @NonNull UUID from,
+        @NonNull UUID to,
+        @NonNull BigDecimal amount,
+        @NonNull UUID operationId
 ) implements DomainEvent {
+    public TransferCompletedEvent {
+        Objects.requireNonNull(from, "from cannot be null");
+        Objects.requireNonNull(to, "to cannot be null");
+        Objects.requireNonNull(amount, "amount cannot be null");
+        Objects.requireNonNull(operationId, "operationId cannot be null");
+    }
 
     @Override
     public String eventType() {

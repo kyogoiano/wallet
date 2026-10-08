@@ -1,6 +1,6 @@
 package br.com.wallet.integration.outbox.publisher;
 
-import br.com.wallet.infrasctructure.messaging.EventPublisher;
+import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;

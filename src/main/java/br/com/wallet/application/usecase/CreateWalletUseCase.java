@@ -5,7 +5,8 @@ import br.com.wallet.domain.context.Wallet;
 
 import java.util.UUID;
 
-public interface CreateWalletUseCase {
-    UUID execute(Wallet wallet);
-    UUID execute();
+public interface CreateWalletUseCase extends UseCase<Wallet> {
+    @Override
+    void handle(Wallet wallet);
+    void handle(UUID walletId);
 }

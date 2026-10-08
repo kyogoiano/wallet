@@ -1,6 +1,6 @@
 package br.com.wallet.unit.infrastructure.outbox;
 
-import br.com.wallet.infrasctructure.messaging.EventPublisher;
+import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
 import br.com.wallet.infrasctructure.outbox.OutboxEvent;
 import br.com.wallet.infrasctructure.outbox.OutboxRelay;
 import br.com.wallet.infrasctructure.persistence.OutboxDao;
@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
@@ -47,10 +48,11 @@ class OutboxRelayTest {
         var event = new OutboxEvent(
                 UUID.randomUUID(),
                 "TRANSFER_COMPLETED",
-                "{\"foo\":\"bar\"}"
+                "{\"foo\":\"bar\"}",
+                0
         );
 
-        when(outboxDao.getOutboxEvents(now))
+        when(outboxDao.claimBatch(now, 100))
                 .thenReturn(List.of(event));
 
         relay.process();
@@ -69,10 +71,11 @@ class OutboxRelayTest {
         var event = new OutboxEvent(
                 UUID.randomUUID(),
                 "TRANSFER_COMPLETED",
-                "{}"
+                "{}",
+                0
         );
 
-        when(outboxDao.getOutboxEvents(now))
+        when(outboxDao.claimBatch(now, 100))
                 .thenReturn(List.of(event));
 
         doThrow(new RuntimeException("boom"))
@@ -81,7 +84,7 @@ class OutboxRelayTest {
 
         relay.process();
 
-        verify(outboxDao).markFailed(event.id(), now);
+        verify(outboxDao).markFailed(any(), any());
         verify(outboxDao, never()).markAsProcessed(any(), any());
     }
 
@@ -94,16 +97,18 @@ class OutboxRelayTest {
         var event1 = new OutboxEvent(
                 UUID.randomUUID(),
                 "TRANSFER_COMPLETED",
-                validTransferPayload()
+                validTransferPayload(),
+                0
         );
 
         var event2 = new OutboxEvent(
                 UUID.randomUUID(),
                 "DEPOSIT_COMPLETED",
-                validDepositPayload()
+                validDepositPayload(),
+                0
         );
 
-        when(outboxDao.getOutboxEvents(now))
+        when(outboxDao.claimBatch(now, 100))
                 .thenReturn(List.of(event1, event2));
 
         doThrow(new RuntimeException())
@@ -113,8 +118,9 @@ class OutboxRelayTest {
         relay.process();
 
         var inOrder = inOrder(outboxDao);
-
-        inOrder.verify(outboxDao).markFailed(event1.id(), now);
+        var backoff = Duration.ofSeconds((long) Math.pow(2, 1));
+        var realRetryTime = now.plus(backoff);
+        inOrder.verify(outboxDao).markFailed(event1.id(), realRetryTime);
         inOrder.verify(outboxDao).markAsProcessed(event2.id(), now);
     }
 

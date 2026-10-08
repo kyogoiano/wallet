@@ -1,12 +1,11 @@
 package br.com.wallet.unit.interfaces.rest;
 
-import br.com.wallet.application.usecase.DepositFundsUseCase;
-import br.com.wallet.application.usecase.TransferFundsUseCase;
-import br.com.wallet.application.usecase.WithdrawFundsUseCase;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.domain.context.Withdraw;
-import br.com.wallet.exceptions.InsufficientFundsException;
+import br.com.wallet.infrasctructure.messaging.publisher.NatsCommandPublisher;
 import br.com.wallet.interfaces.rest.controller.OperationsController;
+import io.nats.client.api.PublishAck;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.webmvc.test.autoconfigure.WebMvcTest;
@@ -16,6 +15,7 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.math.BigDecimal;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
@@ -30,13 +30,14 @@ class OperationsControllerTest {
     MockMvc mockMvc;
 
     @MockitoBean
-    TransferFundsUseCase transfer;
+    NatsCommandPublisher natsCommandPublisher;
 
-    @MockitoBean
-    DepositFundsUseCase deposit;
-
-    @MockitoBean
-    WithdrawFundsUseCase withdraw;
+    @BeforeEach
+    void setup() {
+        // By default, make the mock return a completed future to avoid NullPointerException in controller
+        lenient().when(natsCommandPublisher.publishAsync(anyString(), any()))
+                .thenReturn(CompletableFuture.completedFuture(mock(PublishAck.class)));
+    }
 
     @Test
     void shouldTransferSuccessfully() throws Exception {
@@ -53,9 +54,9 @@ class OperationsControllerTest {
                         .header("Idempotency-Key", UUID.randomUUID())
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isAccepted());
 
-        verify(transfer).execute(any());
+        verify(natsCommandPublisher).publishAsync(anyString(), any());
     }
 
     @Test
@@ -75,7 +76,7 @@ class OperationsControllerTest {
                         .content(body))
                 .andExpect(status().isBadRequest());
 
-        verifyNoInteractions(transfer);
+        verifyNoInteractions(natsCommandPublisher);
     }
 
     @Test
@@ -115,9 +116,13 @@ class OperationsControllerTest {
                         .header("Idempotency-Key", opId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isAccepted());
 
-        verify(deposit).execute(new Deposit(walletId, new BigDecimal("100"), opId));
+        verify(natsCommandPublisher).publishAsync(eq("commands.deposit"), argThat(cmd ->
+                cmd instanceof Deposit(
+                        UUID id, BigDecimal amount, UUID operationId
+                ) && id.equals(walletId) && amount.equals(new BigDecimal("100")) && operationId.equals(opId)
+        ));
     }
 
     @Test
@@ -175,17 +180,14 @@ class OperationsControllerTest {
     }
 
     @Test
-    void shouldReturn500WhenDepositFails() throws Exception {
+    void shouldReturn500WhenNatsInitializationFails() throws Exception {
 
         UUID walletId = UUID.randomUUID();
         UUID opId = UUID.randomUUID();
 
-        doThrow(new IllegalStateException("Operation Failed!"))
-                .when(deposit)
-                .execute(argThat(cmd ->
-                        walletId.equals(cmd.walletId()) &&
-                                opId.equals(cmd.operationId())
-                ));
+        // Simulate a failure before returning the future (e.g., connection issue)
+        when(natsCommandPublisher.publishAsync(anyString(), any()))
+                .thenThrow(new RuntimeException("NATS Down"));
 
         var body = """
                     {
@@ -198,7 +200,7 @@ class OperationsControllerTest {
                         .header("Idempotency-Key", opId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().is5xxServerError());
+                .andExpect(status().isInternalServerError());
     }
 
     @Test
@@ -218,37 +220,13 @@ class OperationsControllerTest {
                         .header("Idempotency-Key", opId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
-                .andExpect(status().isNoContent());
+                .andExpect(status().isAccepted());
 
-        verify(withdraw).execute(new Withdraw(walletId, new BigDecimal("50"), opId));
-    }
-
-    @Test
-    void shouldReturn422WhenInsufficientFunds() throws Exception {
-
-        UUID walletId = UUID.randomUUID();
-        UUID opId = UUID.randomUUID();
-
-        doThrow(new InsufficientFundsException())
-                .when(withdraw)
-                .execute(argThat(cmd ->
-                        walletId.equals(cmd.walletId()) &&
-                                opId.equals(cmd.operationId())
-                ));
-
-        var body = """
-                    {
-                      "walletId": "%s",
-                      "amount": 50
-                    }
-                    """.formatted(walletId);
-
-        mockMvc.perform(post("/operations/withdraw")
-                        .header("Idempotency-Key", opId)
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content(body))
-                .andExpect(status().isUnprocessableContent())
-                .andExpect(jsonPath("$.message").value("Insufficient funds"));
+        verify(natsCommandPublisher).publishAsync(eq("commands.withdraw"), argThat(cmd ->
+                cmd instanceof Withdraw(
+                        UUID id, BigDecimal amount, UUID operationId
+                ) && id.equals(walletId) && amount.equals(new BigDecimal("50")) && operationId.equals(opId)
+        ));
     }
 
     @Test

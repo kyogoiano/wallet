@@ -18,6 +18,7 @@ import java.util.UUID;
 public class TracingAspect {
 
     private static final Logger log = LoggerFactory.getLogger(TracingAspect.class);
+    public static final String OPERATION_ID = "operation.id";
     private final Tracer tracer;
 
     public TracingAspect(final Tracer tracer) {
@@ -43,11 +44,10 @@ public class TracingAspect {
             }
         }
 
-        try (final BaggageInScope baggage = tracer.createBaggageInScope("operationId", operationId)) {
-            span.tag("class", pjp.getTarget().getClass().getSimpleName());
-            span.tag("method", pjp.getSignature().getName());
+        // crates a baggage for cross-service propagation
+        try (final BaggageInScope baggage = tracer.createBaggageInScope(OPERATION_ID, operationId)) {
             if (operationId != null) {
-                span.tag("operationId", operationId);
+                span.tag(OPERATION_ID, operationId); // normalized names ( attribute promotion easily observable)
             }
 
             return pjp.proceed();

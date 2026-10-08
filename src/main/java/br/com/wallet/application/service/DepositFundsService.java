@@ -36,20 +36,28 @@ class DepositFundsService implements DepositFundsUseCase {
 
     @Traceable("wallet.deposit")
     @Transactional
-    public void execute(@NonNull Deposit deposit) {
-        // validations
-        Validations.validatePositiveAmount(deposit.amount());
+    @Override
+    public void handle(@NonNull final Deposit deposit) {
 
-        if (operationsDao.registerOperation(deposit.operationId())) {
+        if (!operationsDao.startOperation(deposit.operationId())) {
             log.info("Idempotent operation ignored. operationId={}", deposit.operationId());
             throw new IdempotencyException("Operation already processed: " + deposit.operationId());
         }
+
+        this.execute(deposit);
+    }
+
+    protected void execute(@NonNull Deposit deposit) {
+        // validations
+        Validations.validatePositiveAmount(deposit.amount());
 
         final var now = Instant.now();
         core.applyTransaction(deposit.walletId(), deposit.amount(), LedgerType.CREDIT, deposit.operationId(), now);
         outboxDao.save(
                 new DepositCompletedEvent(deposit.walletId(), deposit.amount(), deposit.operationId())
         );
+
+        operationsDao.completeOperation(deposit.operationId());
     }
 
 

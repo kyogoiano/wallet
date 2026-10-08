@@ -1,16 +1,21 @@
 package br.com.wallet.domain.event;
 
-import com.fasterxml.jackson.annotation.JsonProperty;
 import org.jspecify.annotations.NonNull;
 
 import java.math.BigDecimal;
+import java.util.Objects;
 import java.util.UUID;
 
 public record DepositCompletedEvent(
-        @JsonProperty(value = "walletId", required = true) UUID walletId,
-        @JsonProperty(value = "amount", required = true) BigDecimal amount,
-        @JsonProperty(value = "operationId", required = true) UUID operationId
+        @NonNull UUID walletId,
+        @NonNull BigDecimal amount,
+        @NonNull UUID operationId
 ) implements DomainEvent {
+    public DepositCompletedEvent {
+        Objects.requireNonNull(walletId, "walletId cannot be null");
+        Objects.requireNonNull(amount, "amount cannot be null");
+        Objects.requireNonNull(operationId, "operationId cannot be null");
+    }
 
     public String eventType() { return "DEPOSIT_COMPLETED"; }
     public UUID aggregateId() { return operationId; }

@@ -8,8 +8,28 @@ receivers:
 exporters:
   debug:
     verbosity: basic
+  otlp_http/openobserve:
+    endpoint:  http://openobserve:5080/api/default
+    headers:
+      # Base64 de leandro.ueg@gmail.com:admin123
+      Authorization: Basic bGVhbmRyby51ZWdAZ21haWwuY29tOmFkbWluMTIz
+    compression: gzip
+    sending_queue:
+      enabled: true
+    retry_on_failure:
+      enabled: true
 
 processors:
+  resource:
+    attributes:
+      - key: service.name
+        value: wallet-app
+        action: upsert
+  attributes:
+    actions:
+      - key: operation.id
+        from_attribute: baggage.operation.id
+        action: upsert
   filter:
     metrics:
       include:
@@ -23,9 +43,13 @@ service:
   pipelines:
     metrics:
       receivers: [ otlp ]
-      processors: [ filter, batch ]
-      exporters: [ debug ]
+      processors: [ batch ]
+      exporters: [ debug, otlp_http/openobserve ]
     traces:
       receivers: [ otlp ]
-      processors: [ filter, batch ]
-      exporters: [ debug ]
+      processors: [ resource, attributes, batch ]
+      exporters: [ debug, otlp_http/openobserve ]
+    logs:
+      receivers: [ otlp ]
+      processors: [ resource, attributes, batch ]
+      exporters: [ debug, otlp_http/openobserve ]

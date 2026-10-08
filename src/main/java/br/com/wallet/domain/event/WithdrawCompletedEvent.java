@@ -18,7 +18,7 @@ public record WithdrawCompletedEvent(
     }
 
     @Override
-    public String eventType() { return "WITHDRAW_COMPLETED"; }
+    public DomainEventType eventType() { return DomainEventType.WITHDRAW_COMPLETED; }
     @Override
     public UUID aggregateId() { return operationId; }
     @Override

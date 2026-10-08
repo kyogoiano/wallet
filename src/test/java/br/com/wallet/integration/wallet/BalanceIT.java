@@ -7,16 +7,17 @@ import br.com.wallet.application.usecase.WithdrawFundsUseCase;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
 import br.com.wallet.domain.context.Withdraw;
-import br.com.wallet.exceptions.IdempotencyException;
+import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
-import br.com.wallet.support.RegisterNatsProperties;
+import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -28,8 +29,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 @SpringBootTest
+@ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-class BalanceIT extends RegisterNatsProperties {
+class BalanceIT extends DockerProperties {
 
     @Autowired
     BalanceUseCase balanceUseCase;
@@ -57,7 +59,8 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldReturnCurrentBalance() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -67,9 +70,10 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldDecreaseSourceBalanceAndIncreaseTargetBalanceAfterTransfer() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        createWalletUseCase.handle(to, userId);
 
         transferFundsUseCase.handle(new Transfer(from, to,
                 new BigDecimal("40"), UUID.randomUUID()));
@@ -84,9 +88,10 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldReturnHistoricalBalance() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), userId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        createWalletUseCase.handle(to, userId);
 
         Instant before = Instant.now();
 
@@ -107,9 +112,10 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldCalculateHistoricalBalanceWithMultipleTransactions() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("200"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("200"), userId, UUID.randomUUID()));
         var other = UUID.randomUUID();
-        createWalletUseCase.handle(other);
+        createWalletUseCase.handle(other, userId);
 
         transferFundsUseCase.handle(new Transfer(wallet, other,
                 new BigDecimal("50"), UUID.randomUUID()));
@@ -127,7 +133,8 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldReturnZeroWhenNoTransactions() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(wallet);
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(wallet, userId);
 
         var result = balanceUseCase.getHistoricalBalance(wallet, Instant.now());
 
@@ -141,11 +148,12 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldNotApplySameOperationTwice() {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
         UUID opId = UUID.randomUUID();
 
-        withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("30"), opId));
-        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("30"), opId))).isInstanceOf(IdempotencyException.class);
+        withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId));
+        assertThatThrownBy(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("30"), opId))).isInstanceOf(IdempotencyException.class);
 
         var balance = balanceUseCase.getBalance(wallet);
 
@@ -158,15 +166,16 @@ class BalanceIT extends RegisterNatsProperties {
     @Test
     void shouldHandleConcurrentWithdrawalsSafely() throws Exception {
         var wallet = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), UUID.randomUUID()));
+        var userId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(wallet, new BigDecimal("100"), userId, UUID.randomUUID()));
 
         try (final var executor = Executors.newFixedThreadPool(2)) {
 
             var op1 = UUID.randomUUID();
             var op2 = UUID.randomUUID();
 
-            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("80"), op1)));
-            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, new BigDecimal("80"), op2)));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op1)));
+            executor.submit(() -> withdrawFundsUseCase.handle(new Withdraw(wallet, userId, new BigDecimal("80"), op2)));
 
             executor.shutdown();
             executor.awaitTermination(3, TimeUnit.SECONDS);

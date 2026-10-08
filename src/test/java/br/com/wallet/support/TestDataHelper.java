@@ -86,6 +86,7 @@ public class TestDataHelper {
                         type,
                         sequence::text,
                         operation_id::text,
+                        user_id::text,
                         (extract(epoch from created_at) * 1000)::bigint::text
                     ),
                     'sha512'
@@ -153,7 +154,7 @@ public class TestDataHelper {
 
     public List<LedgerEntry> getLedgerEntries(UUID walletId) {
         return jdbc.query("""
-            SELECT wallet_id, amount, type, operation_id,
+            SELECT wallet_id, amount, type, operation_id, user_id,
                    sequence, hash, previous_hash, created_at
             FROM ledger
             WHERE wallet_id = ?
@@ -163,6 +164,7 @@ public class TestDataHelper {
                 rs.getBigDecimal("amount"),
                 LedgerType.valueOf(rs.getString("type")),
                 UUID.fromString(rs.getString("operation_id")),
+                UUID.fromString(rs.getString("user_id")),
                 rs.getLong("sequence"),
                 rs.getString("hash"),
                 rs.getString("previous_hash"),

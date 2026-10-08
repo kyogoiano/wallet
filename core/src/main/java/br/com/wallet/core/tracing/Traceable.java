@@ -1,4 +1,4 @@
-package br.com.wallet.application.aspects.tracing;
+package br.com.wallet.core.tracing;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;

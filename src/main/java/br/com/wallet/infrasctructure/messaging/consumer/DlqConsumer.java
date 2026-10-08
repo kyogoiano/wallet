@@ -19,7 +19,7 @@ import java.util.Objects;
 import java.util.UUID;
 
 @Component
-public class DlqConsumer extends AbstractNatsConsumer<DlqEvent> {
+public class DlqConsumer extends AbstractNatsConsumer {
 
     private static final String streamName = "commands_dlq";
     private static final String subject = "commands.dlq.*"; // Subject for transfer commands
@@ -30,13 +30,14 @@ public class DlqConsumer extends AbstractNatsConsumer<DlqEvent> {
 
     public DlqConsumer(@Autowired final Connection natsConnection,
                        final DlqOperationsDao dlqOperationsDao) {
-        super(subject, null, natsConnection, null, null);
+        super(subject, natsConnection);
         this.dlqOperationsDao = dlqOperationsDao;
     }
 
     @Override
     public void init() throws Exception {
         setupGeneralSubscription(streamName, durableConsumerName);
+        log.debug("DlqConsumer init started");
     }
 
     /**
@@ -66,6 +67,7 @@ public class DlqConsumer extends AbstractNatsConsumer<DlqEvent> {
         return new DlqEvent(
                 UUID.randomUUID(),
                 UUID.fromString(Objects.requireNonNull(headers.getFirst("operation_id"))),
+                UUID.fromString(Objects.requireNonNull(headers.getFirst("userId"))),
                 headers.getFirst("original_subject"),
                 DlqStatus.PENDING,
                 headers.getFirst("error_message"),

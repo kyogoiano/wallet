@@ -1,6 +1,6 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '4.0.5'
+	id 'org.springframework.boot' version '4.1.0'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
@@ -9,7 +9,7 @@ version = '0.0.1-SNAPSHOT'
 
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(25)
+		languageVersion = JavaLanguageVersion.of(26)
 	}
 }
 
@@ -19,13 +19,59 @@ repositories {
 
 
 ext {
-	springVersion = "7.0.6"
-	openApiVersion = "3.0.3"
-	jnatsVersion = "2.25.2"
-	otlpAppenderVersion = "2.21.0-alpha"
+	springVersion = "7.0.8"
+	openApiVersion = "3.1.0"
+	jnatsVersion = "2.26.2"
+	lettuceVersion = "7.7.0.RELEASE"
+	otlpAppenderVersion = "2.28.1-alpha"
+	nettyVersion = "4.2.17.Final"
+}
+
+subprojects {
+	apply plugin: 'java'
+	apply plugin: 'io.spring.dependency-management'
+
+	version = '0.0.1-SNAPSHOT'
+
+	dependencyManagement {
+		imports {
+			mavenBom "org.springframework.boot:spring-boot-dependencies:4.1.0"
+		}
+	}
+
+	java {
+		toolchain {
+			languageVersion = JavaLanguageVersion.of(26)
+		}
+	}
+
+	repositories {
+		mavenCentral()
+	}
+
+	bootJar {
+		enabled = false
+	}
+
+	jar {
+		enabled = true
+	}
+
+	dependencies {
+		implementation 'org.springframework.boot:spring-boot-starter'
+	}
+}
+
+bootJar {
+	enabled = true
 }
 
 dependencies {
+	// Project dependencies
+	implementation project(':core')
+	implementation project(':fraud')
+
+	// Spring Boot Starters for the main application
 	implementation 'org.springframework.boot:spring-boot-starter'
 	implementation 'org.springframework.boot:spring-boot-starter-opentelemetry'
 	implementation("io.opentelemetry.instrumentation:opentelemetry-logback-appender-1.0:${otlpAppenderVersion}")
@@ -34,12 +80,19 @@ dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-web'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-actuator'
-	implementation ("org.springframework:spring-aspects:${springVersion}")
+	
+	// Other dependencies
+	implementation 'org.springframework:spring-aspects'
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:${openApiVersion}")
 	implementation("io.nats:jnats:${jnatsVersion}")
+	implementation("io.lettuce:lettuce-core:${lettuceVersion}")
+	implementation("io.netty:netty-transport-native-epoll")
+	implementation("io.netty:netty-transport-native-epoll:${nettyVersion}:linux-x86_64")
 
+	// Test dependencies
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
+	implementation 'org.springframework.boot:spring-boot-webtestclient'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
@@ -47,7 +100,6 @@ dependencies {
 	testImplementation 'org.testcontainers:testcontainers-postgresql'
 
 	runtimeOnly 'org.postgresql:postgresql'
-
 }
 
 tasks.named('test') {

@@ -1,6 +1,6 @@
 package br.com.wallet.infrasctructure.messaging.dlq;
 
-import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.exceptions.TransientException;
 import br.com.wallet.infrasctructure.persistence.DlqOperationsDao;
 import io.nats.client.Connection;
@@ -66,6 +66,7 @@ public class DlqReplayEngine {
         final var headers = new Headers();
 
         headers.add("operation_id", event.operationId().toString());
+        headers.add("userId", event.userId() == null ? null : event.userId().toString());
         headers.add("replayed", "true");
         headers.add("replay_count", String.valueOf(event.retryCount()));
 

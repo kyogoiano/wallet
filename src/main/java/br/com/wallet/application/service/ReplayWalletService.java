@@ -1,6 +1,6 @@
 package br.com.wallet.application.service;
 
-import br.com.wallet.application.aspects.tracing.Traceable;
+import br.com.wallet.core.tracing.Traceable;
 import br.com.wallet.application.usecase.ReplayWalletUseCase;
 import br.com.wallet.domain.LedgerType;
 import br.com.wallet.infrasctructure.persistence.LedgerDao;

@@ -17,7 +17,7 @@ public record DepositCompletedEvent(
         Objects.requireNonNull(operationId, "operationId cannot be null");
     }
 
-    public String eventType() { return "DEPOSIT_COMPLETED"; }
+    public DomainEventType eventType() { return DomainEventType.DEPOSIT_COMPLETED; }
     public UUID aggregateId() { return operationId; }
     public String aggregateType() { return "WALLET_OPERATION"; }
     public UUID partitionKey() { return walletId; }

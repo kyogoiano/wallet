@@ -1,19 +1,16 @@
 package br.com.wallet.config;
 
+import br.com.wallet.infrasctructure.messaging.publisher.JetStreamConfig;
 import io.nats.client.Connection;
-import io.nats.client.JetStreamApiException;
-import io.nats.client.JetStreamManagement;
-import io.nats.client.api.StreamConfiguration;
-import org.jspecify.annotations.NonNull;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.context.annotation.Configuration;
 
-import java.util.List;
+import java.time.Duration;
 
 @Configuration
-public class NatsJetStreamBootstrap implements InitializingBean {
+public class NatsJetStreamBootstrap implements InitializingBean, JetStreamConfig {
     private static final Logger log = LoggerFactory.getLogger(NatsJetStreamBootstrap.class);
 
     private final Connection connection;
@@ -26,27 +23,8 @@ public class NatsJetStreamBootstrap implements InitializingBean {
     public void afterPropertiesSet() throws Exception {
         var jsm = connection.jetStreamManagement();
         log.info(">>>> Inicializando Streams NATS...");
-        createStream(jsm, "commands", List.of("commands.*"));
-        createStream(jsm, "commands_dlq", List.of("commands.dlq.*"));
-        createStream(jsm, "events", List.of("events.*"));
-    }
-
-    private void createStream(@NonNull JetStreamManagement jsm,
-                              @NonNull String name,
-                              @NonNull List<String> subjects) throws Exception {
-        try {
-            jsm.getStreamInfo(name);
-            log.info("Stream '{}' already exists!.", name);
-        } catch (JetStreamApiException e) {
-            if (e.getApiErrorCode() == 10059 || e.getErrorCode() == 404) {
-                jsm.addStream(StreamConfiguration.builder()
-                        .name(name)
-                        .subjects(subjects)
-                        .build());
-                log.info("Stream '{}' created successfully!", name);
-            } else {
-                throw e;
-            }
-        }
+        ensureStream(jsm, "commands", "commands.*", Duration.ofHours(24));
+        ensureStream(jsm, "commands_dlq", "commands.dlq.*", Duration.ofDays(7));
+        ensureStream(jsm, "events", "events.*", Duration.ofDays(7));
     }
 }

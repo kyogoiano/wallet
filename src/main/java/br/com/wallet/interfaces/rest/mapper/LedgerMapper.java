@@ -10,6 +10,7 @@ public class LedgerMapper {
                 entry.amount(),
                 entry.type().name(),
                 entry.operationId(),
+                entry.userId(),
                 entry.sequence(),
                 entry.hash(),
                 entry.previousHash(),

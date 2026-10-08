@@ -1,5 +1,6 @@
 package br.com.wallet.interfaces.rest.controller;
 
+import br.com.wallet.application.fraud.FraudCheckHelper;
 import br.com.wallet.domain.context.Deposit;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Withdraw;
@@ -23,9 +24,12 @@ public class OperationsController implements OperationsApi {
 
     private static final Logger log = LoggerFactory.getLogger(OperationsController.class);
     private final NatsCommandPublisher natsCommandPublisher;
+    private final FraudCheckHelper fraudCheckHelper;
 
-    public OperationsController(final NatsCommandPublisher natsCommandPublisher) {
+    public OperationsController(final NatsCommandPublisher natsCommandPublisher,
+                                final FraudCheckHelper fraudCheckHelper) {
         this.natsCommandPublisher = natsCommandPublisher;
+        this.fraudCheckHelper = fraudCheckHelper;
     }
 
     @PostMapping("/transfer")
@@ -39,7 +43,9 @@ public class OperationsController implements OperationsApi {
                 command.from(), command.to(), command.amount());
         
         var transfer = new Transfer(command.from(), command.to(), command.amount(), operationId);
-        
+
+        fraudCheckHelper.performFraudCheck(transfer);
+
         return natsCommandPublisher.publishAsync("commands.transfer", transfer)
                 .thenAccept(ack -> log.debug("Transfer command ACKed by NATS: seq={}", ack.getSeqno()));
     }
@@ -51,8 +57,10 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final DepositCommand command) {
 
-        var deposit = new Deposit(command.walletId(), command.amount(), operationId);
-        
+        var deposit = new Deposit(command.walletId(), command.userId(), command.amount(), operationId);
+
+        fraudCheckHelper.performFraudCheck(deposit);
+
         return natsCommandPublisher.publishAsync("commands.deposit", deposit)
                 .thenAccept(ack -> log.debug("Deposit command ACKed by NATS: seq={}", ack.getSeqno()));
     }
@@ -64,8 +72,10 @@ public class OperationsController implements OperationsApi {
             @RequestHeader("Idempotency-Key") UUID operationId,
             @RequestBody @Valid final WithdrawCommand command) {
 
-        var withdraw = new Withdraw(command.walletId(), command.amount(), operationId);
-        
+        final var withdraw = new Withdraw(command.walletId(), command.userId(), command.amount(), operationId);
+
+        fraudCheckHelper.performFraudCheck(withdraw);
+
         return natsCommandPublisher.publishAsync("commands.withdraw", withdraw)
                 .thenAccept(ack -> log.debug("Withdraw command ACKed by NATS: seq={}", ack.getSeqno()));
     }

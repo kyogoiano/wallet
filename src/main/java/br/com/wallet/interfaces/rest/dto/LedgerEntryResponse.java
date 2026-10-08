@@ -9,6 +9,7 @@ public record LedgerEntryResponse(
         BigDecimal amount,
         String type,
         UUID operationId,
+        UUID userId,
         Long sequence,
         String hash,
         String previousHash,

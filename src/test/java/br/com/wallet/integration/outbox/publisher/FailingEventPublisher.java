@@ -1,11 +1,13 @@
 package br.com.wallet.integration.outbox.publisher;
 
+import br.com.wallet.domain.event.DomainEventType;
 import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Primary;
 import org.springframework.stereotype.Component;
 
+import java.io.IOException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
@@ -20,10 +22,11 @@ public class FailingEventPublisher implements EventPublisher {
     }
 
     @Override
-    public void publish(String eventType, String payload) {
+    public void publish(DomainEventType eventType, String payload) throws IOException {
+
         if (failCount.getAndDecrement() > 0) {
             throw new RuntimeException("Simulated failure");
         }
-        log.info("📤 Publishing event. type={}, payload={}", eventType, payload);
+        log.info("📤 Publishing event. type={}, payload={}", eventType.name(), payload);
     }
 }

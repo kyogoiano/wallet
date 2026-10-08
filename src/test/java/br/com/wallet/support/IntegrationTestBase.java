@@ -4,15 +4,14 @@ package br.com.wallet.support;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
-import org.springframework.test.context.ActiveProfiles;
 import org.testcontainers.containers.GenericContainer;
-import org.testcontainers.containers.PostgreSQLContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
+import org.testcontainers.postgresql.PostgreSQLContainer;
+import org.testcontainers.utility.DockerImageName;
 import tools.jackson.databind.ObjectMapper;
 
 
 @TestConfiguration(proxyBeanMethods = false)
-@ActiveProfiles("test")
 public class IntegrationTestBase {
 
     @Bean
@@ -20,23 +19,44 @@ public class IntegrationTestBase {
         return new ObjectMapper();
     }
 
+    private static final DockerImageName POSTGRES_FSYNC_OFF_IMAGE = DockerImageName.parse("postgres:18.3-alpine");
+
+    /**
+     * Optimized postgres image
+     * fsync força o banco a esperar a gravação física no disco
+     * synchronous_commit=off: O banco não espera o flush do log de transações para o disco.
+     * full_page_writes=off: Desativa a proteção contra gravações parciais de página (comum após quedas de energia).
+     * withTmpFs: Monta o diretório de dados do Postgres na memória RAM (tmpfs), o que é drasticamente mais rápido que o disco.
+     * @return PostgreSQLContainer
+     */
     @Bean
     @ServiceConnection
-    public PostgreSQLContainer<?> postgresContainer() {
-        return new PostgreSQLContainer<>("postgres:18.3-alpine").withDatabaseName("wallet")
+    public PostgreSQLContainer postgresContainer() {
+        return new PostgreSQLContainer(POSTGRES_FSYNC_OFF_IMAGE)
+                //.withCommand("postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "full_page_writes=off")
+                //.withTmpFs(Map.of("/var/lib/postgresql/data", "rw"))
+                .withReuse(true)
+                .withDatabaseName("wallet")
                 .withUsername("test")
                 .withPassword("test")
                 .withInitScript("schema.sql");
     }
 
+    private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.12.6-alpine");
+
     // Definimos como static para que ele inicie antes do Contexto do Spring
-    public static final GenericContainer<?> NATS_CONTAINER = new GenericContainer<>("nats:2.12.6-alpine")
+    public static final GenericContainer<?> NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
             .withExposedPorts(4222)
             .withCommand("-js")
             .waitingFor(Wait.forListeningPort());
 
+    private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:8.6-alpine");
+    public static final GenericContainer<?> REDIS = new GenericContainer<>(REDIS_IMAGE).withExposedPorts(6379);
+
+
     static {
         NATS_CONTAINER.start();
+        REDIS.start();
     }
 
     @Bean

@@ -1,0 +1,22 @@
+
+
+group = 'br.com.wallet.fraud'
+ext {
+    caffeineVersion = "3.2.4"
+    resilience4jVersion = "2.4.0"
+    lettuceVersion = "7.7.0.RELEASE"
+}
+
+dependencies {
+    implementation project(":core") // Fraud module depends on core for tracing, etc.
+    implementation("io.lettuce:lettuce-core:${lettuceVersion}")
+    implementation("com.github.ben-manes.caffeine:caffeine:${caffeineVersion}")
+    implementation("io.github.resilience4j:resilience4j-spring-boot4:${resilience4jVersion}")
+    // Spring Boot Test dependencies for fraud module
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+    useJUnitPlatform()
+}

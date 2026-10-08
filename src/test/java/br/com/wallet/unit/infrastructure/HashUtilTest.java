@@ -17,6 +17,7 @@ class HashUtilTest {
 
         var walletId = UUID.randomUUID();
         var operationId = UUID.randomUUID();
+        var userId = UUID.randomUUID();
         var sequence = 1L;
         var now = Instant.ofEpochMilli(1700000000000L);
 
@@ -30,6 +31,7 @@ class HashUtilTest {
                 LedgerType.CREDIT,
                 sequence,
                 operationId,
+                userId,
                 now
         );
 
@@ -40,6 +42,7 @@ class HashUtilTest {
                 LedgerType.CREDIT,
                 sequence,
                 operationId,
+                userId,
                 now
         );
 
@@ -56,6 +59,7 @@ class HashUtilTest {
                 LedgerType.CREDIT,
                 1L,
                 UUID.fromString("00000000-0000-0000-0000-000000000002"),
+                UUID.fromString("00000000-0000-0000-0000-000000000003"),
                 Instant.ofEpochMilli(1700000000000L)
         );
 
@@ -67,6 +71,7 @@ class HashUtilTest {
 
         var walletId = UUID.randomUUID();
         var operationId = UUID.randomUUID();
+        var userId = UUID.randomUUID();
         var now = Instant.ofEpochMilli(1700000000000L);
 
         var input1 = HashUtils.buildLedgerHashInput(
@@ -76,6 +81,7 @@ class HashUtilTest {
                 LedgerType.DEBIT,
                 2L,
                 operationId,
+                userId,
                 now
         );
 
@@ -86,6 +92,7 @@ class HashUtilTest {
                 LedgerType.DEBIT,
                 2L,
                 operationId,
+                userId,
                 now
         );
 

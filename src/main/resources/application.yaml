@@ -9,11 +9,19 @@ spring:
   sql:
     init:
       mode: always
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
   application:
     name: wallet
   threads:
     virtual:
       enabled: true
+  cache:
+    cache-names: fraudBlockedUsers
+    caffeine:
+      spec: maximumSize=10000,expireAfterWrite=5m
 management:
   endpoints:
     web:
@@ -67,3 +75,8 @@ logging:
 nats:
   url: nats://nats:4222
   token: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+
+redis:
+  socket:
+    enabled: ${REDIS_SOCKET_ENABLED:false}
+    path: ${REDIS_SOCKET_PATH:/var/run/redis/redis.sock}

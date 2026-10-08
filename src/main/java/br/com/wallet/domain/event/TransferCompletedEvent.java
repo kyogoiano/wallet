@@ -28,8 +28,8 @@ public record TransferCompletedEvent(
     }
 
     @Override
-    public String eventType() {
-        return "TRANSFER_COMPLETED";
+    public DomainEventType eventType() {
+        return DomainEventType.TRANSFER_COMPLETED;
     }
 
     @Override

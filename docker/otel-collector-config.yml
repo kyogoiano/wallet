@@ -11,8 +11,8 @@ exporters:
   otlp_http/openobserve:
     endpoint:  http://openobserve:5080/api/default
     headers:
-      # Base64 de leandro.ueg@gmail.com:admin123
-      Authorization: Basic bGVhbmRyby51ZWdAZ21haWwuY29tOmFkbWluMTIz
+      # Base64 of leandro.ueg@gmail.com:Admin123!@#
+      Authorization: Basic bGVhbmRyby51ZWdAZ21haWwuY29tOkFkbWluMTIzIUAj
     compression: gzip
     sending_queue:
       enabled: true

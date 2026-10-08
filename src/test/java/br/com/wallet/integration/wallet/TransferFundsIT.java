@@ -4,12 +4,12 @@ import br.com.wallet.application.usecase.CreateWalletUseCase;
 import br.com.wallet.application.usecase.TransferFundsUseCase;
 import br.com.wallet.domain.context.Transfer;
 import br.com.wallet.domain.context.Wallet;
-import br.com.wallet.exceptions.IdempotencyException;
+import br.com.wallet.core.exceptions.IdempotencyException;
 import br.com.wallet.exceptions.InsufficientFundsException;
 import br.com.wallet.integration.wallet.scenarios.TransferScenario;
 import br.com.wallet.support.DatabaseCleaner;
 import br.com.wallet.support.IntegrationTestBase;
-import br.com.wallet.support.RegisterNatsProperties;
+import br.com.wallet.support.DockerProperties;
 import br.com.wallet.support.TestDataHelper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +18,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.test.context.ActiveProfiles;
 
 import java.math.BigDecimal;
 import java.util.UUID;
@@ -28,8 +29,9 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 
 @SpringBootTest
+@ActiveProfiles("test")
 @Import(IntegrationTestBase.class)
-class TransferFundsIT extends RegisterNatsProperties {
+class TransferFundsIT extends DockerProperties {
 
     static Stream<TransferScenario> transferScenarios() {
         return Stream.of(
@@ -77,9 +79,11 @@ class TransferFundsIT extends RegisterNatsProperties {
             TransferScenario scenario) {
         // given
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, scenario.initialFrom(), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         // when
         transferFundsUseCase.handle(new Transfer(from, to, scenario.transferAmount(), UUID.randomUUID()));
@@ -93,9 +97,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     void shouldFailWhenInsufficientBalance() {
         // given
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, BigDecimal.TEN, fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         // when / then
         assertThatThrownBy(() ->
@@ -106,7 +112,8 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldNotAllowTransferToSameWallet() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
 
         assertThatThrownBy(() ->
                 transferFundsUseCase.handle(new Transfer(from, from, BigDecimal.TEN, UUID.randomUUID()))
@@ -116,9 +123,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldInsertOutboxEventOnTransfer() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         UUID opId = UUID.randomUUID();
 
@@ -132,9 +141,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldNotDuplicateOutboxEventOnRetry() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, UUID.randomUUID()));
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(to, BigDecimal.ONE, toUserId, UUID.randomUUID()));
 
         UUID opId = UUID.randomUUID();
         var transfer = new Transfer(from, to, new BigDecimal("50"), opId);
@@ -149,9 +160,11 @@ class TransferFundsIT extends RegisterNatsProperties {
     @Test
     void shouldHaveStrictlyIncreasingSequence() {
         var from = UUID.randomUUID();
-        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), UUID.randomUUID()));
+        var fromUserId = UUID.randomUUID();
+        createWalletUseCase.handle(new Wallet(from, new BigDecimal("100"), fromUserId, UUID.randomUUID()));
         var to = UUID.randomUUID();
-        createWalletUseCase.handle(to);
+        var toUserId = UUID.randomUUID();
+        createWalletUseCase.handle(to, toUserId);
 
         var transfer50 = new Transfer(from, to, new BigDecimal("50"), UUID.randomUUID());
         transferFundsUseCase.handle(transfer50);

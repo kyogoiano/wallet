@@ -1,5 +1,6 @@
 package br.com.wallet.unit.infrastructure.outbox;
 
+import br.com.wallet.domain.event.DomainEventType;
 import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
 import br.com.wallet.infrasctructure.outbox.OutboxEvent;
 import br.com.wallet.infrasctructure.outbox.OutboxRelay;
@@ -11,6 +12,7 @@ import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -40,7 +42,7 @@ class OutboxRelayTest {
     private OutboxRelay relay;
 
     @Test
-    void shouldPublishAndMarkAsProcessed() {
+    void shouldPublishAndMarkAsProcessed() throws IOException {
 
         var now = Instant.now();
         when(clock.instant()).thenReturn(now);
@@ -57,13 +59,13 @@ class OutboxRelayTest {
 
         relay.process();
 
-        verify(publisher).publish(eq("TRANSFER_COMPLETED"), anyString());
+        verify(publisher).publish(eq(DomainEventType.TRANSFER_COMPLETED), anyString());
         verify(outboxDao).markAsProcessed(event.id(), now);
         verify(outboxDao, never()).markFailed(any(), any());
     }
 
     @Test
-    void shouldMarkAsFailedWhenPublisherThrows() {
+    void shouldMarkAsFailedWhenPublisherThrows() throws IOException {
 
         var now = Instant.now();
         when(clock.instant()).thenReturn(now);
@@ -78,7 +80,7 @@ class OutboxRelayTest {
         when(outboxDao.claimBatch(now, 100))
                 .thenReturn(List.of(event));
 
-        doThrow(new RuntimeException("boom"))
+        doThrow(new IOException("boom"))
                 .when(publisher)
                 .publish(any(), any());
 
@@ -89,7 +91,7 @@ class OutboxRelayTest {
     }
 
     @Test
-    void shouldContinueProcessingOtherEventsWhenOneFails() {
+    void shouldContinueProcessingOtherEventsWhenOneFails() throws IOException {
 
         var now = Instant.now();
         when(clock.instant()).thenReturn(now);
@@ -113,7 +115,7 @@ class OutboxRelayTest {
 
         doThrow(new RuntimeException())
                 .when(publisher)
-                .publish(eq("TRANSFER_COMPLETED"), any());
+                .publish(eq(DomainEventType.TRANSFER_COMPLETED), any());
 
         relay.process();
 

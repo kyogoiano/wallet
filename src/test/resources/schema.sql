@@ -3,6 +3,7 @@ CREATE TABLE IF NOT EXISTS accounts (
     id UUID PRIMARY KEY,
     balance NUMERIC(19,2) NOT NULL CHECK (balance >= 0),
     version BIGINT NOT NULL DEFAULT 0,
+    user_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     last_sequence BIGINT DEFAULT 0
 );
@@ -16,6 +17,7 @@ CREATE TABLE IF NOT EXISTS ledger (
     type VARCHAR(10) NOT NULL,
     reference_id UUID,
     operation_id UUID NOT NULL,
+    user_id UUID NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     -- tamper-proof fields
@@ -73,7 +75,7 @@ CREATE TABLE IF NOT EXISTS outbox (
     CONSTRAINT outbox_status_chk
         CHECK (status IN ('PENDING', 'FAILED', 'PROCESSING', 'PROCESSED', 'DEAD')),
     CONSTRAINT outbox_event_type_chk -- might be removed for flexibility
-        CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED'))
+        CHECK (event_type IN ('TRANSFER_COMPLETED', 'DEPOSIT_COMPLETED', 'WITHDRAW_COMPLETED', 'FRAUD'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_outbox_unprocessed
@@ -97,6 +99,7 @@ CREATE TABLE IF NOT EXISTS dlq_operations (
     id UUID,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     operation_id UUID NOT NULL,
+    user_id UUID,
     subject VARCHAR(20) NOT NULL,
     status VARCHAR(20) NOT NULL DEFAULT 'PENDING',
     error TEXT,

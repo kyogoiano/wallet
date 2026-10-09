@@ -1,0 +1,1092 @@
+Sim. Esta é uma **boa SPEC-004 como direção**, mas eu **não a consideraria pronta para PLAN ainda**. Diferentemente da 003.2, aqui existem alguns contratos de segurança e execução que precisam ser fechados antes, porque o risco é o Antigravity implementar um fluxo aparentemente correto que ainda permite **double execution, tenant spoofing ou execução fora do gate humano**.
+
+Eu faria a revisão em camadas.
+
+# Veredito geral
+
+**Arquitetura conceitual:** 🟢 correta
+**Boundary Modulith:** 🟢 correta
+**AI fora do critical path:** 🟢 correta
+**Human-in-the-loop:** 🟢 princípio correto
+**MCP read-only:** 🟢 direção correta
+**Proposal model:** 🟡 precisa fechar contrato
+**Approval/execution:** 🔴 precisa fechar idempotência/concurrency
+**Tenant security:** 🔴 exemplo atual viola nossa security boundary
+**Events:** 🟡 precisa alinhar com SPEC-000.12
+**MCP architecture:** 🟡 falta separar capability de transport adapter
+
+Minha avaliação: **Draft → precisa de uma History/Review pass antes do PLAN.**
+
+---
+
+# 1. 🔴 O maior problema: `X-Tenant-Id`
+
+Temos um conflito direto com `SPEC-000.9.3`.
+
+A SPEC-004 diz:
+
+```http
+Headers:
+  X-Tenant-Id: tenant-alpha
+```
+
+e o exemplo de curl faz:
+
+```bash
+-H "X-Tenant-Id: tenant-alpha"
+```
+
+Isso não pode permanecer como mecanismo de tenant.
+
+Nosso contrato de segurança já estabelece:
+
+> `X-Tenant-Id` não participa de autenticação, autorização, routing ou rate limiting.
+
+O tenant confiável vem da **credential autenticada na Edge**, sendo propagado como contexto confiável.
+
+Portanto a SPEC-004 deveria dizer explicitamente:
+
+```text
+I-AI-004:
+TenantContext MUST be derived from authenticated security context.
+Client-supplied X-Tenant-Id MUST NOT establish or override tenant identity.
+```
+
+E o exemplo deveria ser algo como:
+
+```http
+POST /api/v1/copilot/proposals/{id}/approve
+Authorization: <authenticated credential>
+```
+
+sem `X-Tenant-Id`.
+
+Isso é **MUST**, não uma melhoria.
+
+---
+
+# 2. 🔴 `HumanApprove → Execute` precisa de idempotência forte
+
+Este trecho é insuficiente:
+
+```text
+Execute(Proposal) iff
+HumanApprove(proposalId)
+AND Status = PROPOSED
+AND now <= expiresAt
+```
+
+Imagine:
+
+```text
+Request A → approve proposal
+Request B → approve proposal
+```
+
+ou:
+
+```text
+A → execute transfer
+A → database timeout
+A → response lost
+```
+
+O cliente tenta novamente.
+
+Sem uma identidade de execução persistente, podemos ter:
+
+```text
+R$ 100
+R$ 100
+```
+
+executados para uma única proposta.
+
+Isso é particularmente grave porque já temos no Wallet V4 o princípio de:
+
+> `operationId` = identidade financeira de idempotência.
+
+Então `FinancialProposal` deveria carregar uma identidade de execução determinística, por exemplo conceitualmente:
+
+```text
+proposalId
+executionOperationId
+```
+
+e, para uma proposta aprovada, **toda tentativa de execução reutiliza o mesmo `operationId`**.
+
+Não devemos criar um novo `operationId` a cada retry.
+
+Eu transformaria isso em novo invariant, algo como:
+
+### `I-AI-006 — Proposal Execution Idempotency`
+
+```text
+A FinancialProposal MUST have one immutable execution identity.
+Repeated approval or execution attempts for the same proposal MUST NOT
+produce more than one underlying financial effect.
+The execution identity MUST remain stable across retries.
+```
+
+Isso é fundamental.
+
+---
+
+# 3. 🔴 Existe um problema ainda maior: aprovação e execução não são atomicamente equivalentes
+
+Hoje temos:
+
+```text
+PROPOSED
+   ↓
+approve
+   ↓
+execute use case
+   ↓
+EXECUTED
+```
+
+Mas imagine:
+
+```text
+1. Human approves
+2. Transfer executes successfully
+3. Database update proposal → EXECUTED fails
+4. Client retries
+5. Proposal still says PROPOSED
+6. Transfer executes again
+```
+
+Portanto o contrato não pode depender apenas de:
+
+```text
+status == PROPOSED
+```
+
+O status da proposal é **controle/auditoria**, enquanto a idempotência do efeito financeiro precisa ser garantida pelo **command/use case downstream**.
+
+Eu colocaria explicitamente:
+
+```text
+Proposal status MUST NOT be the sole mechanism preventing duplicate
+financial execution.
+
+Underlying mutation use cases MUST enforce their own idempotency using
+the proposal's immutable execution identity.
+```
+
+Isso se encaixa perfeitamente no desenho que já temos para `operationId`.
+
+---
+
+# 4. 🔴 Precisamos definir o lifecycle de `FinancialProposal`
+
+Atualmente aparecem:
+
+```text
+PROPOSED
+EXECUTED
+REJECTED
+EXPIRED
+INVALIDATED
+```
+
+Mas não existe uma máquina de estados formal.
+
+Precisamos pelo menos definir:
+
+```text
+PROPOSED
+ ├── REJECTED
+ ├── EXPIRED
+ ├── INVALIDATED
+ └── EXECUTED
+```
+
+E as transições permitidas.
+
+Por exemplo:
+
+| Current     | Action              | Result           |
+| ----------- | ------------------- | ---------------- |
+| PROPOSED    | approve + valid     | EXECUTED         |
+| PROPOSED    | reject              | REJECTED         |
+| PROPOSED    | TTL elapsed         | EXPIRED          |
+| PROPOSED    | precondition failed | INVALIDATED      |
+| EXECUTED    | approve             | no-op/idempotent |
+| REJECTED    | approve             | reject           |
+| EXPIRED     | approve             | reject           |
+| INVALIDATED | approve             | reject           |
+
+Não precisamos necessariamente introduzir `APPROVED` ou `EXECUTING`.
+
+Na verdade, **eu evitaria inventar esses estados agora**, porque o modelo atual é deliberadamente simples.
+
+Mas a máquina de estados precisa existir.
+
+---
+
+# 5. 🔴 TTL não pode depender do sweeper
+
+`REQ-COPILOT-006` está corretamente como `[SHOULD]`.
+
+Porém existe uma distinção importante:
+
+### Sweeper
+
+```text
+PROPOSED
+   ↓
+15 minutos passam
+   ↓
+background job
+   ↓
+EXPIRED
+```
+
+Isso é apenas limpeza/consistência operacional.
+
+### Approval
+
+Mesmo sem sweeper:
+
+```text
+POST approve
+       ↓
+now > expiresAt
+       ↓
+EXPIRED / INVALIDATED
+```
+
+deve ser rejeitado.
+
+A própria `REQ-COPILOT-005` já implica isso, mas eu deixaria explícito:
+
+> **Expiration enforcement during approval is MUST; background expiration is SHOULD.**
+
+Ou seja:
+
+```text
+REQ-COPILOT-005
+  = authoritative TTL enforcement
+
+REQ-COPILOT-006
+  = asynchronous state cleanup
+```
+
+Isso é uma distinção importante.
+
+---
+
+# 6. 🔴 `FinancialProposal` precisa ser um contrato mais forte
+
+Hoje:
+
+> `parameters JSON`
+
+é muito aberto.
+
+Para uma entidade financeira/auditável, precisamos definir que o JSON é um **snapshot imutável dos parâmetros aprovados pelo humano**.
+
+Algo conceitualmente:
+
+```text
+FinancialProposal
+├── proposalId
+├── tenantId
+├── walletId
+├── type
+├── parameters
+├── createdAt
+├── expiresAt
+├── status
+├── executionOperationId
+├── createdBy
+├── approvedBy
+├── approvedAt
+├── executedAt
+└── executionReference
+```
+
+Não estou dizendo que todos esses campos precisam obrigatoriamente entrar agora — alguns podem ser definidos no PLAN.
+
+Mas alguns são particularmente importantes:
+
+### MUST
+
+* `proposalId`
+* `tenantId`
+* mutation type
+* immutable parameters snapshot
+* `status`
+* `createdAt`
+* `expiresAt`
+* immutable execution identity
+
+### Para auditoria
+
+* proposer/agent identity
+* approver identity
+* approval timestamp
+* execution reference
+
+E principalmente:
+
+> **o approval deve ser sobre exatamente os parâmetros armazenados na proposal.**
+
+O agente não pode criar:
+
+```text
+proposal:
+transfer R$ 50
+```
+
+e depois a execução usar:
+
+```text
+transfer R$ 500
+```
+
+por ter relido ou reconstruído parâmetros externamente.
+
+---
+
+# 7. 🔴 Tenant isolation precisa ser `(T, W, U)` mas com identidade confiável
+
+A fórmula:
+
+```text
+(T, W, U)
+```
+
+é boa.
+
+Mas precisamos distinguir:
+
+```text
+tenantId
+walletId
+userId
+```
+
+de identidade fornecida pelo cliente.
+
+Para aprovação:
+
+```text
+authenticatedTenant
+authenticatedPrincipal
+        ↓
+proposal lookup
+        ↓
+proposal.tenantId == authenticatedTenant
+```
+
+Nunca:
+
+```text
+request.tenantId == proposal.tenantId
+```
+
+O mesmo vale para os MCP tools.
+
+Por exemplo:
+
+```text
+wallet_get_balance(walletId)
+```
+
+não significa:
+
+```text
+"qualquer agente pode consultar esse walletId"
+```
+
+A resolução é:
+
+```text
+authenticated tenant
+        +
+walletId
+        ↓
+authorized access
+```
+
+---
+
+# 8. 🟡 MCP não deveria ser tratado como parte da capability
+
+Aqui eu faria uma pequena evolução arquitetural.
+
+A SPEC diz:
+
+> `br.com.wallet.copilot` exposes capabilities via MCP
+
+Mas nosso princípio anterior é:
+
+> Capability ≠ Module ≠ Tool.
+
+E isso foi justamente uma decisão histórica importante.
+
+Eu estruturaria conceitualmente:
+
+```text
+                    External AI Agent
+                           │
+                         MCP
+                           │
+                    MCP Adapter/Gateway
+                           │
+                    copilot::api
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+        Read Use Cases              Proposal Use Cases
+             │                           │
+       ledger/intelligence        savings/goals/ledger
+```
+
+O MCP é **transport/adapter**.
+
+O domínio `copilot` não deveria ficar acoplado ao protocolo MCP.
+
+Isso também facilita testar:
+
+```text
+MCP → Copilot API
+REST → Copilot API
+```
+
+sem duplicar regras.
+
+Portanto eu adicionaria algo como:
+
+### `I-AI-006` ou novo invariant arquitetural
+
+> MCP transport is an adapter and MUST NOT become the domain contract of `copilot`.
+
+Isso é especialmente importante para não transformar `br.com.wallet.copilot` em um "MCP module" monolítico.
+
+---
+
+# 9. 🟢 A separação Read vs Write está excelente
+
+Esta parte eu manteria.
+
+Temos dois fluxos muito claros:
+
+### Read
+
+```text
+AI
+ ↓
+MCP
+ ↓
+Copilot API
+ ↓
+ledger/intelligence/goals APIs
+ ↓
+deterministic result
+```
+
+### Mutation
+
+```text
+AI
+ ↓
+MCP
+ ↓
+Copilot
+ ↓
+FinancialProposal(PROPOSED)
+ ↓
+human
+ ↓
+approval
+ ↓
+deterministic use case
+ ↓
+financial/configuration state
+```
+
+Essa separação é uma das partes mais fortes da SPEC.
+
+E respeita:
+
+```text
+AI ≠ authority
+AI = proposer
+Human = authorization
+Domain use case = execution authority
+```
+
+---
+
+# 10. 🔴 Transfer proposal precisa respeitar o modelo de segurança existente
+
+Este tool:
+
+```text
+copilot_propose_transfer(
+    sourceWalletId,
+    targetWalletId,
+    amount,
+    description
+)
+```
+
+não pode simplesmente produzir uma proposal válida.
+
+Na criação da proposal precisamos pelo menos validar:
+
+```text
+sourceWallet exists
+sourceWallet belongs to authenticated tenant
+targetWallet exists
+targetWallet belongs to same tenant
+amount > 0
+```
+
+E, principalmente:
+
+> **a criação da proposal não deve reservar/mover dinheiro.**
+
+Não deve:
+
+```text
+SELECT FOR UPDATE
+debit
+credit
+```
+
+no momento da proposta.
+
+A validação financeira definitiva ocorre na execução/aprovação, porque saldo e demais precondições podem mudar nos 15 minutos seguintes.
+
+Isso conversa diretamente com `I-AI-005`.
+
+---
+
+# 11. 🟡 Savings e Goals também precisam de precondition semantics
+
+Aqui:
+
+```text
+savings rule
+goal adjustment
+transfer
+```
+
+há três tipos diferentes de mutation.
+
+Não devemos assumir que todos possuem as mesmas preconditions.
+
+Por exemplo:
+
+```text
+Transfer
+→ source account
+→ target account
+→ balance
+→ tenant
+→ amount
+```
+
+enquanto:
+
+```text
+Goal adjustment
+→ goal exists
+→ tenant
+→ targetAmount
+→ targetDate
+```
+
+e:
+
+```text
+Savings rule
+→ plan exists
+→ tenant
+→ ruleType
+→ ratio/threshold
+```
+
+Então `FinancialProposal` deve ser genericamente tipada pelo `type`, mas a **validação final de cada mutation deve continuar pertencendo ao domínio que executa a operação**.
+
+Copilot não deve virar uma segunda implementação de `SavingsPlanUseCase`, `GoalUseCase` ou `TransferUseCase`.
+
+---
+
+# 12. 🟡 Proposal creation precisa de idempotência também
+
+Existe uma diferença entre:
+
+### Execution idempotency
+
+```text
+proposalId → one financial effect
+```
+
+e:
+
+### Proposal creation idempotency
+
+```text
+same AI request retried
+       ↓
+one proposal
+```
+
+Imagine timeout:
+
+```text
+AI → propose transfer 100
+Copilot creates proposal
+response lost
+AI retries
+```
+
+Sem idempotency teremos:
+
+```text
+proposal A
+proposal B
+```
+
+Isso não necessariamente viola o financial ledger, mas gera propostas duplicadas e pode causar duas aprovações humanas.
+
+Eu não necessariamente tornaria isso um novo requirement agora, mas **o PLAN precisa decidir explicitamente** se a criação terá:
+
+```text
+idempotencyKey
+```
+
+ou se `proposalId` será sempre novo e duplicidade será aceitável.
+
+Para um Copilot financeiro, minha preferência arquitetural seria **idempotência na criação**, mas isso precisa ser uma decisão formal, não uma implementação silenciosa.
+
+---
+
+# 13. 🟡 `ProposalApprovedEvent` / `ProposalExecutedEvent`
+
+A direção está correta, mas precisa respeitar `SPEC-000.12`.
+
+Esses são:
+
+```text
+intra-Core domain/application events
+```
+
+e não:
+
+```text
+NATS
+```
+
+A publicação deve usar Spring Modulith Event Publication Registry.
+
+E lembrando nossa regra:
+
+> at-least-once; listeners idempotentes por `eventId`.
+
+Portanto eu acrescentaria uma referência explícita:
+
+```text
+REQ-COPILOT-007 → SPEC-000.12
+```
+
+E não deixaria a SPEC-004 definir novamente retry/DLQ/event delivery.
+
+---
+
+# 14. 🟡 Approval não deveria necessariamente significar `EXECUTED`
+
+Há uma questão semântica interessante.
+
+Hoje:
+
+```text
+POST /approve
+    ↓
+EXECUTED
+```
+
+Isso funciona se a execução for síncrona e o endpoint realmente aguardar o use case.
+
+Mas nosso Core possui operações financeiras que podem envolver:
+
+```text
+command
+→ transaction
+→ operation status
+```
+
+Então talvez o correto seja:
+
+```text
+approve
+   ↓
+validate
+   ↓
+dispatch deterministic use case
+   ↓
+execution result
+   ↓
+EXECUTED
+```
+
+Se o use case for síncrono, perfeito.
+
+Se for assíncrono, então precisamos de:
+
+```text
+APPROVED / EXECUTING / EXECUTED
+```
+
+**Não escolheria isso agora sem verificar os contratos reais de `savings.api`, `goals.api` e `ledger.api`.**
+
+Portanto isso deve virar um **PLAN decision point**, não uma invenção no SPEC.
+
+---
+
+# 15. 🔴 Falta rate limiting / abuse boundary
+
+O MCP é uma nova superfície de entrada.
+
+Temos já:
+
+```text
+Edge
+HMAC
+tenant
+principal
+rate limiting
+```
+
+Então SPEC-004 não deve criar uma segunda autenticação independente.
+
+O fluxo deve ser:
+
+```text
+External MCP Client
+        ↓
+authenticated perimeter
+        ↓
+tenant + principal
+        ↓
+Copilot
+```
+
+E especialmente:
+
+```text
+read tools
+proposal creation
+proposal listing
+approval
+```
+
+devem estar sujeitos a authorization/rate limiting apropriados.
+
+Não precisamos detalhar os buckets aqui, pois isso pertence à security/perimeter spec.
+
+Mas a SPEC precisa declarar:
+
+> Copilot MUST consume authenticated tenant/principal context and MUST NOT establish its own identity model.
+
+---
+
+# 16. 🟢 A parte de Ollama está corretamente como COULD
+
+Eu manteria exatamente assim:
+
+```text
+REQ-COPILOT-008 [COULD]
+```
+
+E principalmente:
+
+> rationale summary
+
+não pode virar:
+
+```text
+LLM → proposal parameters
+```
+
+O fluxo seguro é:
+
+```text
+deterministic proposal
+       ↓
+optional SLM
+       ↓
+human-readable explanation
+```
+
+e nunca:
+
+```text
+SLM
+ ↓
+financial mutation decision
+```
+
+Isso também está alinhado com `SPEC-000.8.1`.
+
+---
+
+# 17. Um ponto importante: `goal simulation` não deveria depender do Copilot
+
+O tool:
+
+```text
+wallet_simulate_goal_strategy(...)
+```
+
+está correto como **exposição**.
+
+Mas a simulação deve continuar pertencendo ao `goals::api`.
+
+Então:
+
+```text
+MCP
+ ↓
+Copilot
+ ↓
+goals::api
+```
+
+e não:
+
+```text
+MCP
+ ↓
+Copilot
+ ↓
+reimplementação de goal mathematics
+```
+
+O mesmo princípio vale para cashflow:
+
+```text
+MCP
+ ↓
+Copilot
+ ↓
+intelligence::api
+ ↓
+SPEC-003.2
+```
+
+Excelente oportunidade para manter `copilot` muito fino.
+
+---
+
+# 18. A seção de testes precisa de alguns testes MUST adicionais
+
+O atual Test Triad é bom, mas faltam os testes que realmente protegem o risco financeiro.
+
+Eu acrescentaria à SPEC:
+
+### Proposal idempotency
+
+```text
+same proposal approved twice
+→ one domain execution
+→ one financial effect
+```
+
+### Concurrent approval
+
+```text
+two concurrent approvals
+→ one succeeds in execution
+→ other is idempotent/rejected
+→ never two financial effects
+```
+
+### TTL race
+
+```text
+approval near expiresAt
+→ deterministic expiration rule
+```
+
+### Parameter immutability
+
+```text
+stored proposal parameters
+≠ request mutation after creation
+```
+
+### Cross-tenant proposal
+
+```text
+Tenant B attempts to approve Tenant A proposal
+→ access rejected
+→ no execution
+```
+
+### Proposal execution failure
+
+```text
+approval
+→ domain precondition failure
+→ no financial mutation
+→ proposal INVALIDATED
+```
+
+### Retry after successful execution
+
+```text
+execution succeeded
+response lost
+retry
+→ same execution identity
+→ no duplicate effect
+```
+
+Esse último é provavelmente o teste mais importante de todos.
+
+---
+
+# 19. Eu mudaria também a seção matemática
+
+`I-AI-005` atualmente mistura:
+
+```text
+TTL
++
+balance
++
+status transitions
+```
+
+Não é exatamente uma matemática ruim, mas o contrato fica melhor se separar:
+
+### `I-AI-005 — Proposal Expiration`
+
+```text
+now > expiresAt ⇒ proposal cannot be executed
+```
+
+### novo invariant
+
+```text
+I-AI-006 — Execution Preconditions
+
+Proposal execution is permitted only when all domain-specific
+preconditions are satisfied at execution time.
+```
+
+E depois:
+
+```text
+I-AI-007 — Execution Idempotency
+```
+
+Isso torna a especificação muito mais verificável.
+
+---
+
+# 20. O modelo final que eu perseguiria
+
+A arquitetura resultante ficaria:
+
+```text
+                     EXTERNAL AI AGENT
+                            │
+                           MCP
+                            │
+                     Authenticated Edge
+                            │
+                    Copilot MCP Adapter
+                            │
+                     copilot::api
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+        READ PATH                      WRITE PATH
+             │                             │
+             ▼                             ▼
+    deterministic APIs              FinancialProposal
+             │                         PROPOSED
+      ┌──────┼──────┐                    │
+      │      │      │                    │
+    ledger goals intelligence          HUMAN
+                                      APPROVAL
+                                         │
+                                         ▼
+                              domain-specific UseCase
+                                         │
+                              ┌──────────┼──────────┐
+                              │          │          │
+                           ledger     savings     goals
+                              │          │          │
+                              └──────────┼──────────┘
+                                         │
+                                   domain effect
+```
+
+E os eventos:
+
+```text
+Copilot
+   │
+   ├── ProposalApprovedEvent
+   └── ProposalExecutedEvent
+             │
+             ▼
+   Spring Modulith Event Registry
+```
+
+**Nunca MCP → NATS → Core para comunicação interna do Copilot.**
+
+---
+
+# Minha decisão sobre a SPEC
+
+Eu classificaria os pontos assim:
+
+| Item                             | Status             |
+| -------------------------------- | ------------------ |
+| Copilot bounded context          | 🟢                 |
+| Read-only tools                  | 🟢                 |
+| Human approval concept           | 🟢                 |
+| AI critical-path isolation       | 🟢                 |
+| Modulith boundary                | 🟢                 |
+| Proposal persistence             | 🟡                 |
+| Proposal lifecycle               | 🔴                 |
+| Execution idempotency            | 🔴                 |
+| Concurrent approval              | 🔴                 |
+| Tenant derivation                | 🔴                 |
+| `X-Tenant-Id` example            | 🔴                 |
+| TTL enforcement                  | 🟡                 |
+| MCP adapter separation           | 🟡                 |
+| Goals/Intelligence API usage     | 🟢                 |
+| Savings/Goals execution boundary | 🟢                 |
+| Modulith events                  | 🟡                 |
+| Ollama                           | 🟢                 |
+| Test coverage                    | 🔴 needs additions |
+
+### Portanto:
+
+**Não criaria ainda o PLAN-004.**
+
+Primeiro faria uma **SPEC-004 History/Revision pass**, incorporando pelo menos:
+
+1. remover `X-Tenant-Id` como trusted input;
+2. formalizar `FinancialProposal` state machine;
+3. formalizar execution idempotency via `operationId`/stable execution identity;
+4. definir concurrent approval behavior;
+5. separar TTL enforcement de background sweeper;
+6. definir immutable proposal parameter snapshot;
+7. separar MCP adapter de `copilot::api`;
+8. referenciar `SPEC-000.12` para eventos;
+9. adicionar proposal/execution race tests;
+10. deixar a decisão sobre `APPROVED/EXECUTING` versus `PROPOSED → EXECUTED` para verificação dos contratos reais dos downstream APIs, sem inventar agora.
+
+**A ideia central da SPEC está correta.** O que falta não é arquitetura nova; é transformar o `FinancialProposal` de um simples registro de intenção em uma **fronteira de segurança e idempotência formal**. Isso é o que vai impedir que o Copilot vire, inadvertidamente, um segundo caminho de execução financeira.

@@ -1,0 +1,518 @@
+Yes — **I think this materially improves SPEC-004**, and I would incorporate it. But I would make one important architectural correction to the way you phrased it:
+
+> **Elicitation should be the human-interaction mechanism; Streamable HTTP should be the MCP transport; Spring AI should be the implementation framework.**
+
+They solve three different problems.
+
+I checked the current MCP/Spring AI documentation because this is a fast-moving area. Spring AI currently supports MCP Streamable HTTP, WebFlux, async clients/servers, MCP annotations, and `@McpElicitation`; its documentation also explicitly says that **Streamable HTTP replaces legacy SSE for new HTTP MCP servers**. ([Home][1])
+
+## The architecture I'd put into SPEC-004
+
+```text
+                         HUMAN
+                           ▲
+                           │
+                    MCP Elicitation
+                  form / confirmation
+                           │
+                           │
+AI Agent ───────► MCP Client
+                    │
+                    │ Streamable HTTP
+                    │
+                    ▼
+             ┌───────────────────┐
+             │  Copilot MCP      │
+             │     Adapter       │
+             │                   │
+             │ Spring AI MCP     │
+             │ Server/WebFlux    │
+             └─────────┬─────────┘
+                       │
+                 copilot::api
+                       │
+          ┌────────────┴────────────┐
+          │                         │
+       READ PATH                WRITE PATH
+          │                         │
+          ▼                         ▼
+ ledger/intelligence/       FinancialProposal
+ goals APIs                       │
+                                  │
+                         Elicitation / Human
+                                  │
+                                  ▼
+                           Approval Gate
+                                  │
+                                  ▼
+                         Domain UseCase
+                                  │
+                         ledger/goals/savings
+```
+
+This is significantly stronger than the current SPEC because the **human approval isn't just a REST side channel anymore**. The MCP interaction itself can participate in the human-in-the-loop experience.
+
+---
+
+# 1. Elicitation is particularly appropriate for the proposal flow
+
+Imagine the AI says:
+
+> "I can move R$500 from your Wallet A to Wallet B. The transfer would leave R$320 available. Do you want me to proceed?"
+
+Instead of merely returning:
+
+```json
+{
+  "proposalId": "...",
+  "status": "PROPOSED"
+}
+```
+
+the MCP server can request human input through elicitation.
+
+Conceptually:
+
+```text
+AI
+ │
+ │ copilot_propose_transfer(...)
+ ▼
+Copilot
+ │
+ │ create FinancialProposal
+ │
+ │ PROPOSED
+ ▼
+MCP Elicitation
+ │
+ ▼
+Human
+ │
+ ├── Accept
+ ├── Reject
+ └── Cancel
+```
+
+The important architectural point is:
+
+> **Elicitation does not replace `FinancialProposal`.**
+
+It is an **interaction mechanism around the proposal**, while `FinancialProposal` remains the durable financial authorization boundary.
+
+That's important for auditability.
+
+---
+
+# 2. We should distinguish two kinds of elicitation
+
+The current MCP ecosystem supports two important modes:
+
+### Form elicitation
+
+Useful for non-sensitive structured input:
+
+```text
+Do you want to transfer R$500?
+
+[ Confirm ]
+[ Reject ]
+```
+
+or:
+
+```text
+New goal target:
+
+Target amount: R$ 15,000
+Target date: 2027-12-31
+```
+
+The MCP documentation describes form elicitation as structured user input. ([ModelContextProtocol][2])
+
+### URL elicitation
+
+This is particularly interesting for financial security.
+
+For sensitive interactions, MCP's URL mode allows the server to send the user to a browser-based flow rather than passing sensitive information through the MCP client. The MCP project specifically describes this for OAuth, payments and sensitive credential collection. ([Model Context Protocol Blog][3])
+
+For Wallet V4, I would therefore explicitly prohibit things like:
+
+```text
+MCP form → credit-card number
+MCP form → banking password
+MCP form → authentication secret
+```
+
+and use an out-of-band secured flow where required.
+
+---
+
+# 3. Streamable HTTP is better than saying "HTTP or SSE"
+
+I'd change the original wording:
+
+> "streaming data or events over HTTP or SSE"
+
+to something more current:
+
+> **MCP Streamable HTTP with optional SSE streaming**
+
+because Spring AI's current documentation describes Streamable HTTP as the preferred HTTP transport and says the older SSE transport is being replaced/deprecated for new implementations. ([Home][1])
+
+Spring AI currently supports:
+
+* WebMVC Streamable HTTP
+* WebFlux Streamable HTTP
+* synchronous MCP servers
+* asynchronous MCP servers
+* MCP annotations
+* MCP client integration
+* elicitation annotations
+
+and WebFlux provides the reactive/non-blocking model that fits what you're proposing. ([Home][1])
+
+For our architecture, I'd choose:
+
+> **Spring AI MCP Server + WebFlux + Streamable HTTP**
+
+rather than building the MCP protocol layer ourselves.
+
+---
+
+# 4. There is an even more interesting 2026 MCP development
+
+This is where I'd slightly change our previous SPEC-004 design.
+
+The current MCP evolution has moved toward **Multi Round-Trip Requests (MRTR)**.
+
+This matters because a modern MCP interaction can effectively become:
+
+```text
+Tool invocation
+      │
+      ▼
+INPUT_REQUIRED
+      │
+      ▼
+Human interaction
+      │
+      ▼
+Tool continuation
+```
+
+rather than requiring a permanently held SSE connection.
+
+The July 2026 MCP specification work explicitly describes MRTR as replacing server-initiated requests that previously required a held-open stream, including elicitation. ([Model Context Protocol Blog][4])
+
+This is **very relevant to our architecture**.
+
+It means we shouldn't design SPEC-004 around:
+
+> "the MCP server must hold an HTTP/SSE connection open while waiting for the human."
+
+Instead:
+
+```text
+MCP Tool
+   │
+   ▼
+input_required
+   │
+   ▼
+human
+   │
+   ▼
+input_response
+   │
+   ▼
+continue proposal workflow
+```
+
+This is much more scalable.
+
+---
+
+# 5. This also solves one of our earlier concerns about proposal state
+
+Previously we were discussing whether:
+
+```text
+PROPOSED
+APPROVED
+EXECUTING
+EXECUTED
+```
+
+was necessary.
+
+With elicitation/MRTR, we can distinguish **protocol interaction state** from **financial proposal state**.
+
+For example:
+
+```text
+MCP interaction
+
+CALL
+ │
+ └── INPUT_REQUIRED
+       │
+       └── ACCEPT
+```
+
+while the durable financial object remains:
+
+```text
+FinancialProposal
+
+PROPOSED
+   │
+   ▼
+EXECUTED
+```
+
+or:
+
+```text
+PROPOSED
+   │
+   ├── REJECTED
+   ├── EXPIRED
+   ├── INVALIDATED
+   └── EXECUTED
+```
+
+That's much cleaner.
+
+**MCP interaction state ≠ FinancialProposal state.**
+
+This should become an explicit invariant.
+
+---
+
+# 6. Spring AI should be in the SPEC, but not in the domain
+
+This is important.
+
+I would **not** do:
+
+```text
+copilot.domain
+   └── Spring AI MCP classes
+```
+
+Instead:
+
+```text
+br.com.wallet.copilot
+│
+├── api
+│   ├── model
+│   ├── usecase
+│   └── ...
+│
+└── internal
+    ├── proposal
+    ├── service
+    ├── persistence
+    │
+    └── mcp
+        ├── server
+        ├── tools
+        ├── elicitation
+        └── transport
+```
+
+Spring AI belongs to the **adapter/infrastructure side**.
+
+The domain should know:
+
+```text
+CreateProposal
+ApproveProposal
+RejectProposal
+GetFinancialContext
+```
+
+not:
+
+```text
+McpSyncServer
+McpAsyncServer
+McpServerExchange
+```
+
+This preserves our previous:
+
+> **Capability ≠ Module ≠ Tool ≠ Transport**
+
+principle.
+
+---
+
+# 7. I'd add an explicit Spring AI architectural requirement
+
+Something like:
+
+### `REQ-COPILOT-010 [MUST] — Spring AI MCP Adapter`
+
+> Implement the MCP Gateway using the supported Spring AI MCP server integration. MCP transport/protocol concerns MUST remain inside the Copilot adapter boundary and MUST NOT leak into `copilot::api` or domain models.
+
+Then:
+
+### `REQ-COPILOT-011 [MUST] — Streamable HTTP`
+
+> The remote MCP gateway MUST use MCP Streamable HTTP. Legacy SSE MAY be supported only for compatibility and MUST NOT be the primary transport for new deployments.
+
+This matches current Spring AI guidance. ([Home][1])
+
+---
+
+# 8. And an elicitation requirement
+
+I'd add:
+
+### `REQ-COPILOT-012 [MUST] — Human Elicitation`
+
+> Mutation-oriented Copilot interactions MUST support MCP elicitation for explicit human confirmation when the MCP client advertises the required capability.
+
+And:
+
+### `I-AI-008 — Elicitation Is Not Authorization`
+
+This is the subtle but important one:
+
+```text
+MCP elicitation accepted
+        ≠
+financial execution authorized
+```
+
+Instead:
+
+```text
+Elicitation ACCEPT
+       │
+       ▼
+Proposal authorization
+       │
+       ▼
+Precondition validation
+       │
+       ▼
+Idempotent domain execution
+```
+
+The durable proposal remains the source of authorization/audit state.
+
+---
+
+# 9. And one more invariant for streaming
+
+I'd introduce:
+
+### `I-AI-009 — Streaming Does Not Hold Financial Transactions`
+
+A very important rule:
+
+> MCP streaming/elicitation MUST NOT hold an open database transaction, ledger lock, or financial transaction while waiting for human input.
+
+So absolutely never:
+
+```text
+BEGIN TRANSACTION
+   │
+   ├── create proposal
+   │
+   ├── wait for human  ← ❌
+   │
+   └── execute
+COMMIT
+```
+
+Instead:
+
+```text
+TX #1
+ └── create immutable proposal
+        ↓
+      COMMIT
+        ↓
+   human interaction
+        ↓
+TX #2
+ └── validate proposal + preconditions
+ └── execute domain operation
+ └── COMMIT
+```
+
+This is particularly important for the Wallet V4 performance/security model.
+
+---
+
+# 10. This makes SPEC-004 much more interesting
+
+I'd now position Phase 4 as:
+
+```text
+Phase 4 — AI Financial Copilot
+
+                ┌─────────────────────┐
+                │      AI Agent       │
+                └──────────┬──────────┘
+                           │
+                    MCP Streamable HTTP
+                           │
+                ┌──────────▼──────────┐
+                │ Spring AI MCP       │
+                │ Gateway / Adapter    │
+                └──────────┬──────────┘
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+           READ                      PROPOSE
+              │                         │
+       deterministic APIs        FinancialProposal
+                                        │
+                                  MCP Elicitation
+                                        │
+                                      HUMAN
+                                        │
+                                  authorization
+                                        │
+                                  domain UseCase
+                                        │
+                           ┌────────────┼────────────┐
+                           ▼            ▼            ▼
+                        Ledger       Savings       Goals
+```
+
+And this gives us a really nice architectural story:
+
+> **AI proposes. MCP elicits. Human authorizes. Domain executes.**
+
+That is much stronger than simply saying "we have an AI chatbot with an approval endpoint."
+
+---
+
+## One caution
+
+I would **not yet lock the SPEC to a specific Spring AI version** until we check the Wallet project's actual Spring Boot/Spring AI compatibility matrix. The current Spring AI documentation is clearly moving quickly, and the current docs expose both legacy and newer MCP protocol models. ([Home][5])
+
+So in the SPEC I'd say **"Spring AI MCP integration compatible with the project's ratified Spring Boot baseline"**, and make the exact dependency/version a PLAN decision.
+
+### Bottom line
+
+**Yes, absolutely add it.** In fact, I think MCP Elicitation + Streamable HTTP + Spring AI should become **core architectural elements of SPEC-004**, not optional implementation details.
+
+The revised central principle becomes:
+
+> **MCP is the AI interaction boundary; Streamable HTTP is the remote transport; Spring AI implements the adapter; elicitation provides interactive human input; `FinancialProposal` remains the durable authorization/audit boundary; domain APIs remain the only execution authority.**
+
+That gives us a much cleaner Phase 4 and also resolves several of the concerns we identified in the first SPEC-004 review.
+
+[1]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-streamable-http-server-boot-starter-docs.html?utm_source=chatgpt.com "Untitled :: Spring AI Reference"
+[2]: https://csharp.sdk.modelcontextprotocol.io/v1/concepts/elicitation/elicitation.html?utm_source=chatgpt.com "Elicitation | MCP C# SDK"
+[3]: https://blog.modelcontextprotocol.io/posts/2025-11-25-first-mcp-anniversary/?utm_source=chatgpt.com "One Year of MCP: November 2025 Spec Release | Model Context Protocol Blog"
+[4]: https://blog.modelcontextprotocol.io/posts/2026-07-28/?utm_source=chatgpt.com "The 2026-07-28 Specification | Model Context Protocol Blog"
+[5]: https://docs.spring.io/spring-ai/reference/api/mcp/?utm_source=chatgpt.com "Index of /spring-ai/reference/api/mcp"

@@ -82,8 +82,9 @@ System architecture documents synthesize multiple atomic specifications into a d
 
 | Phase | Module | Spec | Description | Status | Target Dependencies |
 | :--- | :--- | :--- | :--- | :---: | :--- |
-| **3.0** | `intelligence` | `SPEC-003` | Subscription & Spending Intelligence (Recurring bills, merchant categorization, cashflow forecasting) | ⚪ Planned | `ledger.api`, `goals.api`, `fraud.embeddings` |
-| **4.0** | `copilot` | `SPEC-004` | AI Financial Copilot & Model Context Protocol (MCP) Gateway with Human-in-the-Loop | ⚪ Planned | `goals.api`, `savings.api`, `intelligence.api` |
+| **3.0** | `intelligence` | [`SPEC-003`](file:///.spec/SPEC-003-spending-and-subscription-intelligence.md) | Subscription & Spending Intelligence (Recurring bills, merchant categorization, cashflow forecasting) | 🟢 Verified | `ledger.api`, `goals.api`, `fraud.embeddings` |
+| **4.0** | `copilot` | [`SPEC-004`](file:///.spec/SPEC-004-ai-financial-copilot-and-proposal-domain.md) | AI Financial Copilot & Proposal Domain (Lifecycle, Human Gate, Execution Idempotency) | 🟢 Verified | `ledger.api`, `savings.api`, `goals.api`, `core.api` |
+| **4.1** | `copilot` | [`SPEC-004.1`](file:///.spec/SPEC-004.1-mcp-gateway-and-human-interaction.md) | MCP Gateway & Human-in-the-Loop Interaction (Spring AI, Streamable HTTP, Elicitation) | 🟡 Draft | `copilot.api`, `ledger.api`, `intelligence.api`, `goals.api` |
 
 ---
 

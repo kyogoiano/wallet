@@ -13,6 +13,7 @@ public class DatabaseCleaner {
     private static final Logger log = LoggerFactory.getLogger(DatabaseCleaner.class);
 
     private static final List<String> TABLES_IN_DELETE_ORDER = List.of(
+            "copilot_proposals",
             "fraud_analyst_reviews",
             "fraud_investigation_checkpoints",
             "fraud_fusion_jobs",

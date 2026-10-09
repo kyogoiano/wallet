@@ -614,4 +614,36 @@ CREATE TABLE IF NOT EXISTS intelligence_processed_events (
 
 CREATE INDEX IF NOT EXISTS idx_intel_processed_events_tenant ON intelligence_processed_events (tenant_id);
 
+-- =========================================================================
+-- Phase 4.0: AI Financial Copilot & Proposal Domain (SPEC-004, REQ-COPILOT-002)
+-- =========================================================================
+
+CREATE TABLE IF NOT EXISTS copilot_proposals (
+    id UUID PRIMARY KEY,
+    tenant_id VARCHAR(64) NOT NULL,
+    wallet_id UUID NOT NULL,
+    type VARCHAR(32) NOT NULL,
+    parameters_json JSONB NOT NULL,
+    parameters_hash CHAR(64) NOT NULL,
+    status VARCHAR(32) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    execution_operation_id VARCHAR(128) NOT NULL,
+    created_by VARCHAR(128) NOT NULL,
+    approved_by VARCHAR(128),
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    execution_claimed_at TIMESTAMP WITH TIME ZONE,
+    execution_lease_until TIMESTAMP WITH TIME ZONE,
+    approved_at TIMESTAMP WITH TIME ZONE,
+    executed_at TIMESTAMP WITH TIME ZONE,
+    execution_reference VARCHAR(128),
+    CONSTRAINT chk_copilot_proposal_status CHECK (status IN ('PROPOSED', 'EXECUTING', 'EXECUTED', 'REJECTED', 'EXPIRED', 'INVALIDATED')),
+    CONSTRAINT uq_copilot_proposal_tenant_idempotency UNIQUE (tenant_id, idempotency_key),
+    CONSTRAINT uq_copilot_proposal_execution_op_id UNIQUE (execution_operation_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_copilot_proposals_tenant_wallet_status ON copilot_proposals(tenant_id, wallet_id, status);
+CREATE INDEX IF NOT EXISTS idx_copilot_proposals_expires_at ON copilot_proposals(status, expires_at) WHERE status = 'PROPOSED';
+CREATE INDEX IF NOT EXISTS idx_copilot_proposals_stale_lease ON copilot_proposals(status, execution_lease_until) WHERE status = 'EXECUTING';
+
 --TODO: on high concurrency envs include pgbouncer proxy connection pooler on stack with transaction mode enabled this will improve the reuse of connections

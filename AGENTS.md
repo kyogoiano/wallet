@@ -74,6 +74,7 @@ To protect the orchestrator's context window from pollution, delegate work acros
 - [`typed-decision-algebra`](file:///.agents/skills/typed-decision-algebra/SKILL.md) — Native Java typed decision algebra, generic question-outcome binding, anti-coercion composition, machine-verifiable evidence hashing, and Five-Gate semantic evaluation protocol.
 - [`financial-cryptographic-security`](file:///.agents/skills/financial-cryptographic-security/SKILL.md) — Application-layer envelope encryption, AEAD with canonical AAD, secure key material lifecycle, replay protection algebra, zero-plaintext journals, telemetry non-emission, and Spring Modulith cryptographic isolation.
 - [`durable-modulith-events`](file:///.agents/skills/durable-modulith-events/SKILL.md) — Spring Modulith Event Publication Registry, PostgreSQL persistence, automatic lifecycle tracking, and in-process crash recovery.
+- [`financial-copilot-engine`](file:///.agents/skills/financial-copilot-engine/SKILL.md) — Asynchronous Financial Proposal Engine, human-in-the-loop authorization gates, atomic execution claim leases, and Spring AI MCP Gateway integration.
 
 
 ### Workflows ([`.agents/workflows/`](file:///.agents/workflows/))

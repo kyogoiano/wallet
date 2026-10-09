@@ -528,7 +528,7 @@ gantt
 
 ### 🔹 Phase 3: Subscription & Spending Intelligence
 **Bounded Context**: `Spending Intelligence, Recurring Patterns & Cashflow Forecasting (br.com.wallet.intelligence)`  
-**Status**: ⚪ Planned (Next Milestone)  
+**Status**: 🟢 **Completed & Verified**  
 
 - **Intent**: Asynchronously observe financial transactions, detect recurring subscriptions and obligations (periodicity, variance, merchant clustering), forecast forward liquidity liabilities (7/14/30-day calendar projections), automatically feed inferred `monthlyIncome` and `monthlyCommittedExpenses` into `CashflowProfile` (`br.com.wallet.goals`), and enrich behavioral vectors without direct ledger mutation.
 - **Milestone Breakdown & Spec Kit Artifacts**:
@@ -544,14 +544,20 @@ gantt
 
 ---
 
-### 🔹 Phase 4: AI Financial Copilot & Model Context Protocol (MCP)
-**Spec Identifier**: `SPEC-004-ai-financial-copilot-mcp`  
-**Status**: ⚪ Planned  
-**Core Abstraction**: `Agent & Tools (br.com.wallet.copilot)`
+### 🔹 Phase 4: AI Financial Copilot & MCP Gateway
+**Status**: 🔄 **In Progress (Two-Stage Architectural Slicing)**  
+**Core Abstraction**: `FinancialProposal Domain & MCP Edge Adapter (br.com.wallet.copilot)`
 
-- **Intent**: Expose wallet capabilities to AI agents via standardized Model Context Protocol (MCP) with human-in-the-loop approvals.
-- **Spec Kit Artifacts**:
-  - `.spec/SPEC-004-ai-financial-copilot-mcp.md`
+- **Milestone Breakdown & Spec Kit Artifacts**:
+  - **Phase 4.0 — AI Financial Copilot & Proposal Domain**:
+    - [`.spec/SPEC-004-ai-financial-copilot-and-proposal-domain.md`](file:///.spec/SPEC-004-ai-financial-copilot-and-proposal-domain.md) (🟢 Completed & Verified)
+    - [`plans/PLAN-004-ai-financial-copilot-and-proposal-domain.md`](file:///.spec/plans/PLAN-004-ai-financial-copilot-and-proposal-domain.md) (Approved)
+    - [`tasks/TASKS-004-ai-financial-copilot-and-proposal-domain.md`](file:///.spec/tasks/TASKS-004-ai-financial-copilot-and-proposal-domain.md) (Completed)
+    - [`.spec/summaries/SUMMARY-004-ai-financial-copilot-and-proposal-domain.md`](file:///.spec/summaries/SUMMARY-004-ai-financial-copilot-and-proposal-domain.md) (Verified)
+    - Implements `FinancialProposal` lifecycle (`PROPOSED` $\to$ `EXECUTED`), immutable parameters snapshot, stable `executionOperationId`, authoritative TTL gate, precondition checks, authenticated tenant security, and idempotent downstream bridge (`ledger.api`, `savings.api`, `goals.api`).
+  - **Phase 4.1 — MCP Gateway & Human-in-the-Loop Interaction**:
+    - [`.spec/SPEC-004.1-mcp-gateway-and-human-interaction.md`](file:///.spec/SPEC-004.1-mcp-gateway-and-human-interaction.md) (🟡 Draft / Next Up)
+    - Implements Spring AI MCP Server + WebFlux + Streamable HTTP on Spring Boot 4.2.0-M2, read-only tools, mutation proposal tools, Form & URL Elicitation, MRTR (`input_required`), and capability negotiation.
 
 ---
 

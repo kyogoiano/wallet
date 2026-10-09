@@ -1,0 +1,921 @@
+Sim. Revisei a nova **SPEC-004** inteira. A divisão ficou **bem melhor** do que a versão anterior: agora o 004 realmente é o **domínio de Proposal/Financial Copilot**, enquanto MCP/Spring AI/Streamable HTTP ficam fora, em `SPEC-004.1`. Isso está explicitamente refletido no escopo e nos non-goals.
+
+Minha avaliação: **a direção arquitetural está correta, mas eu ainda não consideraria a SPEC-004 “ratifiable”**. Há alguns pontos importantes para fechar antes de partir para PLAN/TASKS.
+
+## 1. O que ficou muito bom
+
+### 1.1 A separação 004 / 004.1 está correta
+
+Este é provavelmente o maior avanço.
+
+A SPEC-004 agora não tenta conhecer:
+
+* MCP;
+* Spring AI;
+* Streamable HTTP;
+* JSON-RPC;
+* elicitation;
+* LLM.
+
+Ela concentra-se em:
+
+> **Proposal → Human Authorization → Preconditions → Domain Use Case → Execution**
+
+Isso é exatamente o limite que eu esperaria para o domínio.
+
+A própria spec deixa isso explícito nos non-goals.
+
+E isso permite que a 004.1 seja substituível sem contaminar o domínio.
+
+---
+
+# 2. O principal problema: `PROPOSED → EXECUTED` ainda está simplificado demais
+
+Hoje a spec define:
+
+```text
+PROPOSED
+   ├── EXECUTED
+   ├── REJECTED
+   ├── EXPIRED
+   └── INVALIDATED
+```
+
+e o approval:
+
+```http
+POST /proposals/{id}/approve
+        ↓
+validate
+        ↓
+dispatch
+        ↓
+EXECUTED
+```
+
+Isso aparece diretamente nos requisitos 003, 006 e 007.
+
+**Aqui eu faria uma alteração importante.**
+
+O problema é que existe uma janela:
+
+```text
+approve request
+      |
+      v
+proposal validation
+      |
+      v
+downstream dispatch
+      |
+      +---- timeout
+      |
+      +---- network failure
+      |
+      +---- downstream unavailable
+      |
+      v
+EXECUTED
+```
+
+Se o dispatch falhar, o que acontece?
+
+A spec atualmente não define um estado intermediário.
+
+### Eu adicionaria:
+
+```text
+PROPOSED
+    |
+    +--> REJECTED
+    |
+    +--> EXPIRED
+    |
+    +--> INVALIDATED
+    |
+    +--> APPROVED / EXECUTING
+              |
+              +--> EXECUTED
+              |
+              +--> EXECUTION_FAILED
+```
+
+Mas existe uma questão ainda melhor:
+
+**talvez nem precisemos expor todos esses estados externamente.**
+
+Podemos separar:
+
+### Proposal lifecycle
+
+```text
+PROPOSED
+REJECTED
+EXPIRED
+INVALIDATED
+EXECUTED
+```
+
+### Execution state
+
+```text
+NOT_STARTED
+IN_PROGRESS
+SUCCEEDED
+FAILED
+```
+
+Isso evita transformar o lifecycle da proposta em um workflow engine.
+
+---
+
+# 3. Precisamos resolver a atomicidade do approval
+
+Este é, para mim, o **maior gap técnico da spec atual**.
+
+Temos:
+
+> approval of already EXECUTED proposal is an idempotent no-op
+
+e:
+
+> concurrent/retried approvals reuse `executionOperationId`, single ledger mutation
+
+
+
+Ótimo.
+
+Mas falta definir **como a primeira aprovação ganha o direito de executar**.
+
+Imagine:
+
+```text
+Request A                 Request B
+
+SELECT proposal
+PROPOSED                  SELECT proposal
+                          PROPOSED
+
+approve                   approve
+
+dispatch                  dispatch
+```
+
+Os dois podem chegar ao downstream.
+
+O `executionOperationId` protege **se o downstream realmente implementa idempotência por operationId**, mas o Copilot também precisa ter uma regra de concorrência.
+
+Eu colocaria explicitamente:
+
+```text
+I-AI-008 — Atomic Proposal Execution Claim
+
+Only one approval attempt may transition a proposal
+from PROPOSED to its execution-owned state.
+
+The transition MUST be conditional/locked and MUST
+not permit two concurrent approval requests to
+dispatch the same proposal independently.
+```
+
+Isso conversa diretamente com `I-CONCURRENCY-001` / `I-ATOMICITY-001`, que a spec já reconhece.
+
+---
+
+# 4. `executionOperationId` está correto, mas falta separar três identidades
+
+A spec acertou em colocar `executionOperationId` imutável na criação.
+
+Mas eu acho importante formalizar:
+
+```text
+proposalId
+executionOperationId
+approvalRequestId
+```
+
+### proposalId
+
+Identifica a proposta.
+
+```text
+"Eu quero aprovar esta proposta."
+```
+
+### executionOperationId
+
+Identifica **a intenção financeira executável**.
+
+```text
+"Esta é a operação financeira que nunca deve ser
+executada duas vezes."
+```
+
+### approvalRequestId
+
+Identifica uma tentativa HTTP/MCP/etc.
+
+```text
+"Esta foi a tentativa número 7 de aprovação."
+```
+
+Isso é especialmente importante quando tivermos MCP multi-round-trip, retries HTTP, browser refresh etc.
+
+A 004.1 pode gerar request IDs, mas o domínio precisa permanecer protegido pelo `executionOperationId`.
+
+---
+
+# 5. Falta uma decisão sobre criação idempotente de Proposal
+
+Esse é outro ponto que eu adicionaria.
+
+Hoje:
+
+```java
+CreateProposalCommand(
+    UUID walletId,
+    ProposalType type,
+    String parametersJson,
+    String createdBy
+)
+```
+
+
+
+Imagine o agente gerar:
+
+```text
+create proposal
+timeout
+retry
+create proposal
+```
+
+Teremos:
+
+```text
+proposal A
+proposal B
+```
+
+com a mesma operação financeira.
+
+Mesmo que ambas tenham `executionOperationId` diferente.
+
+Isso não é resolvido pela idempotência de execução.
+
+### Eu adicionaria:
+
+```java
+CreateProposalCommand(
+    UUID walletId,
+    ProposalType type,
+    String parametersJson,
+    String createdBy,
+    String idempotencyKey
+)
+```
+
+ou um `UUID`.
+
+E uma invariant:
+
+```text
+I-AI-009 — Proposal Creation Idempotency
+```
+
+Se o mesmo `(tenantId, idempotencyKey)` for submetido novamente:
+
+```text
+return existing proposal
+```
+
+em vez de criar outra.
+
+Isso será **muito importante quando o MCP Gateway entrar em cena**.
+
+---
+
+# 6. Tenant security: há uma inconsistência que eu corrigiria agora
+
+A spec corretamente remove o `X-Tenant-Id` como fonte de identidade:
+
+> TenantContext MUST be derived strictly from authenticated security principal.
+
+Excelente.
+
+Mas o teste define:
+
+> Tenant A attempts approval on Tenant B proposal → **403**.
+
+Eu **não fixaria 403 ainda**.
+
+Precisamos decidir isso de acordo com o security boundary já ratificado.
+
+Para recursos tenant-scoped, minha preferência arquitetural seria:
+
+```text
+proposal exists for another tenant
+        ↓
+404 Not Found
+```
+
+em vez de:
+
+```text
+403 Forbidden
+```
+
+porque 403 pode confirmar que:
+
+> "esse proposalId existe, mas pertence a outro tenant."
+
+Isso cria uma oracle de existência.
+
+Então eu colocaria:
+
+```text
+Cross-tenant proposal access MUST NOT disclose
+resource existence.
+```
+
+e provavelmente:
+
+```text
+404
+```
+
+para GET/approve/reject.
+
+**Mas eu deixaria isso como decisão explícita na SPEC**, não como alteração silenciosa.
+
+---
+
+# 7. O TTL está quase certo, mas existe uma race
+
+A regra:
+
+```text
+now() > expiresAt → EXPIRED
+```
+
+está clara.
+
+Mas existe:
+
+```text
+t = expiresAt - 1ms
+validate TTL → valid
+
+          [time passes]
+
+dispatch
+```
+
+Portanto o TTL não pode ser apenas:
+
+```java
+if (now <= expiresAt)
+```
+
+antes do dispatch.
+
+O que precisamos garantir é:
+
+```text
+claim/transition + TTL validation
+```
+
+como operação atômica do domínio.
+
+Ou, melhor:
+
+```text
+UPDATE proposal
+SET state = EXECUTING
+WHERE id = ?
+  AND state = PROPOSED
+  AND expires_at >= now
+```
+
+Então somente uma requisição ganha o claim.
+
+Esse ponto deveria entrar na invariant `I-AI-005`.
+
+---
+
+# 8. `INVALIDATED` precisa de semântica mais precisa
+
+Atualmente:
+
+> Failed preconditions transition proposal to `INVALIDATED`.
+
+Mas existem dois tipos diferentes:
+
+### Estado do mundo mudou
+
+Exemplo:
+
+```text
+Proposal:
+transfer $500
+
+Current balance:
+$300
+```
+
+→ `INVALIDATED`
+
+Perfeito.
+
+Mas:
+
+```text
+PostgreSQL unavailable
+NATS unavailable
+downstream timeout
+temporary infrastructure error
+```
+
+**não é invalidation**.
+
+É falha de execução.
+
+Isso reforça novamente a necessidade de distinguir:
+
+```text
+business precondition failure
+```
+
+de:
+
+```text
+technical execution failure
+```
+
+Eu faria essa distinção explícita.
+
+---
+
+# 9. Precondition validation está genérica demais
+
+Hoje:
+
+> verify account active, balance sufficient (transfers), and entity exists prior to executing mutations.
+
+A direção está correta, mas precisamos tomar cuidado para o Copilot não virar um **segundo domínio financeiro**.
+
+Eu colocaria uma regra arquitetural:
+
+> Copilot MAY orchestrate/validate coarse-grained preconditions, but MUST NOT reimplement authoritative financial business rules owned by ledger, savings or goals.
+
+Por exemplo, Copilot não deveria fazer:
+
+```java
+if (balance >= amount) ...
+```
+
+e então considerar isso a autorização financeira.
+
+O correto é:
+
+```text
+Copilot
+   |
+   | proposal execution
+   v
+ledger.api
+   |
+   +-- authoritative balance validation
+   +-- locking
+   +-- idempotency
+   +-- financial mutation
+```
+
+A própria spec já estabelece o bridge para `ledger.api`, `savings.api` e `goals.api`.
+
+Eu só tornaria a responsabilidade explícita.
+
+---
+
+# 10. `parametersJson` merece um pouco mais de rigor
+
+Hoje:
+
+```java
+String parametersJson
+```
+
+e:
+
+> immutable snapshot.
+
+Conceitualmente correto.
+
+Mas precisamos decidir:
+
+### Opção A — JSON textual canônico
+
+Persistimos:
+
+```text
+canonical JSON
+```
+
+e garantimos:
+
+```text
+same semantic parameters
+        ↓
+same canonical representation
+```
+
+### Opção B — JSONB
+
+PostgreSQL:
+
+```sql
+parameters jsonb
+```
+
+Eu tenderia a **JSONB**, mas isso é uma decisão de implementação/PLAN, não necessariamente da SPEC.
+
+O que a SPEC precisa exigir é:
+
+> the persisted snapshot is immutable and is the sole source of execution parameters.
+
+E não:
+
+```text
+re-read current proposal parameters from another source
+```
+
+---
+
+# 11. `createdBy` também precisa de definição
+
+Temos:
+
+```java
+createdBy
+```
+
+mas não está definido se significa:
+
+* userId;
+* principalId;
+* agentId;
+* MCP client;
+* service identity.
+
+Como estamos trabalhando com:
+
+```text
+(Tenant, Wallet, User)
+```
+
+eu evitaria deixar `createdBy: String` sem semântica.
+
+Algo como:
+
+```text
+createdBy = authenticated principal that created the proposal
+```
+
+e eventualmente:
+
+```text
+createdByType:
+HUMAN
+AGENT
+SYSTEM
+```
+
+Mas talvez nem precisemos desse segundo campo agora.
+
+O importante é a semântica.
+
+---
+
+# 12. `approvedBy` está correto como conceito, mas precisa ser obrigatório somente depois do approval
+
+O modelo tem:
+
+```text
+createdBy
+approvedBy
+approvedAt
+executedAt
+```
+
+Isso está bom.
+
+Eu documentaria a invariância:
+
+```text
+PROPOSED:
+approvedBy = null
+approvedAt = null
+executedAt = null
+
+REJECTED:
+approvedBy = null
+approvedAt = null
+executedAt = null
+
+EXECUTED:
+approvedBy != null
+approvedAt != null
+executedAt != null
+```
+
+E:
+
+```text
+approvedBy MUST represent a human authorization principal.
+```
+
+Isso é importante porque `I-AI-001` não é apenas "existe um endpoint `/approve`".
+
+Precisamos provar que **quem aprovou é uma identidade humana autorizada**.
+
+---
+
+# 13. O evento model está bom, mas eu faria uma pequena correção conceitual
+
+A spec sugere:
+
+```text
+ProposalCreatedEvent
+ProposalApprovedEvent
+ProposalExecutedEvent
+```
+
+
+
+Isso está alinhado com o `SPEC-000.12`: eventos internos devem usar Spring Modulith, não NATS.
+
+Eu manteria.
+
+Mas:
+
+**não colocaria esses eventos como parte da autorização financeira.**
+
+Ou seja:
+
+```text
+DB state transition
+      ↓
+financial execution
+      ↓
+domain event
+```
+
+não:
+
+```text
+event
+   ↓
+maybe execute
+```
+
+A publicação é observabilidade/reação downstream, não o mecanismo de autorização.
+
+---
+
+# 14. O teste triad precisa crescer bastante
+
+A seção atual é boa como skeleton.
+
+Mas para esta SPEC eu adicionaria pelo menos:
+
+### Concurrency
+
+```text
+100 concurrent approvals
+        ↓
+1 financial mutation
+        ↓
+same executionOperationId
+```
+
+### TTL race
+
+```text
+approval starts before expiration
+expiration occurs during execution
+```
+
+### Creation retry
+
+```text
+same idempotencyKey
+        ↓
+one proposal
+```
+
+### Parameter immutability
+
+```text
+proposal created
+external source changes
+        ↓
+execution uses original snapshot
+```
+
+### Cross tenant
+
+```text
+Tenant A → proposal B
+        ↓
+no resource disclosure
+```
+
+### Downstream technical failure
+
+```text
+ledger unavailable
+        ↓
+NOT INVALIDATED
+```
+
+### Downstream business failure
+
+```text
+insufficient funds
+        ↓
+INVALIDATED
+```
+
+### Already executed
+
+```text
+approve
+approve
+approve
+        ↓
+one mutation
+```
+
+---
+
+# 15. Um detalhe importante: `approved → EXECUTED` pode não ser HTTP 200 sempre
+
+O contrato atual diz:
+
+```text
+POST approve
+       ↓
+EXECUTED
+       ↓
+200
+```
+
+
+
+Eu **não congelaria isso ainda**.
+
+Se o downstream é síncrono e temos garantia de execução completa dentro do request:
+
+```text
+200 EXECUTED
+```
+
+é perfeitamente aceitável.
+
+Mas se a arquitetura de retry/reliable command da Core eventualmente exigir:
+
+```text
+APPROVED
+EXECUTING
+```
+
+então o endpoint poderia retornar:
+
+```text
+202 Accepted
+```
+
+e o cliente consultar o estado.
+
+Como SPEC-004 deve ser compatível com o restante da arquitetura, eu colocaria:
+
+> The exact synchronous/asynchronous execution response semantics MUST be resolved against the authoritative downstream use-case contracts during PLAN-004.
+
+Isso evita tomar uma decisão prematura.
+
+---
+
+# 16. A seed SQL deve sair da SPEC
+
+Eu removeria a seção:
+
+```sql
+INSERT INTO accounts ...
+```
+
+da SPEC.
+
+Isso é mais adequado para:
+
+```text
+TASKS-004
+```
+
+ou integration-test fixture.
+
+A SPEC deve dizer **o que precisa ser verdade**, não como montar uma conta específica.
+
+O mesmo vale para os `curl`.
+
+O exemplo HTTP do contrato é útil.
+
+Mas:
+
+```text
+Bearer dev-token-tenant-alpha
+```
+
+é muito específico para uma SPEC de domínio e ainda pode conflitar com a evolução do security perimeter.
+
+---
+
+# Minha classificação
+
+Eu colocaria assim:
+
+| Área                     | Estado                         |
+| ------------------------ | ------------------------------ |
+| Separação 004 / 004.1    | 🟢 Excelente                   |
+| Boundary Modulith        | 🟢                             |
+| Human-in-the-loop        | 🟢                             |
+| Tenant security          | 🟢 direção / 🟡 status code    |
+| Proposal lifecycle       | 🟢 base / 🟡 execution failure |
+| TTL                      | 🟢 regra / 🟡 concurrency race |
+| OperationId              | 🟢                             |
+| Idempotência de execução | 🟢 conceito / 🟡 claim         |
+| Idempotência de criação  | 🔴 falta                       |
+| Immutable snapshot       | 🟢                             |
+| Downstream bridge        | 🟢                             |
+| Precondition ownership   | 🟡 precisa explicitar          |
+| Eventos                  | 🟢                             |
+| Test strategy            | 🟡 precisa expandir            |
+| Verification guide       | 🟡 mover detalhes para TASKS   |
+| MCP boundary             | 🟢 excelente                   |
+
+## Eu faria 7 mudanças antes de ratificar
+
+**MUST fix:**
+
+1. **Adicionar atomic execution claim/concurrency invariant.**
+2. **Adicionar creation idempotency (`idempotencyKey`).**
+3. **Separar business invalidation de technical execution failure.**
+4. **Definir precisamente a semântica do `approvedBy` / human authorization.**
+5. **Resolver cross-tenant response sem resource enumeration** — provavelmente `404`, mas devemos alinhar com a security spec.
+6. **Deixar explícito que Copilot não reimplementa regras financeiras dos módulos downstream.**
+7. **Resolver `200 EXECUTED` vs eventual `202`/execution state durante PLAN**, dependendo dos contratos reais de `ledger.api`, `savings.api` e `goals.api`.
+
+**SHOULD:**
+
+8. separar `proposalId`, `executionOperationId` e request/attempt identity;
+9. fortalecer o triad com races/failures;
+10. tirar seed SQL/curls operacionais da SPEC e colocar em PLAN/TASKS.
+
+### E a decisão arquitetural mais importante
+
+Eu manteria o modelo mental:
+
+```text
+                 ┌──────────────────────┐
+                 │     MCP / REST       │
+                 │      004.1           │
+                 └──────────┬───────────┘
+                            │
+                       CreateProposal
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │       004             │
+                 │ Proposal Domain      │
+                 │                      │
+                 │ PROPOSED             │
+                 │   │                  │
+                 │   ├─ REJECTED        │
+                 │   ├─ EXPIRED         │
+                 │   ├─ INVALIDATED     │
+                 │   └─ EXECUTION       │
+                 └──────────┬───────────┘
+                            │
+                     Human approval
+                            │
+                            ▼
+                 ┌──────────────────────┐
+                 │   Domain Use Cases   │
+                 │ ledger / savings /   │
+                 │ goals                │
+                 └──────────────────────┘
+```
+
+**AI proposes → Proposal persists → Human authorizes → Copilot dispatches → Domain decides and mutates.**
+
+Esse é o boundary que eu acho que devemos preservar. A nova SPEC-004 já está muito próxima disso; eu faria esses ajustes antes de gerar o **PLAN-004**.

@@ -105,7 +105,7 @@ public class ProposalDao {
         Objects.requireNonNull(tenantId, "tenantId cannot be null");
         Objects.requireNonNull(walletId, "walletId cannot be null");
         String sql = """
-            SELECT * FROM copilot_proposals 
+            SELECT * FROM copilot_proposals
             WHERE tenant_id = ? AND wallet_id = ? AND status = 'PROPOSED' AND expires_at >= NOW()
             ORDER BY created_at DESC
         """;
@@ -230,7 +230,7 @@ public class ProposalDao {
                     rs.getObject("wallet_id", UUID.class),
                     ProposalType.valueOf(rs.getString("type")),
                     rs.getString("parameters_json"),
-                    rs.getString("parameters_hash") != null ? rs.getString("parameters_hash").trim() : null,
+                    Objects.requireNonNull(rs.getString("parameters_hash"), "parameters_hash cannot be null in database").trim(),
                     ProposalStatus.valueOf(rs.getString("status")),
                     rs.getString("idempotency_key"),
                     rs.getString("execution_operation_id"),

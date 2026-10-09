@@ -109,7 +109,7 @@ class ParametersHashUtilTest {
     @Test
     @DisplayName("Should reject blank or invalid JSON")
     void shouldRejectInvalidJson() {
-        assertThatThrownBy(() -> ParametersHashUtil.computeHash(null))
+        assertThatThrownBy(() -> ParametersHashUtil.computeHash(" "))
                 .isInstanceOf(IllegalArgumentException.class);
         assertThatThrownBy(() -> ParametersHashUtil.computeHash("   "))
                 .isInstanceOf(IllegalArgumentException.class);

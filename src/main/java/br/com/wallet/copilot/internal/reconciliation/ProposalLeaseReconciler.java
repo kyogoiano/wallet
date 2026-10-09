@@ -67,6 +67,7 @@ public class ProposalLeaseReconciler {
                 if (result instanceof ExecutionResult.Success(String executionReference)) {
                     proposalDao.markExecuted(proposal.id(), proposal.tenantId(), Instant.now(), executionReference);
                 } else if (result instanceof ExecutionResult.BusinessFailure failure) {
+                    log.warn("Re-dispatch for proposal {} encountered business failure {}; marked as invalidated!", proposal.id(), failure);
                     proposalDao.markInvalidated(proposal.id(), proposal.tenantId(), Instant.now());
                 } else {
                     log.warn("Re-dispatch for proposal {} encountered technical failure; preserved in EXECUTING", proposal.id());

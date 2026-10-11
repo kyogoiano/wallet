@@ -49,11 +49,11 @@ public class WalletProposalTools {
     )
     @NonNull
     public ProposalResponse proposeTransfer(
-            @McpToolParam(required = true, description = "Source wallet UUID") @NonNull final String sourceWalletId,
-            @McpToolParam(required = true, description = "Target wallet UUID") @NonNull final String targetWalletId,
-            @McpToolParam(required = true, description = "Canonical scale-2 monetary amount (e.g. 150.00)") @NonNull final String amount,
+            @McpToolParam(description = "Source wallet UUID") @NonNull final String sourceWalletId,
+            @McpToolParam(description = "Target wallet UUID") @NonNull final String targetWalletId,
+            @McpToolParam(description = "Canonical scale-2 monetary amount (e.g. 150.00)") @NonNull final String amount,
             @McpToolParam(required = false, description = "Optional human-readable description") @Nullable final String description,
-            @McpToolParam(required = true, description = "Mandatory client idempotency key") @NonNull final String idempotencyKey
+            @McpToolParam(description = "Mandatory client idempotency key") @NonNull final String idempotencyKey
     ) {
         validateIdempotencyKey(idempotencyKey);
         validateCanonicalAmount(amount);
@@ -86,12 +86,12 @@ public class WalletProposalTools {
     )
     @NonNull
     public ProposalResponse proposeSavingsRule(
-            @McpToolParam(required = true, description = "Savings plan UUID") @NonNull final String planId,
-            @McpToolParam(required = true, description = "Rule type (PERCENTAGE, ROUND_UP, THRESHOLD)") @NonNull final String ruleType,
+            @McpToolParam(description = "Savings plan UUID") @NonNull final String planId,
+            @McpToolParam(description = "Rule type (PERCENTAGE, ROUND_UP, THRESHOLD)") @NonNull final String ruleType,
             @McpToolParam(required = false, description = "Percentage (e.g. 10.00)") @Nullable final String percentage,
             @McpToolParam(required = false, description = "Threshold amount") @Nullable final String threshold,
             @McpToolParam(required = false, description = "Step amount") @Nullable final String step,
-            @McpToolParam(required = true, description = "Mandatory client idempotency key") @NonNull final String idempotencyKey
+            @McpToolParam(description = "Mandatory client idempotency key") @NonNull final String idempotencyKey
     ) {
         validateIdempotencyKey(idempotencyKey);
         UUID planUuid = UUID.fromString(planId);
@@ -129,12 +129,12 @@ public class WalletProposalTools {
     )
     @NonNull
     public ProposalResponse proposeGoalAdjustment(
-            @McpToolParam(required = true, description = "Financial goal UUID") @NonNull final String goalId,
-            @McpToolParam(required = true, description = "Goal display name") @NonNull final String name,
-            @McpToolParam(required = true, description = "Target monetary amount (scale 2)") @NonNull final String targetAmount,
-            @McpToolParam(required = true, description = "Target date YYYY-MM-DD") @NonNull final String targetDate,
-            @McpToolParam(required = true, description = "Priority (LOW, MEDIUM, HIGH)") @NonNull final String priority,
-            @McpToolParam(required = true, description = "Mandatory client idempotency key") @NonNull final String idempotencyKey
+            @McpToolParam(description = "Financial goal UUID") @NonNull final String goalId,
+            @McpToolParam(description = "Goal display name") @NonNull final String name,
+            @McpToolParam(description = "Target monetary amount (scale 2)") @NonNull final String targetAmount,
+            @McpToolParam(description = "Target date YYYY-MM-DD") @NonNull final String targetDate,
+            @McpToolParam(description = "Priority (LOW, MEDIUM, HIGH)") @NonNull final String priority,
+            @McpToolParam(description = "Mandatory client idempotency key") @NonNull final String idempotencyKey
     ) {
         validateIdempotencyKey(idempotencyKey);
         validateCanonicalAmount(targetAmount);

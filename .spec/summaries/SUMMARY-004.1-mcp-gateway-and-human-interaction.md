@@ -100,10 +100,11 @@ export GRADLE_USER_HOME=/home/leandro/snap/antigravity-cli/common/gradle_home
 
 #### Step 1: Initialize MCP Streamable HTTP Session
 ```bash
-curl -X POST http://localhost:8080/mcp \
+curl -i -X POST http://localhost:8081/mcp \
   -H "Authorization: Bearer agent-token-123" \
   -H "X-Tenant-ID: tenant-primary" \
   -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream, application/json" \
   -d '{
     "jsonrpc": "2.0",
     "id": "init-1",
@@ -112,21 +113,24 @@ curl -X POST http://localhost:8080/mcp \
       "protocolVersion": "2024-11-05",
       "capabilities": {
         "elicitation": {
-          "form": true,
-          "url": true
+          "form": {},
+          "url": {}
         }
       },
       "clientInfo": { "name": "finance-agent", "version": "1.0.0" }
     }
   }'
 ```
+*Expected Response*: HTTP 200 OK with header `Mcp-Session-Id: <session-id>` and server capabilities.
 
-#### Step 2: Propose Transfer via `copilot_propose_transfer` Tool
+#### Step 2: List Available Tools or Propose Transfer
 ```bash
-curl -X POST http://localhost:8080/mcp \
+curl -i -X POST http://localhost:8081/mcp \
   -H "Authorization: Bearer agent-token-123" \
   -H "X-Tenant-ID: tenant-primary" \
+  -H "Mcp-Session-Id: <session-id-from-step-1>" \
   -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream, application/json" \
   -d '{
     "jsonrpc": "2.0",
     "id": "call-1",
@@ -134,20 +138,20 @@ curl -X POST http://localhost:8080/mcp \
     "params": {
       "name": "copilot_propose_transfer",
       "arguments": {
-        "walletId": "77777777-7777-7777-7777-777777777777",
+        "sourceWalletId": "77777777-7777-7777-7777-777777777777",
         "targetWalletId": "88888888-8888-8888-8888-888888888888",
         "amount": "250.00",
-        "rationale": "Sweeping surplus to savings goal",
+        "description": "Sweeping surplus to savings goal",
         "idempotencyKey": "prop-transfer-101"
       }
     }
   }'
 ```
-*Expected Response*: JSON containing proposal object with `status: "PROPOSED"` and Tier 1 Form Elicitation payload.
+*Expected Response*: SSE stream delivering proposal object with `status: "PROPOSED"`.
 
 #### Step 3: Authoritative Human Authorization via Verified REST Gate
 ```bash
-curl -X POST http://localhost:8080/api/v1/proposals/{proposalId}/approve \
+curl -X POST http://localhost:8081/api/v1/proposals/{proposalId}/approve \
   -H "Authorization: Bearer human-jwt-token" \
   -H "X-Tenant-ID: tenant-primary"
 ```

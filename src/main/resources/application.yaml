@@ -36,6 +36,15 @@ spring:
   threads:
     virtual:
       enabled: true
+  ai:
+    mcp:
+      server:
+        enabled: true
+        name: wallet-copilot
+        version: "1.0.0"
+        protocol: STREAMABLE
+        streamable-http:
+          mcp-endpoint: /mcp
   cache:
     cache-names: fraudBlockedUsers
     caffeine:

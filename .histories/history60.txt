@@ -1,0 +1,268 @@
+Yes — this task breakdown is now sufficiently aligned with the reviewed SPEC/PLAN to move into implementation. I would make **a few final corrections before starting TASK-SEC-1.1**, mainly to eliminate traceability drift and a couple of security ambiguities.
+
+### 1. One important traceability correction
+
+`TASK-SEC-6.1` currently says:
+
+> Assert zero third-party crypto/auth SDK dependencies (`I-PLATFORM-001`).
+
+But the traceability matrix maps `REQ-SEC-015` to `I-PLATFORM-001`.
+
+Those are different concepts. `REQ-SEC-015` is the **“WON'T mandatory mTLS”** decision, while `I-PLATFORM-001` is the architectural/platform boundary.
+
+I would **not couple them**.
+
+Use something like:
+
+```text
+TASK-SEC-6.1 [MUST]: Verify Architectural Boundaries & Portability
+- Assert Edge/Core process boundary remains intact.
+- Assert Edge has no relational database dependency.
+- Assert no third-party crypto/auth SDK is introduced.
+- Assert no JWT/OIDC/Keycloak dependency is introduced.
+- Assert mandatory mTLS is not introduced.
+- Verify against I-PLATFORM-001 and REQ-SEC-014/015.
+```
+
+And change the matrix row to:
+
+```text
+| `REQ-SEC-014`, `REQ-SEC-015`, `I-PLATFORM-001` | `[MUST]` | `ProcessBoundaryArchitectureTest` | `TASK-SEC-6.1` |
+```
+
+---
+
+### 2. `REQ-SEC-010` should now really be MUST
+
+Your tasks treat credential overlap/rotation as mandatory:
+
+```text
+TASK-SEC-2.2
+TASK-SEC-2.5
+```
+
+and the traceability matrix classifies it as `[MUST]`.
+
+That is good for the implementation, but the SPEC previously had `REQ-SEC-010` as a `SHOULD`.
+
+So before implementation, **promote it in the SPEC**:
+
+```text
+REQ-SEC-010 [MUST]
+The Edge MUST support overlapping active/retiring credentials
+to permit credential rotation without an authentication outage.
+```
+
+Otherwise your TASKS are stricter than the governing SPEC, which violates the SDD hierarchy.
+
+---
+
+### 3. `Idempotency-Key` vs `X-Operation-Id`
+
+This is the remaining terminology issue I'd fix now.
+
+The TASKS use:
+
+```text
+IDEMPOTENCY_KEY = "Idempotency-Key"
+```
+
+while the earlier PLAN allowed:
+
+```text
+Idempotency-Key or X-Operation-Id
+```
+
+and the canonical HMAC field is called:
+
+```text
+OPERATION-ID
+```
+
+For a financial system, I recommend making the protocol unambiguous:
+
+```text
+IDEMPOTENCY_KEY = "Idempotency-Key"
+```
+
+and internally:
+
+```java
+operationId
+```
+
+with the canonicalization rule:
+
+```text
+OPERATION-ID = value of Idempotency-Key
+```
+
+Then explicitly state:
+
+```text
+There is exactly one financial idempotency identity.
+HTTP header: Idempotency-Key
+Domain field: operationId
+NATS field: operationId
+Canonical HMAC field: OPERATION-ID
+```
+
+That avoids accidentally creating two independent idempotency mechanisms.
+
+---
+
+### 4. `TASK-SEC-3.3` needs one security clarification
+
+This part is good:
+
+> Queries operation tenant via NATS Request-Reply (or local state)
+
+But I would remove **“or local state”** unless that local state is explicitly part of the approved architecture.
+
+The security boundary should be deterministic:
+
+```text
+TASK-SEC-3.3 [MUST]:
+
+OperationStatusAuthorizationFilter MUST resolve the operation's
+tenant ownership through an authenticated Edge→Core NATS
+request/reply interaction.
+
+Edge MUST NOT query PostgreSQL directly.
+
+The Core response MUST be authoritative for operation ownership.
+```
+
+If you later introduce an Edge-local status cache, that should be a separate explicitly specified optimization with its own consistency/security rules.
+
+---
+
+### 5. NATS authorization should test the actual transport identity
+
+`TASK-SEC-5.5` is particularly important.
+
+I'd make the acceptance matrix explicit:
+
+| Publisher          | Transport identity                     | Tenant headers | Expected                                           |
+| ------------------ | -------------------------------------- | -------------- | -------------------------------------------------- |
+| Edge               | authorized Edge credential             | valid          | accepted                                           |
+| Edge               | authorized Edge credential             | forged tenant  | rejected/tenant derived from authenticated context |
+| Unknown client     | unauthorized NATS identity             | valid-looking  | rejected                                           |
+| Unknown client     | no authenticated transport identity    | valid-looking  | rejected                                           |
+| Core/other service | not granted command publish permission | valid-looking  | rejected                                           |
+
+This validates **I-SEC-009**, rather than merely testing that some header exists.
+
+---
+
+### 6. Rate limiter test wording
+
+This:
+
+> exhausting tenant A's capacity returns `429`
+
+should become:
+
+> exhausting **tenant A + principal A** capacity returns `429`, while **tenant B + principal B** remains unaffected.
+
+Because the actual invariant is:
+
+```text
+RateLimitKey = (tenantId, principalId)
+```
+
+Otherwise the test could accidentally implement tenant-only throttling.
+
+I'd also add:
+
+```text
+same tenant + different principal => independent bucket
+```
+
+That directly verifies the intended noisy-neighbor behavior.
+
+---
+
+### 7. One missing explicit test
+
+I'd add:
+
+```text
+HmacAuthenticationFilterTest.shouldUseCredentialTenantWhenXTenantIdDiffers()
+```
+
+with:
+
+```text
+Credential:
+    tenantId = tenant-A
+
+Request:
+    X-Tenant-Id = tenant-B
+
+Expected:
+    authenticatedPrincipal.tenantId() == tenant-A
+```
+
+Your existing `TASK-SEC-2.6` already describes this, so this is mostly a naming/traceability improvement.
+
+---
+
+## Final TASKS status
+
+After those small changes, I would consider the hierarchy:
+
+```text
+SPEC-000.9.3
+       │
+       ▼
+PLAN-000.9.3
+       │
+       ▼
+TASKS-000.9.3
+       │
+       ├── implementation
+       ├── unit tests
+       ├── integration tests
+       └── architecture verification
+              │
+              ▼
+       SUMMARY-000.9.3
+```
+
+properly converged.
+
+The implementation order you've chosen is also sound:
+
+```text
+1. primitives
+      ↓
+2. credentials + HMAC
+      ↓
+3. perimeter enforcement
+      ↓
+4. persistence schema
+      ↓
+5. Core tenant enforcement
+      ↓
+6. operational/convergence verification
+```
+
+Most importantly, **don't mark the `[ ]` boxes during planning**. They should only become `[x]` after the corresponding implementation and verification actually pass. That keeps the task document an execution ledger rather than a plan pretending to be completed.
+
+### I would therefore make the next implementation step
+
+**`TASK-SEC-1.1` only.**
+
+That means no HMAC filter, no NATS changes, no schema changes yet. First establish:
+
+```text
+TenantMismatchException
+SecurityHeaders
+```
+
+and their tests if the project's TDD convention requires tests for those primitives.
+
+Then proceed to `TASK-SEC-2.1`.
+
+This keeps the active-task protocol you've defined intact and prevents pulling unrelated architecture into the implementation context.

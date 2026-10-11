@@ -1,0 +1,565 @@
+Yes. **This is much closer to the architecture I would ratify.** The skill and the spec are also nicely aligned now: the skill describes *how the implementation agent should work*, while the spec defines *what must be true*.
+
+I would make a few changes before freezing them, though. There are **3 important security/architecture issues** and a handful of smaller refinements.
+
+## 1. The biggest issue: HMAC does not automatically solve replay
+
+Your current `I-SEC-006` says:
+
+> timestamp within ±30s → admit
+
+That is good **freshness**, but it is not by itself replay protection.
+
+An attacker who captures a valid request can replay the exact same:
+
+```text
+X-Key-Id
+X-Timestamp
+X-Nonce
+X-Operation-Id
+X-Signature
+```
+
+within those 30 seconds.
+
+You already have the perfect second half of the solution:
+
+```text
+operationId
+```
+
+because the financial path already guarantees idempotency.
+
+I'd change the invariant to explicitly say:
+
+```text
+I-SEC-006 — Replay Resistance
+
+A request is admissible only when:
+1. timestamp is within ±30s; AND
+2. operationId has not already produced a financial effect.
+
+Duplicate operationId MUST NOT produce a second financial effect.
+```
+
+Then we don't need to introduce a Dragonfly nonce registry just for security.
+
+That is **much lighter**.
+
+### What about `X-Nonce`?
+
+I'd actually question whether we need it at all.
+
+If:
+
+```text
+HMAC
++
+timestamp
++
+operationId
++
+existing financial idempotency
+```
+
+is already authoritative, `X-Nonce` becomes additional protocol complexity.
+
+For a financial API, `operationId` is already effectively the request nonce.
+
+So I'd simplify:
+
+```text
+X-Key-Id
+X-Timestamp
+X-Operation-Id
+X-Signature
+```
+
+instead of:
+
+```text
+X-Key-Id
+X-Timestamp
+X-Nonce
+X-Operation-Id
+X-Signature
+```
+
+That is very much in line with your **simple + fast** objective.
+
+---
+
+# 2. Credential resolution needs a stronger definition
+
+Your spec currently says:
+
+> in-memory `CredentialResolver` loaded from configuration or local file.
+
+That is fine as a **bootstrap implementation**, but there's an architectural problem.
+
+If we have multiple Edge instances:
+
+```text
+Edge A → credential version A
+Edge B → credential version B
+Edge C → credential version C
+```
+
+then key rotation can become inconsistent.
+
+You already have:
+
+> `REQ-SEC-010`: overlapping credentials.
+
+Good.
+
+I'd therefore define the credential source as:
+
+```text
+CredentialResolver
+        │
+        ├── immutable in-memory snapshot
+        │
+        └── reload / rotation mechanism
+```
+
+and explicitly state:
+
+> **Credential lookup MUST be local memory. Credential refresh MUST NOT occur synchronously on the request path.**
+
+That preserves your O(1) hot path.
+
+Dragonfly can remain the **optional future distributed credential source**, but I wouldn't put it in the critical authentication path.
+
+---
+
+# 3. Don't put the secret inside a normal `Credential` record
+
+This:
+
+```java
+public record Credential(
+    String keyId,
+    byte[] secret,
+    String tenantId,
+    String principalId,
+    Set<String> permissions,
+    boolean active
+) {}
+```
+
+is convenient, but architecturally I'd separate the public metadata from the secret.
+
+Something like:
+
+```java
+public record CredentialMetadata(
+    String keyId,
+    String tenantId,
+    String principalId,
+    Set<String> permissions,
+    boolean active
+) {}
+```
+
+and:
+
+```java
+final class CredentialMaterial {
+    byte[] secret();
+}
+```
+
+Why?
+
+Because it becomes much harder to accidentally:
+
+```text
+log(Credential)
+serialize(Credential)
+emit(Credential)
+trace(Credential)
+```
+
+and expose the HMAC secret.
+
+This becomes especially relevant when you add observability.
+
+---
+
+# 4. One thing I would change in the canonical request
+
+You currently have:
+
+```text
+Method
+Path
+Query
+KeyId
+Timestamp
+Nonce
+OpId
+SHA256(Body)
+```
+
+That's good.
+
+I'd add a **protocol/version identifier**.
+
+For example:
+
+```text
+WALLET-HMAC-V1
+POST
+/operations/transfers
+...
+```
+
+Why?
+
+Because otherwise changing canonicalization in V2 becomes painful.
+
+So:
+
+```text
+WALLET-HMAC-V1\n
+HTTP_METHOD\n
+CANONICAL_PATH\n
+CANONICAL_QUERY\n
+X-KEY-ID\n
+X-TIMESTAMP\n
+X-OPERATION-ID\n
+HEX(SHA256(BODY))
+```
+
+Now the signature protocol itself is versioned.
+
+This is particularly useful for a long-lived financial API.
+
+---
+
+# 5. Be precise about timestamp units
+
+The spec currently has:
+
+> Unix epoch seconds or milliseconds
+
+I would **not allow both**.
+
+Choose one.
+
+I'd use:
+
+```text
+Unix epoch milliseconds
+```
+
+because Java's:
+
+```java
+Instant.now().toEpochMilli()
+```
+
+makes the implementation trivial.
+
+Then:
+
+```text
+abs(edgeNow - requestTimestamp) <= 30_000
+```
+
+No ambiguity.
+
+---
+
+# 6. HTTP status semantics need one small correction
+
+You currently have:
+
+```text
+unknown key
+signature
+timestamp
+tenant mismatch
+        ↓
+401 or 403
+```
+
+I'd make the distinction explicit:
+
+| Failure                                 | Response |
+| --------------------------------------- | -------: |
+| Missing credentials                     |    `401` |
+| Unknown key                             |    `401` |
+| Invalid signature                       |    `401` |
+| Expired timestamp                       |    `401` |
+| Invalid operation ID format             |    `400` |
+| Authenticated but unauthorized resource |    `403` |
+| Tenant/account mismatch                 |    `403` |
+| Rate limit                              |    `429` |
+
+That gives clients and monitoring a much cleaner security taxonomy.
+
+---
+
+# 7. `X-Tenant-Id` should not merely be "ignored"
+
+Your invariant is excellent:
+
+> Tenant identity MUST NOT originate from untrusted headers.
+
+But I'd make the implementation rule stronger:
+
+```text
+X-Tenant-Id MUST NOT participate in authentication,
+authorization,
+rate limiting,
+routing,
+CommandEnvelope construction,
+or financial processing.
+```
+
+Whether we:
+
+```text
+ignore it
+```
+
+or:
+
+```text
+reject it
+```
+
+is an API-policy choice.
+
+I'd probably **ignore it**, because rejecting legacy clients that happen to send it isn't necessary.
+
+But it can never influence anything.
+
+---
+
+# 8. One important issue with the SSE signature
+
+This is subtle.
+
+For:
+
+```http
+GET /operations/{opId}/stream
+```
+
+the request has no body, which is fine.
+
+But SSE connections can stay open for minutes/hours.
+
+The signature contains:
+
+```text
+X-Timestamp
+```
+
+and your ±30s verification is performed **when the connection is established**.
+
+That's perfectly fine.
+
+We should explicitly state:
+
+> Timestamp freshness applies to request admission, not to the lifetime of an already-authenticated SSE connection.
+
+Otherwise somebody may accidentally implement a timer that kills the stream after 30 seconds.
+
+---
+
+# 9. Core should NOT trust arbitrary NATS headers
+
+This deserves an explicit invariant.
+
+You currently say:
+
+```text
+NatsEdgeCommandPublisher
+    ↓
+tenant_id
+principal_id
+key_id
+```
+
+Good.
+
+But the Core must know that the message came from an authenticated Edge.
+
+So I'd add:
+
+### `I-SEC-009 — Trusted Edge Origin`
+
+```text
+Core MUST accept financial commands only from authenticated
+Edge/NATS identities authorized to publish wallet commands.
+
+NATS message headers are trusted only after the transport/publisher
+identity has been authenticated.
+```
+
+Otherwise someone who gets access to the NATS subject could fabricate:
+
+```text
+tenant_id=A
+principal_id=admin
+```
+
+even though the external HMAC is perfect.
+
+This is probably the **most important missing invariant** after replay.
+
+---
+
+# 10. Rate limiter: use structured key, not concatenated string
+
+Instead of:
+
+```java
+tenantId + ":" + principalId
+```
+
+I'd define:
+
+```java
+record RateLimitKey(
+    String tenantId,
+    String principalId
+) {}
+```
+
+and let the implementation encode it.
+
+It avoids delimiter collisions and makes the domain intent clearer.
+
+Also, I'd reconsider the phrase:
+
+> "Tenant A submitting 10,000 req/s will be throttled without degrading Tenant B's throughput."
+
+That's too absolute.
+
+The global Edge has finite capacity.
+
+Better:
+
+> Tenant-specific exhaustion MUST NOT consume another tenant's allocated bucket capacity; global infrastructure saturation MAY still affect all tenants.
+
+That is technically accurate.
+
+---
+
+# 11. The database schema requirement needs care
+
+This:
+
+```sql
+tenant_id VARCHAR(64) NOT NULL DEFAULT 'default'
+```
+
+is practical for migration, but dangerous if it survives indefinitely.
+
+You don't want:
+
+```text
+tenant_id = 'default'
+```
+
+becoming a permanent security escape hatch.
+
+I'd make the spec say:
+
+> `DEFAULT 'default'` is migration compatibility only and MUST NOT represent an authenticated production tenant.
+
+Eventually:
+
+```sql
+tenant_id NOT NULL
+```
+
+with real tenant IDs.
+
+Also, `ledger` deserves clarification because your ledger may contain entries rather than account-owned rows. We should make sure the tenant is derived consistently from the operation/account relationship rather than accidentally creating contradictory tenant data.
+
+---
+
+# 12. Your skill is actually excellent for Antigravity
+
+I particularly like that you separated it from the specification.
+
+The skill says:
+
+> **"Edge authenticates cryptographically, derives tenant identity without DB access, and enforces tenant rate limits. Core enforces account ownership inside the database transaction boundary."**
+
+That is exactly the kind of compact architectural instruction an implementation agent can repeatedly apply.
+
+I'd add only one section:
+
+## 9. Implementation Guardrails
+
+```text
+- NEVER query PostgreSQL from Edge security code.
+- NEVER trust X-Tenant-Id or equivalent client-supplied tenant headers.
+- NEVER log HMAC secrets or credential material.
+- NEVER compare signatures using ordinary String.equals().
+- NEVER perform synchronous credential refresh during request processing.
+- NEVER use HMAC authentication as a replacement for Core authorization.
+- NEVER trust tenant_id NATS headers without authenticated Edge transport.
+- NEVER create a second financial idempotency mechanism when operationId already provides it.
+- NEVER introduce JWT/OIDC/Keycloak for V1.
+- Prefer JDK 27 cryptographic primitives over external crypto libraries.
+```
+
+That would make the skill considerably more useful during implementation.
+
+---
+
+# My final recommendation
+
+I'd keep the overall spec almost exactly as it is. The structure is good and it is comfortably within your 250-line constraint. The core architecture is already clearly established: HMAC at Edge, local credential resolution, tenant-scoped admission, authenticated propagation, and transactional Core isolation.
+
+Before creating `PLAN-000.9.3`, I'd make these **nine changes**:
+
+1. **Remove `X-Nonce`** unless we later prove independent nonce replay detection is required.
+2. Make `operationId + timestamp` the V1 replay model.
+3. Standardize timestamp to **epoch milliseconds**.
+4. Add `WALLET-HMAC-V1` to canonicalization.
+5. Separate credential metadata from secret material.
+6. Explicitly define **authenticated Edge → NATS → Core trust**.
+7. Tighten `401` vs `403`.
+8. Clarify SSE timestamp applies only to connection admission.
+9. Add the implementation guardrails to the skill.
+
+Then I think we have a very clean security foundation:
+
+```text
+                 TLS 1.3
+                    │
+                    ▼
+             ┌─────────────┐
+             │    Edge     │
+             ├─────────────┤
+             │ HMAC        │
+             │ timestamp   │
+             │ operationId │
+             │ tenant      │
+             │ rate limit  │
+             └──────┬──────┘
+                    │
+              authenticated
+                 NATS/TLS
+                    │
+                    ▼
+             ┌─────────────┐
+             │    Core     │
+             ├─────────────┤
+             │ tenant      │
+             │ ownership   │
+             │ SELECT LOCK │
+             │ ledger TX   │
+             └─────────────┘
+```
+
+**Very little infrastructure, no synchronous security DB, no IAM product, no JWT stack, no extra replay store, and still a strong security boundary.** That's exactly the direction I'd want for this wallet.

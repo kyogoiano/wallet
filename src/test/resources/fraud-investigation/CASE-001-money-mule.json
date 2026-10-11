@@ -1,0 +1,29 @@
+{
+  "caseId": "CASE-001-money-mule",
+  "archetype": "MONEY_MULE_RAPID_DRAIN",
+  "targetSubject": "MASK_USER_TARGET",
+  "evidenceItems": [
+    {
+      "id": "GRAPH-001",
+      "type": "SHARED_DEVICE_CLUSTER",
+      "subject": "MASK_USER_TARGET",
+      "facts": { "sharedAccountCount": 4, "windowHours": 24 }
+    },
+    {
+      "id": "TEMPORAL-014",
+      "type": "RAPID_PASS_THROUGH",
+      "subject": "MASK_USER_TARGET",
+      "facts": { "transactionCount": 12, "windowHours": 2 }
+    }
+  ],
+  "expectedClaims": [
+    {
+      "type": "SHARED_INFRASTRUCTURE",
+      "evidenceReferences": ["GRAPH-001"]
+    },
+    {
+      "type": "RAPID_FUND_MOVEMENT",
+      "evidenceReferences": ["TEMPORAL-014"]
+    }
+  ]
+}

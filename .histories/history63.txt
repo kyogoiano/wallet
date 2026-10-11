@@ -1,0 +1,421 @@
+Yes — and after checking the current project, I think **`spring-ai-typesafe` fits SPEC-000.8.1 unusually well**. In fact, it gives us a cleaner architectural interpretation of what we called “typed decisions” than trying to make generic Spring AI structured output do the whole job.
+
+The important distinction is that **TypeSafe/Jev is not merely “LLM → JSON → Java record.”** Its documented model is a state plus multiple typed questions, returning typed answers (`Noul`, `Choice`, `Score`) without requiring generated prose or JSON parsing. ([GitHub][1])
+
+### How I'd evolve 000.8.1
+
+Instead of:
+
+```text
+Evidence
+   ↓
+LLM/SLM
+   ↓
+JSON
+   ↓
+schema validation
+   ↓
+TypedDecision
+```
+
+I'd make the architecture:
+
+```text
+                 ┌──────────────────────────────┐
+                 │ Deterministic Fraud Engine   │
+                 │ Rules + ONNX + Dragonfly     │
+                 └──────────────┬───────────────┘
+                                │
+                         authoritative
+                         hot-path decision
+                                │
+                                ▼
+                         Financial Action
+                                │
+                    ────────────┼────────────
+                                │
+                         OUTBOX / NEARLINE
+                                │
+                                ▼
+                    ┌──────────────────────┐
+                    │ Evidence/Fusion      │
+                    │ 000.7 + 000.8        │
+                    └──────────┬───────────┘
+                               │
+             ┌─────────────────┴─────────────────┐
+             │                                   │
+       Deterministic                       Semantic evaluation
+       baseline                           (TypeSafe/Jev)
+             │                                   │
+             │                           typed questions
+             │                         Noul / Choice / Score
+             │                                   │
+             └─────────────────┬─────────────────┘
+                               ▼
+                    TypedDecisionEvaluation
+                               │
+                    ┌──────────┴──────────┐
+                    │                     │
+               investigation          benchmark
+               / analyst              / shadow mode
+```
+
+This preserves the most important invariant from 000.8.1: **Jev never becomes part of authorization.**
+
+---
+
+## Why TypeSafe is interesting here
+
+The current project specifically describes Jev as taking a state and a map of typed questions, answering them against the same state in parallel, and composing atomic questions in application code. ([GitHub][1])
+
+That maps almost directly onto your three questions:
+
+| 000.8.1                                            | TypeSafe/Jev primitive |
+| -------------------------------------------------- | ---------------------- |
+| Q1: behavior inconsistent with historical profile? | `Noul`                 |
+| Q2: coordinated smurfing/mule topology?            | `Noul`                 |
+| Q3: grounded risk score?                           | `Score`                |
+| categorical classification                         | `Choice`               |
+| confidence gate                                    | composition            |
+| multiple questions over same evidence              | single Jev evaluation  |
+
+So rather than inventing a `TypedDecisionEngine` around an LLM response parser, we can define **our own domain SPI** and use TypeSafe as one implementation.
+
+For example:
+
+```java
+public interface TypedDecisionEngine {
+
+    TypedDecisionEvaluation evaluate(
+        DecisionState state,
+        List<TypedQuestion<?>> questions
+    );
+}
+```
+
+Then:
+
+```text
+TypedDecisionEngine
+       │
+       ├── DeterministicDecisionEngine
+       │
+       ├── TypeSafeDecisionEngine
+       │       └── TypeSafeClient / Jev
+       │
+       └── OllamaDecisionEngine
+               └── Spring AI
+```
+
+That is much better than making `Jev` part of the fraud domain itself.
+
+---
+
+# And there's an important Spring AI distinction
+
+I'd **not** use ordinary Spring AI `StructuredOutputConverter` as the core mechanism for this feature.
+
+Spring AI's normal structured-output abstraction is fundamentally:
+
+```text
+prompt
+  ↓
+LLM
+  ↓
+structured response
+  ↓
+parse/validate
+  ↓
+Java object
+```
+
+The documentation explicitly describes the converter as a best-effort mechanism and says the model isn't guaranteed to return the requested structure. ([Home][2])
+
+Spring AI 2.0 improves this substantially with provider-native structured output and schema validation/self-correction. ([Home][3])
+
+But **TypeSafe/Jev attacks the problem one level earlier**:
+
+```text
+                 Generic LLM
+                     │
+             "produce JSON"
+                     │
+              parser/validator
+                     │
+                 Java type
+```
+
+versus:
+
+```text
+                 TypeSafe/Jev
+                     │
+             typed questions
+                     │
+       ┌─────────────┼─────────────┐
+       ▼             ▼             ▼
+      Noul         Choice         Score
+       │             │             │
+       └─────────────┼─────────────┘
+                     ▼
+              typed evaluation
+```
+
+That is much closer to what we actually want for **fraud decision evaluation**.
+
+---
+
+# I would therefore change SPEC-000.8.1 conceptually
+
+I would rename the abstraction slightly.
+
+Instead of thinking:
+
+> **Typed AI Decision Evaluation**
+
+I'd define:
+
+> **Typed Decision Evaluation**
+
+AI becomes an implementation detail.
+
+That gives us:
+
+```text
+Typed Decision Evaluation
+├── deterministic evaluator
+├── TypeSafe/Jev evaluator
+├── local SLM evaluator
+└── future evaluator
+```
+
+And the benchmark asks:
+
+> Can this evaluator improve semantic evaluation of the same evidence without compromising the fraud engine?
+
+rather than:
+
+> Is Jev better than our current AI?
+
+That is a much stronger experiment.
+
+---
+
+## The three questions become very natural
+
+For example:
+
+```java
+var state = DecisionState.builder()
+    .behaviorProfile(profile)
+    .transaction(transaction)
+    .device(deviceEvidence)
+    .network(networkEvidence)
+    .graph(graphEvidence)
+    .velocity(velocityEvidence)
+    .build();
+```
+
+Then:
+
+```java
+var evaluation = decisionEngine.evaluate(
+    state,
+
+    question(
+        "Q1",
+        NOUL,
+        "Is this behavior inconsistent with the historical profile?"
+    ),
+
+    question(
+        "Q2",
+        NOUL,
+        "Does the topology provide evidence of coordinated smurfing or mule activity?"
+    ),
+
+    question(
+        "Q3",
+        SCORE,
+        "What grounded risk score does the combined device/network evidence support?"
+    )
+);
+```
+
+The critical architectural property is that **the domain receives a typed result**, not a model response.
+
+Something like:
+
+```java
+record TypedDecisionEvaluation(
+    String evaluationId,
+    String engine,
+    String engineVersion,
+    Instant evaluatedAt,
+    List<TypedDecisionResult> decisions,
+    List<EvidenceReference> evidence,
+    EvaluationMetadata metadata
+) {}
+```
+
+Then:
+
+```java
+record TypedDecisionResult(
+    String questionId,
+    DecisionType type,
+    Object value,
+    double confidence
+) {}
+```
+
+I'd probably make `value` more strongly typed than `Object`, though.
+
+---
+
+# One particularly useful thing from TypeSafe
+
+The current project explicitly provides **confidence gates, composite scores and consistency mechanisms** in its Spring AI integration. ([Spring AI Community][4])
+
+That is interesting for your existing fusion architecture.
+
+We could have:
+
+```text
+Rules
+   │
+ONNX
+   │
+Graph Risk
+   │
+Behavioral Embeddings
+   │
+   ▼
+Evidence Fusion
+   │
+   ├── deterministic risk
+   │
+   └── TypeSafe semantic evaluation
+             │
+             ├── Q1 behavioral anomaly
+             ├── Q2 coordinated topology
+             └── Q3 device/network score
+             │
+             ▼
+       Investigation Signal
+```
+
+But **not**:
+
+```text
+Jev → HARD_BLOCK
+```
+
+That should remain explicitly prohibited.
+
+---
+
+# One thing I would change in your existing `I-TYPED-003`
+
+You currently have:
+
+> nearline typed outputs boolean or score [0,1], schema validity 100%, no unstructured prose.
+
+With TypeSafe, **schema validity isn't really the interesting acceptance criterion anymore**.
+
+I'd change the invariant to something closer to:
+
+```text
+I-TYPED-003:
+Nearline semantic evaluations MUST cross a typed decision boundary.
+The application MUST receive one of the declared domain types
+(Noul, Choice, Score or equivalent domain representation).
+Unstructured model prose MUST NOT be consumed as a decision input.
+```
+
+Then separate:
+
+```text
+I-TYPED-004:
+Decision semantic correctness MUST be evaluated independently
+from transport/type validity.
+```
+
+Because:
+
+```text
+typed != correct
+```
+
+A perfectly typed `Score(0.91)` can still be wrong.
+
+That's an important distinction for your benchmark.
+
+---
+
+# And I would add one new requirement
+
+### `REQ-TYPED-007 — Typed Decision SPI`
+
+```text
+The fraud intelligence bounded context MUST expose a provider-neutral
+TypedDecisionEngine SPI.
+
+The SPI MUST NOT expose TypeSafe/Jev, Ollama, Spring AI or any model-
+specific type in its domain contract.
+
+TypeSafe/Jev MUST be implemented as an adapter behind this SPI.
+
+The implementation MUST support shadow evaluation without affecting
+financial authorization, ledger mutation, outbox completion or
+transaction latency.
+```
+
+Then:
+
+```text
+REQ-TYPED-008 — Provider Isolation
+
+TypeSafe/Jev MUST be optional infrastructure.
+
+Removal, timeout, authentication failure, API failure or version
+incompatibility of TypeSafe/Jev MUST NOT prevent the deterministic
+fraud engine from authorizing or rejecting a financial operation.
+```
+
+This makes the architecture future-proof.
+
+---
+
+## And there's a very interesting implication for your Jevify idea
+
+The current repository actually describes itself as a **TypeSafe AI System One API (`jev`)**, with a Java SDK and Spring AI integration. ([GitHub][1])
+
+So your earlier concept of **“Jevify”** can be made much more precise architecturally:
+
+```text
+                    Wallet Fraud
+                         │
+                TypedDecisionEngine
+                         │
+          ┌──────────────┼──────────────┐
+          │              │              │
+      Baseline        TypeSafe         Local
+     evaluator          Jev             SLM
+          │              │              │
+      Rules/ML      spring-ai-       Spring AI
+                     typesafe
+```
+
+And the benchmark becomes **provider/evaluator agnostic**.
+
+That's exactly what I would want in `SPEC-000.8.1`.
+
+One caveat: the TypeSafe project is currently very new (the repository shows a small commit history and the current docs identify `0.1.0`/`0.1.0-SNAPSHOT` artifacts depending on the path), so I would treat it as an **experimental candidate behind an SPI**, not as a hard architectural dependency. ([GitHub][1])
+
+That actually fits your `Beat Existing Implementation` philosophy very well: **the spec defines the experiment; TypeSafe/Jev is one candidate implementation.** ([GitHub][1])
+
+[1]: https://github.com/spring-ai-community/spring-ai-typesafe?utm_source=chatgpt.com "GitHub - spring-ai-community/spring-ai-typesafe: A Java SDK for the TypeSafe AI JEV API, & Spring AI TypeSafe integrations. · GitHub"
+[2]: https://docs.spring.io/spring-ai/reference/api/structured-output/converters.html?utm_source=chatgpt.com "Output Converters :: Spring AI Reference"
+[3]: https://docs.spring.io/spring-ai/reference/api/structured-output/native.html?utm_source=chatgpt.com "Provider-Native Structured Output :: Spring AI Reference"
+[4]: https://spring-ai-community.github.io/spring-ai-typesafe/latest/?utm_source=chatgpt.com "Spring AI TypeSafe"

@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "wallet-platform.fullname" . }}-core
+  labels:
+    {{- include "wallet-platform.labels" . | nindent 4 }}
+    {{- include "wallet-platform.coreSelectorLabels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.core.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "wallet-platform.coreSelectorLabels" . | nindent 6 }}
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        {{- include "wallet-platform.coreSelectorLabels" . | nindent 8 }}
+    spec:
+      terminationGracePeriodSeconds: {{ .Values.core.terminationGracePeriodSeconds | default 30 }}
+      securityContext:
+        {{- toYaml .Values.core.podSecurityContext | nindent 8 }}
+      containers:
+        - name: core
+          image: "{{ .Values.core.image.repository }}:{{ .Values.core.image.tag }}"
+          imagePullPolicy: {{ .Values.core.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.core.securityContext | nindent 12 }}
+          ports:
+            - name: management
+              containerPort: 8081
+              protocol: TCP
+          env:
+            - name: SERVER_PORT
+              value: "8081"
+            - name: WALLET_RUNTIME_MODE
+              value: "multi-process"
+            - name: WALLET_EDGE_ENABLED
+              value: "false"
+            - name: NATS_URL
+              value: {{ .Values.nats.url | quote }}
+            - name: SPRING_DATASOURCE_URL
+              value: {{ .Values.postgres.url | quote }}
+            - name: SPRING_DATA_REDIS_HOST
+              value: {{ .Values.dragonfly.host | quote }}
+            - name: SPRING_DATA_REDIS_PORT
+              value: {{ .Values.dragonfly.port | quote }}
+            - name: JAVA_TOOL_OPTIONS
+              value: "-XX:MaxRAMPercentage=75 -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
+          livenessProbe:
+            httpGet:
+              path: /actuator/health/liveness
+              port: 8081
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            httpGet:
+              path: /actuator/health/readiness
+              port: 8081
+            initialDelaySeconds: 15
+            periodSeconds: 5
+            timeoutSeconds: 3
+          resources:
+            {{- toYaml .Values.core.resources | nindent 12 }}

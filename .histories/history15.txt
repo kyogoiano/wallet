@@ -1,0 +1,563 @@
+Sim. E agora que vejo as três specs juntas — **000.5, 000.6 e 000.7** — acho que a divisão ficou **muito melhor arquiteturalmente** do que tentar colocar Graph + propagation + embeddings em uma única feature.
+
+A separação natural ficou:
+
+```text
+                    FRAUD INTELLIGENCE
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+          SPEC-000.5    SPEC-000.6    SPEC-000.7
+             │             │             │
+        GRAPH MODEL    RISK PROPAGATION  BEHAVIOR
+        + PATTERNS     + TEMPORAL DECAY  + VECTOR
+             │             │             │
+             └─────────────┼─────────────┘
+                           │
+                      FRAUD SIGNALS
+                           │
+                           ▼
+                     DragonflyDB
+                           │
+                           ▼
+                    Fraud Gate O(1)
+```
+
+A **000.5** é, na minha opinião, a mais importante das três, porque cria o *substrato de dados* sobre o qual 000.6 e 000.7 vão trabalhar.
+
+O arquivo que você enviou confirma exatamente essa intenção: manter o caminho financeiro síncrono em DragonflyDB e projetar a topologia relacional de forma assíncrona em PostgreSQL.
+
+## Eu faria alguns ajustes antes de ratificar a 000.5
+
+### 1. Não transformaria PostgreSQL em "pseudo Neo4j"
+
+Esse é o ponto mais importante.
+
+A proposta atual está muito boa porque você **não está dizendo "vamos implementar um graph database dentro do Postgres"**.
+
+Você está dizendo:
+
+> PostgreSQL é nosso **Fraud Relationship Store**, e usamos SQL/CTE para responder a um conjunto limitado de perguntas de fraude.
+
+Isso é muito mais barato e operacionalmente simples.
+
+A própria spec deixa Neo4j/Memgraph como algo futuro, e isso eu manteria.
+
+O objetivo da V1 deveria ser:
+
+```text
+PostgreSQL
+    │
+    ├── Who is connected to whom?
+    ├── How strongly?
+    ├── How recently?
+    ├── How much money?
+    ├── How many transactions?
+    │
+    └── Is there a suspicious topology?
+```
+
+e **não**:
+
+```text
+PostgreSQL
+   ↓
+arbitrary graph traversal engine
+   ↓
+complex graph analytics
+   ↓
+centrality / PageRank / community detection / etc.
+```
+
+Isso poderia virar um problema de performance e manutenção.
+
+---
+
+# 2. Eu mudaria uma coisa importante no `fraud_relationships`
+
+Hoje você propõe:
+
+```text
+(source_id,
+ target_id,
+ relationship_type)
+```
+
+como chave lógica.
+
+E o invariant:
+
+> `ON CONFLICT (source_entity_id, target_entity_id, relationship_type) DO UPDATE`
+
+
+
+Isso é excelente para **estado atual agregado**, mas pode ser insuficiente para algumas análises temporais.
+
+Por exemplo:
+
+```text
+A → B
+10:00
+
+A → B
+10:05
+
+A → B
+10:10
+
+A → B
+10:15
+```
+
+Você quer poder responder:
+
+> "A transferiu R$ 20k para B em 15 minutos?"
+
+Se só mantivermos:
+
+```text
+A → B
+tx_count = 4
+total_amount = 20k
+last_seen = 10:15
+```
+
+perdemos a granularidade temporal.
+
+### Eu faria uma separação conceitual:
+
+```text
+fraud_relationships
+        │
+        │ aggregate edge
+        ▼
+fraud_relationship_events
+        │
+        │ temporal facts
+        ▼
+individual observations
+```
+
+Mas **não necessariamente precisa implementar a segunda tabela na primeira versão**.
+
+Podemos deixar:
+
+```text
+fraud_relationships
+```
+
+como agregado e usar os próprios eventos/NATS ou uma tabela compacta de observações temporais apenas quando necessário.
+
+Isso combina perfeitamente com o conceito de:
+
+> `G≤t`
+
+que você colocou no invariant `I-FRAUD-003`.
+
+Porque para garantir:
+
+$$
+Features(e,t)=f(G_{\leq t})
+$$
+
+você precisa ter informação suficiente para reconstruir o estado naquele instante.
+
+---
+
+# 3. Eu também separaria "Graph Risk" de "Direct Risk"
+
+Você já está caminhando nessa direção, mas eu deixaria isso **explícito na spec**.
+
+Hoje:
+
+```text
+fraud_entities
+    risk_score
+```
+
+pode acabar ficando ambíguo.
+
+Eu preferiria:
+
+```text
+direct_risk
+graph_risk
+behavioral_risk
+network_risk
+final_risk
+```
+
+conceitualmente:
+
+```text
+                 ┌───────────────┐
+                 │ Direct Rules  │
+                 └───────┬───────┘
+                         │
+                         ▼
+                    direct_risk
+                         │
+                         │
+Graph ───────────────► graph_risk
+                         │
+                         │
+Behavior ─────────────► behavioral_risk
+                         │
+                         ▼
+                  ┌──────────────┐
+                  │ Risk Fusion  │
+                  └───────┬──────┘
+                          │
+                          ▼
+                     final_risk
+```
+
+Isso vai ser **muito importante na 000.6**.
+
+Porque a 000.6 não deveria sobrescrever o risco original.
+
+Ela deveria produzir um novo sinal:
+
+```text
+propagated_risk
+```
+
+---
+
+# 4. E aqui aparece uma arquitetura muito interessante
+
+Com as três specs, eu não faria:
+
+```text
+000.5 → 000.6 → 000.7 → Fraud Gate
+```
+
+como pipeline linear.
+
+Faria:
+
+```text
+                         ┌──────────────────┐
+                         │ Transaction      │
+                         │ Events           │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │ SPEC-000.5       │
+                         │ Graph Projection │
+                         └────────┬─────────┘
+                                  │
+                    ┌─────────────┴──────────────┐
+                    │                            │
+                    ▼                            ▼
+          ┌──────────────────┐         ┌──────────────────┐
+          │ SPEC-000.6       │         │ SPEC-000.7       │
+          │ Risk Propagation │         │ Behavioral Vector│
+          └────────┬─────────┘         └────────┬─────────┘
+                   │                            │
+                   └─────────────┬──────────────┘
+                                 ▼
+                       ┌────────────────────┐
+                       │ Risk Signal Fusion │
+                       └─────────┬──────────┘
+                                 │
+                                 ▼
+                         ┌────────────────┐
+                         │   DragonflyDB  │
+                         │ Hot Risk State │
+                         └───────┬────────┘
+                                 │
+                                 ▼
+                         ┌────────────────┐
+                         │ Fraud Gate V4  │
+                         │     O(1)       │
+                         └────────────────┘
+```
+
+Isso é muito mais poderoso.
+
+---
+
+# 5. E eu manteria NATS na 000.5
+
+Aqui a decisão que discutimos anteriormente fica particularmente clara.
+
+Para **eventos internos dentro do mesmo bounded context**, Spring Modulith:
+
+```java
+@ApplicationModuleListener
+```
+
+é excelente.
+
+Mas para:
+
+```text
+Fraud Intelligence
+       ↓
+long-running processing
+       ↓
+PostgreSQL projection
+       ↓
+risk propagation
+       ↓
+Dragonfly materialization
+```
+
+eu manteria **NATS JetStream**.
+
+A própria 000.5 já estabelece isso:
+
+```text
+Outbox
+   ↓
+NATS JetStream
+   ↓
+FraudGraphEventListener
+   ↓
+Graph Projector
+```
+
+
+
+E isso é correto porque aqui você não está simplesmente comunicando:
+
+> "aconteceu algo dentro do meu módulo."
+
+Você está criando uma **durable asynchronous processing pipeline**.
+
+Então eu faria:
+
+### Spring Modulith
+
+Para:
+
+```text
+Ledger
+  └── DepositCompletedEvent
+        └── Savings
+        └── Goals
+        └── etc.
+```
+
+### NATS
+
+Para:
+
+```text
+Outbox
+   ↓
+Fraud Intelligence
+   ↓
+Graph Projection
+   ↓
+Propagation
+   ↓
+ML/Vector
+   ↓
+Risk Materialization
+```
+
+Isso inclusive deixa a arquitetura conceitualmente limpa.
+
+---
+
+# 6. Dragonfly + PostgreSQL ficou uma excelente decisão
+
+E acho que foi uma decisão melhor do que colocar Neo4j imediatamente.
+
+Você acaba tendo:
+
+| Tecnologia          | Responsabilidade             |
+| ------------------- | ---------------------------- |
+| **PostgreSQL**      | Truth / durable fraud graph  |
+| **DragonflyDB**     | Hot fraud state              |
+| **NATS JetStream**  | Async event backbone         |
+| **Caffeine**        | Local O(1) rules             |
+| **pgvector**        | Behavioral similarity        |
+| **Spring Modulith** | In-process module boundaries |
+| **ML**              | Later intelligence layer     |
+
+E principalmente:
+
+```text
+              DURABILITY
+                  ▲
+                  │
+             PostgreSQL
+                  │
+          graph + history
+                  │
+                  │ async
+                  ▼
+               NATS
+                  │
+                  ▼
+             Intelligence
+                  │
+                  ▼
+              Dragonfly
+                  │
+                  │ O(1)
+                  ▼
+             Fraud Gate
+                  │
+                  ▼
+             TRANSACTION
+```
+
+Isso é uma arquitetura **muito mais barata de operar** que:
+
+```text
+Postgres
++
+Redis
++
+Neo4j
++
+Kafka
++
+Vector DB
++
+ML platform
+```
+
+para o estágio atual do Wallet.
+
+---
+
+# 7. A 000.7 ficou particularmente interessante
+
+Eu manteria **pgvector antes de qualquer banco vetorial dedicado**.
+
+Porque você consegue fazer:
+
+```sql
+SELECT ...
+FROM fraud_entity_features
+WHERE ...
+ORDER BY behavioral_vector <=> :reference_vector
+LIMIT 10;
+```
+
+e ainda fazer:
+
+```text
+vector similarity
+        +
+fraud metadata
+        +
+transaction history
+        +
+relational graph
+```
+
+no mesmo storage.
+
+E isso casa perfeitamente com o objetivo que você colocou na 000.7:
+
+> "without adding a separate vector database cluster."
+
+É uma decisão arquitetural muito coerente com o objetivo de **resource optimization / low maintenance cost**.
+
+---
+
+# 8. E tem uma evolução que eu colocaria no roadmap
+
+Depois de 000.5, 000.6 e 000.7, eu criaria algo como:
+
+### `SPEC-000.8 — Fraud Signal Fusion & Micro-ML`
+
+Não faria ML ainda dentro da 000.5/000.6/000.7.
+
+Primeiro criamos features:
+
+```text
+Graph:
+    fan_in
+    fan_out
+    cycle_count
+    shared_devices
+    shared_ips
+    network_risk
+
+Temporal:
+    propagation_risk
+    risk_age
+    decay_rate
+
+Behavior:
+    velocity
+    amount_entropy
+    nocturnal_ratio
+    behavioral_similarity
+```
+
+Depois:
+
+```text
+              ┌───────────────┐
+              │ Rule Signals  │
+              └───────┬───────┘
+                      │
+              ┌───────▼───────┐
+              │ Graph Signals │
+              └───────┬───────┘
+                      │
+              ┌───────▼───────┐
+              │ Vector Signals│
+              └───────┬───────┘
+                      │
+              ┌───────▼───────┐
+              │ Temporal      │
+              │ Signals       │
+              └───────┬───────┘
+                      │
+                      ▼
+               ┌──────────────┐
+               │ Micro-ML     │
+               │ Risk Model   │
+               └──────┬───────┘
+                      │
+                      ▼
+                  final_risk
+```
+
+E aí o ML **não decide sozinho**.
+
+Ele vira mais uma fonte de evidência:
+
+$$
+R_{final}=F(R_{rules},R_{graph},R_{behavior},R_{temporal},R_{ML})
+$$
+
+Isso é muito mais seguro para uma fintech.
+
+---
+
+## Minha avaliação das três specs
+
+Eu daria:
+
+| Spec      | Avaliação | Papel                   |
+| --------- | --------: | ----------------------- |
+| **000.5** |     ⭐⭐⭐⭐⭐ | Foundation              |
+| **000.6** |     ⭐⭐⭐⭐½ | Network intelligence    |
+| **000.7** |     ⭐⭐⭐⭐⭐ | Behavioral intelligence |
+
+E a sequência está correta:
+
+**000.5 → 000.6 + 000.7 → Micro-ML**
+
+Não colocaria Neo4j agora.
+
+Não colocaria uma vector DB agora.
+
+Não colocaria LLM no hot path.
+
+E não substituiria NATS por Modulith nessa parte.
+
+O mais interessante é que estamos chegando a uma arquitetura em que **cada tecnologia tem uma responsabilidade muito específica**, em vez de simplesmente adicionar componentes porque são "modernos".
+
+Eu só faria **uma revisão final da 000.5 antes de implementá-la**, principalmente em torno de **temporal graph storage, idempotência do projector e definição dos `risk_*` scores**. Esses três pontos vão determinar se a 000.6 e a 000.7 serão fáceis ou se teremos que refatorar o graph model depois.

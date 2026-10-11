@@ -1,0 +1,923 @@
+Sim. Com a **000.11 Rev.2** agora bem focada em reliable reprocessing, a **000.12 faz sentido como uma mudança arquitetural separada**: ela não deve tentar resolver DLQ; deve resolver **quem consome o quê e onde esse consumer vive**.
+
+A direção está boa, mas eu faria alguns ajustes antes de considerar a SPEC pronta para ARCH/PLAN. O principal é que há **3 questões arquiteturais importantes** escondidas no draft.
+
+A 000.12 está explicitamente posicionada como a eliminação do dispatcher monolítico e descentralização dos consumers para os bounded contexts.
+
+---
+
+# 1. A divisão 000.11 → 000.12 ficou muito boa
+
+Eu manteria exatamente essa separação:
+
+### SPEC-000.11
+
+**Reliable Reprocessing**
+
+Responde:
+
+> O que fazemos quando um consumer falha?
+
+```text
+failure
+   ↓
+reprocess
+   ↓
+retry
+   ↓
+exhausted / quarantine
+```
+
+### SPEC-000.12
+
+**Consumer Decentralization**
+
+Responde:
+
+> Quem é responsável por consumir cada mensagem?
+
+```text
+commands.ledger.transfer
+        ↓
+ledger.TransferCommandConsumer
+
+commands.ledger.deposit
+        ↓
+ledger.DepositCommandConsumer
+
+events.ledger.transfer-completed
+        ↓
+fraud.FraudGraphConsumer
+```
+
+Isso é uma separação excelente.
+
+---
+
+# 2. Mas há uma inconsistência importante no modelo de bounded contexts
+
+O draft diz:
+
+> `ledger`, `fraud`, `savings`, `dlq`
+
+e depois:
+
+```text
+commands.ledger.transfer
+commands.ledger.deposit
+commands.ledger.withdraw
+```
+
+Isso sugere que **ledger é o dono dos três comandos**.
+
+Pelo que temos construído no Wallet, isso precisa ser decidido explicitamente.
+
+Se `Deposit`, `Withdraw` e `Transfer` são **financial commands do Wallet Core**, então:
+
+```text
+ledger
+ ├── transfer
+ ├── deposit
+ └── withdraw
+```
+
+pode ser perfeitamente válido.
+
+Mas então **Wallet Creation** desapareceu do SPEC.
+
+Você mencionou agora que os bounded contexts incluem:
+
+* fraud
+* deposits
+* transfers
+* withdraw
+* wallet creation
+
+Então eu não deixaria a SPEC afirmar implicitamente que os únicos comandos são três.
+
+Eu colocaria:
+
+```text
+commands.<capability>.<command>
+```
+
+e deixaria a tabela de canonical mapping explícita:
+
+```text
+commands.ledger.transfer
+commands.ledger.deposit
+commands.ledger.withdraw
+commands.wallet.create
+```
+
+**se `wallet` for realmente o capability owner**.
+
+Ou:
+
+```text
+commands.account.create-wallet
+```
+
+se esse for o modelo de domínio escolhido.
+
+O importante é: **o subject deve seguir o ownership do capability, não simplesmente o tipo da operação financeira.**
+
+---
+
+# 3. Eu mudaria `I-STREAM-004`
+
+Hoje está:
+
+> `Subject(CommandType) = "commands.ledger." + CommandType.toLowerCase()`
+
+Isso é muito rígido.
+
+Ele transforma o namespace em uma função de string:
+
+```java
+"commands.ledger." + commandType
+```
+
+e acaba codificando uma decisão arquitetural dentro do enum.
+
+Eu prefiro:
+
+```text
+CommandType
+      │
+      ▼
+CommandRoute
+      │
+      ├── capability
+      └── subject
+```
+
+Por exemplo:
+
+```text
+TransferFunds → ledger → commands.ledger.transfer
+DepositFunds  → ledger → commands.ledger.deposit
+WithdrawFunds → ledger → commands.ledger.withdraw
+CreateWallet  → wallet → commands.wallet.create
+```
+
+Assim o contrato é:
+
+> **Every external command MUST have exactly one canonical capability-owned subject.**
+
+Não:
+
+> todos os comandos são `ledger`.
+
+Isso vai envelhecer muito melhor.
+
+---
+
+# 4. A maior questão: ACK depois de enviar para DLQ
+
+Aqui temos uma consequência direta do 000.11.
+
+A 000.11 estabelece:
+
+```text
+failure
+   ↓
+route to reprocessing
+   ↓
+ACK original
+```
+
+e isso é essencial para liberar live traffic.
+
+Mas existe uma janela perigosa:
+
+```text
+Core Consumer
+    │
+    ├── persist DLQ
+    │
+    └── ACK NATS
+```
+
+Imagine:
+
+```text
+persist DLQ ✓
+ACK ✓
+```
+
+ótimo.
+
+Mas:
+
+```text
+persist DLQ ✗
+ACK
+```
+
+→ **lost message**
+
+E:
+
+```text
+persist DLQ ✓
+ACK ✗
+```
+
+→ NATS redelivers → **duplicate DLQ entry**
+
+Então a 000.12 precisa pelo menos estabelecer uma regra:
+
+> **A message MUST NOT be acknowledged until durable reprocessing handoff has succeeded. The handoff MUST be idempotent using the original message identity.**
+
+Isso não precisa entrar em implementação SQL ainda.
+
+Mas precisa estar na SPEC.
+
+Eu adicionaria:
+
+### `I-STREAM-006 — Durable Handoff Before ACK`
+
+```text
+ACK(m) ⇒ DurableHandoff(m) = committed
+```
+
+E:
+
+```text
+Handoff(m) is idempotent by message identity.
+```
+
+Esse é, para mim, um **MUST antes de PLAN**.
+
+---
+
+# 5. Isso é particularmente importante para os dois DLQs
+
+Porque agora temos:
+
+```text
+CORE_COMMAND
+```
+
+e
+
+```text
+BOUNDED_CONTEXT
+```
+
+O handoff é diferente.
+
+### Core Command
+
+```text
+CoreCommandConsumer
+       │
+       ▼
+Core Command DLQ
+       │
+       ▼
+ACK original NATS message
+```
+
+Identity:
+
+```text
+messageId
+operationId
+```
+
+### Bounded Context
+
+```text
+FraudConsumer
+       │
+       ▼
+Fraud DLQ
+       │
+       ▼
+ACK original event
+```
+
+Identity:
+
+```text
+messageId
+correlationId
+```
+
+A 000.12 não precisa implementar DLQ — isso é 000.11 — mas precisa definir **o contrato de handoff** entre consumer e DLQ.
+
+---
+
+# 6. Outro ponto importante: `WALLET_DLQ` está conceitualmente estranho
+
+Hoje:
+
+```text
+WALLET_DLQ
+ ├── commands.dlq.ledger.*
+ └── events.dlq.fraud.*
+```
+
+Enquanto a taxonomia é:
+
+```text
+<kind>.<capability>.<action>
+```
+
+Mas:
+
+```text
+commands.dlq.ledger.*
+```
+
+tem quatro componentes e `dlq` ocupa o lugar de capability.
+
+Eu não tentaria forçar DLQ dentro da mesma taxonomia de negócio.
+
+Prefiro algo explicitamente diferente:
+
+```text
+dlq.commands.ledger.transfer
+dlq.commands.ledger.deposit
+dlq.commands.ledger.withdraw
+
+dlq.events.fraud.*
+dlq.events.ledger.*
+```
+
+Ou:
+
+```text
+dlq.commands.<capability>.<action>
+dlq.events.<capability>.<event>
+```
+
+Isso comunica imediatamente:
+
+> isto não é uma mensagem normal; é uma mensagem de reprocessamento.
+
+E fica muito alinhado ao conceito da 000.11 de separar live path de reprocessing path.
+
+---
+
+# 7. Eu manteria um `WALLET_COMMANDS` e `WALLET_EVENTS`
+
+Essa parte está boa:
+
+```text
+WALLET_COMMANDS
+    commands.*
+
+WALLET_EVENTS
+    events.*
+```
+
+Mas eu evitaria pensar em:
+
+```text
+one stream = one consumer
+```
+
+O modelo correto é:
+
+```text
+                WALLET_COMMANDS
+                       │
+       ┌───────────────┼────────────────┐
+       ▼               ▼                ▼
+ ledger.transfer  ledger.deposit  ledger.withdraw
+       │               │                │
+       ▼               ▼                ▼
+ durable consumer durable consumer durable consumer
+```
+
+Cada durable consumer tem:
+
+```text
+subject filter
+consumer name
+ack policy
+delivery policy
+```
+
+Então `I-STREAM-001` está correta conceitualmente.
+
+---
+
+# 8. Mas eu mudaria "dedicated JetStream durable consumer"
+
+Para evitar uma interpretação errada:
+
+> Each capability consumer MUST have an independently managed JetStream consumer with an explicit subject filter.
+
+Porque "dedicated" pode ser interpretado como:
+
+```text
+one stream per bounded context
+```
+
+e não precisamos disso.
+
+Podemos ter:
+
+```text
+WALLET_EVENTS
+```
+
+com:
+
+```text
+fraud-transfer-consumer
+fraud-risk-consumer
+savings-consumer
+```
+
+todos independentes.
+
+---
+
+# 9. O `AbstractEncryptedCommandConsumer<T>` merece atenção
+
+Essa é provavelmente a maior questão de design de código da SPEC.
+
+A ideia:
+
+```java
+abstract class AbstractEncryptedCommandConsumer<T>
+```
+
+é boa **como technical pipeline**:
+
+```text
+NATS message
+   ↓
+CryptoEnvelope
+   ↓
+decrypt
+   ↓
+tenant validation
+   ↓
+operation context
+   ↓
+T
+   ↓
+business handler
+```
+
+Mas existe o risco de criarmos outro "god abstraction".
+
+O antigo:
+
+```text
+CoreCommandConsumer
+```
+
+era um god class.
+
+Não queremos substituir:
+
+```text
+CoreCommandConsumer
+```
+
+por:
+
+```text
+AbstractEncryptedCommandConsumer
+```
+
+que acaba contendo:
+
+```text
+crypto
+tenant
+otel
+status
+ack
+retry
+DLQ
+business dispatch
+```
+
+Eu restringiria fortemente o contrato.
+
+Algo como:
+
+```text
+AbstractEncryptedCommandConsumer
+
+ONLY:
+    receive
+    validate envelope
+    decrypt
+    construct context
+    delegate
+```
+
+E **não**:
+
+```text
+classify failure
+persist DLQ
+decide retry
+broadcast business status
+dispatch business operation
+```
+
+Essas responsabilidades continuam em componentes separados.
+
+---
+
+# 10. Na verdade eu consideraria composition em vez de inheritance
+
+O seu draft propõe:
+
+```text
+AbstractEncryptedCommandConsumer<T>
+```
+
+Eu colocaria isso como ponto de revisão, não necessariamente rejeição.
+
+Podemos ter:
+
+```text
+NatsCommandConsumer
+       │
+       ├── EnvelopeProcessor
+       ├── TenantContextResolver
+       ├── FailureHandler
+       └── CommandHandler<T>
+```
+
+E o consumer concreto:
+
+```java
+TransferCommandConsumer
+```
+
+basicamente:
+
+```text
+receive
+   ↓
+shared pipeline
+   ↓
+TransferFundsHandler
+```
+
+Isso evita herança profunda.
+
+Mas eu **não transformaria isso em MUST no SPEC**. É decisão de ARCH/PLAN.
+
+---
+
+# 11. Existe outra inconsistência: "status broadcast"
+
+O `REQ-STRM-006` coloca:
+
+> `OperationStatusBroadcaster`
+
+dentro da infraestrutura compartilhada.
+
+Eu tiraria isso da responsabilidade do encrypted consumer.
+
+Crypto pipeline não deveria saber que existe:
+
+```text
+OperationStatusBroadcaster
+```
+
+Porque aí:
+
+```text
+security infrastructure
+       ↓
+application/business notification
+```
+
+fica acoplado.
+
+Melhor:
+
+```text
+Consumer
+   ↓
+Command Handler
+   ↓
+application/domain event
+   ↓
+status broadcaster
+```
+
+Ou outro mecanismo já existente no Wallet.
+
+Esse é um **SHOULD → MUST architectural boundary** para mim:
+
+> Shared messaging infrastructure MUST NOT own business-status semantics.
+
+---
+
+# 12. `Tenant extraction` também precisa respeitar o SPEC-000.9.3
+
+A SPEC diz:
+
+> Tenant extraction and validation.
+
+Eu escreveria de forma mais precisa:
+
+```text
+TenantContext MUST be derived from the authenticated
+message/envelope security context and MUST NOT be derived
+from an untrusted command field or subject.
+```
+
+Porque já temos o princípio:
+
+```text
+credential → tenant
+```
+
+e:
+
+```text
+X-Tenant-Id ≠ trusted identity
+```
+
+Não quero que 000.12 reabra essa discussão.
+
+---
+
+# 13. FraudConsumer está meio ambíguo
+
+Temos:
+
+```text
+events.fraud.*
+    → FraudConsumer
+
+events.ledger.transfer-completed
+    → FraudGraphConsumer
+```
+
+Isso pode estar correto.
+
+Mas precisamos definir **ownership**:
+
+### Fraud capability
+
+é dono de:
+
+```text
+events.fraud.*
+```
+
+e pode **consumir eventos de ledger**:
+
+```text
+events.ledger.transfer-completed
+```
+
+Isso é perfeitamente válido.
+
+Então eu adicionaria uma regra:
+
+> A consumer MUST live in the bounded context that owns the processing capability, not necessarily the bounded context that owns the event subject.
+
+Isso é importante.
+
+Exemplo:
+
+```text
+event owner:
+    ledger
+
+consumer owner:
+    fraud
+```
+
+Não há contradição.
+
+---
+
+# 14. E eu adicionaria explicitamente `consumer ownership`
+
+Algo como:
+
+```text
+I-STREAM-007 — Consumer Ownership
+
+Every consumer MUST have exactly one owning bounded context.
+The event/command producer MUST NOT own the consumer implementation
+unless that capability also owns the processing responsibility.
+```
+
+Isso resolve muita confusão futura.
+
+---
+
+# 15. Backward compatibility precisa de prazo
+
+Hoje:
+
+```text
+commands.ledger.*
+```
+
+e:
+
+```text
+commands.wallet.*
+```
+
+temporariamente.
+
+Mas "temporary backwards-compatibility alias" sem critério é perigoso.
+
+Eu colocaria:
+
+```text
+REQ-STRM-001
+```
+
+como:
+
+> legacy `commands.wallet.*` MUST remain supported only during migration and MUST have an explicit removal milestone.
+
+E, principalmente:
+
+**Edge deve publicar somente o novo subject.**
+
+Não devemos ter:
+
+```text
+Edge
+ ├── new
+ └── old
+```
+
+simultaneamente.
+
+O alias é para consumidores antigos durante a migração, não para manter dois contratos vivos indefinidamente.
+
+---
+
+# 16. Eu adicionaria uma regra muito importante sobre subject → consumer
+
+Hoje temos:
+
+```text
+commands.ledger.transfer
+       ↓
+TransferCommandConsumer
+```
+
+Precisamos garantir:
+
+```text
+one canonical subject
+        ↓
+one owning consumer
+```
+
+pelo menos para commands.
+
+Algo como:
+
+### `I-STREAM-008 — Deterministic Command Ownership`
+
+> Every canonical command subject MUST have exactly one owning command consumer within the active Wallet Core deployment.
+
+Isso evita daqui a seis meses:
+
+```text
+commands.ledger.transfer
+   ├── TransferCommandConsumer
+   ├── OldTransferConsumer
+   └── GenericCommandConsumer
+```
+
+que é exatamente o problema que estamos tentando eliminar.
+
+---
+
+# 17. O que eu mudaria na SPEC agora
+
+Eu faria **poucas mudanças**, não uma reescrita.
+
+### Adicionar:
+
+```text
+I-STREAM-006 — Durable Handoff Before ACK
+I-STREAM-007 — Consumer Ownership
+I-STREAM-008 — Deterministic Command Ownership
+```
+
+### Alterar:
+
+`I-STREAM-004`
+
+de:
+
+```text
+CommandType → "commands.ledger." + lowerCase
+```
+
+para:
+
+```text
+CommandType → canonical CommandRoute
+                 ├── capability
+                 └── subject
+```
+
+### Alterar:
+
+DLQ subjects:
+
+```text
+commands.dlq.*
+events.dlq.*
+```
+
+para algo como:
+
+```text
+dlq.commands.*
+dlq.events.*
+```
+
+### Restringir:
+
+`AbstractEncryptedCommandConsumer`
+
+para **technical message processing only**.
+
+### Remover do shared consumer:
+
+```text
+OperationStatusBroadcaster
+```
+
+### Adicionar:
+
+ownership de consumer.
+
+---
+
+# 18. A topologia final que eu gostaria de ver
+
+```text
+                         EDGE
+                           │
+                           │
+                  commands.ledger.*
+                           │
+                           ▼
+              ┌─────────────────────────┐
+              │     WALLET_COMMANDS     │
+              └─────────────────────────┘
+                    │       │       │
+                    ▼       ▼       ▼
+                 Transfer Deposit Withdraw
+                    │       │       │
+                    ▼       ▼       ▼
+                 Ledger bounded context
+                    │
+                    │ domain events
+                    ▼
+              ┌─────────────────────────┐
+              │      WALLET_EVENTS      │
+              └─────────────────────────┘
+                    │       │       │
+                    ▼       ▼       ▼
+                 Fraud   Savings   Goals
+                    │
+                    │ failure
+                    ▼
+              ┌─────────────────────────┐
+              │       WALLET_DLQ        │
+              │   dlq.commands.*        │
+              │   dlq.events.*          │
+              └─────────────────────────┘
+                    │
+                    ▼
+             Reliable Reprocessing
+                SPEC-000.11
+```
+
+E a separação arquitetural fica muito limpa:
+
+```text
+000.09 → Edge durability / ingress
+000.10 → Financial cryptographic security
+000.11 → Reliable reprocessing / DLQ
+000.12 → Consumer & stream decentralization
+```
+
+**Essa sequência está muito boa.**
+
+Minha avaliação da 000.12 agora seria **🟢 directionally ready, mas ainda 🟡 SPEC revision required**. Não por grandes problemas conceituais, mas porque os pontos de **durable handoff-before-ACK, command ownership, subject routing e limite do `AbstractEncryptedCommandConsumer`** são importantes demais para deixar implícitos.
+
+E eu **não acrescentaria mais complexidade**. Depois desses ajustes, eu congelaria a SPEC e passaria para `ARCH-000.12`; especialmente a decisão **inheritance vs composition** do consumer base deve ser tomada no ARCH, não inflada dentro da SPEC.

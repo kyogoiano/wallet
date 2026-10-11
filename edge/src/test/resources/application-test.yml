@@ -1,0 +1,40 @@
+server:
+  port: 0
+
+wallet:
+  runtime:
+    mode: multi-process
+  edge:
+    enabled: true
+
+edge:
+  instance-id: test-edge-instance
+  runtime:
+    mode: multi-process
+  spool:
+    directory: ${java.io.tmpdir}/wallet-edge-test-spool-${random.uuid}
+    segment-size-bytes: 1048576
+    max-capacity-bytes: 10485760
+  rate-limit:
+    capacity: 10000
+    refill-rate: 10000
+  bulkhead:
+    max-inflight: 2048
+
+nats:
+  url: nats://localhost:4222
+  token: ""
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: always
+      probes:
+        enabled: true
+      group:
+        readiness:
+          include: readinessState,edgeReadiness

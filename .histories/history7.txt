@@ -1,0 +1,68 @@
+Atualmente o package-info.java permite:
+
+allowedDependencies =
+{
+    "ledger::api",
+    "ledger",
+    "core::api",
+    "core"
+}
+
+Eu tentaria reduzir isso para:
+
+allowedDependencies = {
+    "ledger::api",
+    "core::api"
+}
+
+Ou, se core não tiver realmente um módulo publicado:
+
+allowedDependencies = {
+    "ledger::api",
+    "core"
+}
+
+Mas o ideal é não permitir tanto ledger::api quanto ledger.
+
+Porque:
+
+ledger::api
+
+expressa precisamente:
+
+Savings pode depender apenas da API exposta.
+
+Enquanto:
+
+ledger
+
+pode acabar permitindo uma dependência mais ampla do que queremos.
+
+O PLAN afirma justamente que o Savings deve usar BalanceUseCase e TransferFundsUseCase da API do Ledger.
+
+Então eu faria o boundary tão restritivo quanto possível.
+
+Minha recomendação final
+Agora — V4 / SPEC-001
+Gradle
+├── :core
+└── :fraud
+
+Spring Modulith
+├── ledger
+└── savings
+Resultado
+          PHYSICAL BUILD MODULES
+
+      :core                    :fraud
+        │                        │
+        └───────────┬────────────┘
+                    │
+                    ▼
+              Wallet Application
+                    │
+        ┌───────────┴────────────┐
+        ▼                        ▼
+      ledger                  savings
+    Modulith                 Modulith
+    Module                   Module

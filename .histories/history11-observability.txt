@@ -1,0 +1,14 @@
+Optimizing OpenTelemetry (OTel) data collection with OpenObserve involves reducing telemetry volume and resource overhead using core collector levers and storage efficiencies.Key Optimization StrategiesTail Sampling: Configure the OpenTelemetry Collector's tail sampling processor to analyze entire traces before deciding to keep them, ensuring you capture errors and slow requests while dropping repetitive, healthy traffic.Attribute and Log Filtering: Use the OTel Collector transform or filter processors to drop high-volume, low-value attributes, debug logs, or health check spans before they hit your network.Transport Protocol Selection: Switch from OTLP/HTTP to OTLP/gRPC in your collector configuration for higher throughput and lower per-request CPU overhead.Leverage Native Storage: OpenObserve stores data using columnar Apache Parquet formatting, which inherently minimizes storage footprints and accelerates analytical queries without requiring complex cold-tier setups.
+
+Should we link metrics to traces ?
+
+Include transform optimizations and include them on pipeline :
+
+transform:
+    # Drop verbose metric attributes (like specific spring bean names) to reduce cardinality
+    error_mode: ignore
+    metrics:
+      datapoint:
+        - delete_key(attributes, "spring.bean.name")
+
+Optimize large log sizes, trace spikes, or metric cardinality.

@@ -1,0 +1,751 @@
+Yes. I think **000.9.1 is the right place to do this**, and I would *not* jump directly from the current same-JVM architecture to independent microservices.
+
+What you're describing is essentially a **modular-monolith internal platform boundary**:
+
+```text
+                    Wallet JVM
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│   ┌──────────────────────┐     ┌─────────────────────────┐  │
+│   │       EDGE           │     │      WALLET CORE        │  │
+│   │                      │     │                         │  │
+│   │ WebFlux / Netty      │     │ Transfer                │  │
+│   │ HTTP/2 / HTTP/3      │     │ Deposit                 │  │
+│   │ Rate limit           │     │ Withdraw                │  │
+│   │ Bulkhead             │     │ Ledger                  │  │
+│   │ Journal              │     │ Fraud                   │  │
+│   │ SSE                  │     │ Accounts                │  │
+│   │                      │     │                         │  │
+│   └──────────┬───────────┘     └──────────┬──────────────┘  │
+│              │                            │                 │
+│              └──────── Internal Contract ─┘                 │
+│                                                             │
+│                Same JVM / Same deployment                  │
+└─────────────────────────────────────────────────────────────┘
+```
+
+The interesting part is **how strong that internal boundary should be**.
+
+I see three progressively stronger designs.
+
+---
+
+# 1. Option A — Spring Modulith modular monolith
+
+This is the option I would choose as the **baseline for 000.9.1**.
+
+Something like:
+
+```text
+wallet
+├── edge
+│   ├── api
+│   ├── application
+│   └── infrastructure
+│
+├── wallet
+│   ├── api
+│   ├── application
+│   ├── domain
+│   └── infrastructure
+│
+├── fraud
+├── ledger
+├── account
+└── shared
+```
+
+But there is one very important distinction:
+
+### Don't create a giant `shared` module.
+
+Instead:
+
+```text
+edge
+   │
+   ├── depends on → edge-api
+   │
+   └── depends on → small platform contracts
+
+wallet
+   │
+   ├── owns commands
+   ├── owns financial use cases
+   └── owns ledger
+
+infrastructure
+   │
+   ├── NATS
+   ├── PostgreSQL
+   ├── observability
+   └── adapters
+```
+
+The direction becomes explicit.
+
+For example:
+
+```text
+             ┌─────────────────┐
+             │      EDGE       │
+             └────────┬────────┘
+                      │
+                 EdgeCommand
+                      │
+                      ▼
+             ┌─────────────────┐
+             │  WALLET CORE    │
+             └────────┬────────┘
+                      │
+             ┌────────┴────────┐
+             ▼                 ▼
+          Fraud              Ledger
+```
+
+Spring Modulith gives you a very useful enforcement mechanism here: **the architecture becomes executable**.
+
+You can enforce:
+
+```text
+edge
+  cannot access
+    ledger.internal
+    fraud.internal
+    persistence.internal
+```
+
+That is much more valuable than simply putting classes in different packages.
+
+---
+
+# 2. Option B — OSGi-style modular application
+
+This is the more radical idea you mentioned, and it is actually interesting for this project.
+
+OSGi's fundamental idea is:
+
+> modules have explicit exported/imported packages and isolated dependencies.
+
+Conceptually:
+
+```text
+┌─────────────────────────────────────────────────────┐
+│ JVM                                                 │
+│                                                     │
+│  Bundle: edge                                       │
+│     exports: edge.api                               │
+│     imports: wallet.command.api                     │
+│                                                     │
+│  Bundle: wallet                                     │
+│     exports: wallet.command.api                     │
+│     imports: ledger.api, fraud.api                  │
+│                                                     │
+│  Bundle: ledger                                     │
+│     exports: ledger.api                             │
+│                                                     │
+└─────────────────────────────────────────────────────┘
+```
+
+The important benefit isn't dynamic loading.
+
+It's **dependency isolation**.
+
+You can get something similar without actually adopting OSGi.
+
+For example, using Java modules:
+
+```text
+module com.wallet.edge {
+    requires com.wallet.edge.api;
+
+    exports br.com.wallet.edge.api;
+}
+```
+
+and:
+
+```text
+module com.wallet.core {
+    requires com.wallet.ledger.api;
+    requires com.wallet.fraud.api;
+
+    exports br.com.wallet.wallet.api;
+}
+```
+
+Now Java itself helps prevent accidental dependencies.
+
+---
+
+# 3. Option C — Hybrid: Modulith + Java Module System
+
+This is the one I find most interesting for your architecture.
+
+You could have **three layers of modularity**:
+
+```text
+                 JVM
+┌────────────────────────────────────────────────────────┐
+│                                                        │
+│  JPMS                                                   │
+│  ┌──────────────────────────────────────────────────┐  │
+│  │ deployment/module boundaries                     │  │
+│  │                                                  │  │
+│  │  edge   │   wallet   │   fraud   │ infrastructure│  │
+│  └──────────────────────────────────────────────────┘  │
+│                                                        │
+│             Spring Modulith                           │
+│        ┌──────────┬──────────┬──────────┐              │
+│        │ Edge     │ Wallet   │ Fraud    │ ...          │
+│        └──────────┴──────────┴──────────┘              │
+│                                                        │
+│                 Java packages                          │
+│                                                        │
+└────────────────────────────────────────────────────────┘
+```
+
+But I **wouldn't implement all three simultaneously in 000.9.1**.
+
+That's likely over-engineering.
+
+---
+
+# The key architectural question
+
+I think the most important question for 000.9.1 isn't:
+
+> "Should we use Modulith or OSGi?"
+
+It is:
+
+> **What is the contract between Edge and Wallet Core?**
+
+Because once we get this right, the physical deployment can evolve later.
+
+For example:
+
+```text
+Current
+
+HTTP
+ ↓
+Edge
+ ↓
+CommandAcceptanceService
+ ↓
+NATS
+ ↓
+CoreCommandConsumer
+ ↓
+Wallet
+```
+
+Even though everything is:
+
+```text
+same JVM
+```
+
+we can make the boundary behave as though they were separate processes.
+
+That's powerful.
+
+---
+
+# 4. I would introduce an internal `Command Gateway`
+
+Rather than Edge knowing anything about:
+
+```text
+TransferFundsUseCase
+DepositFundsUseCase
+WithdrawFundsUseCase
+```
+
+Edge should know only:
+
+```java
+interface WalletCommandGateway {
+
+    CommandAcceptanceResult accept(CommandEnvelope command);
+}
+```
+
+or, because you're already using NATS:
+
+```java
+interface WalletCommandIngress {
+
+    CompletionStage<CommandAcceptance> accept(
+        CommandEnvelope command
+    );
+}
+```
+
+The Edge knows:
+
+```text
+CommandEnvelope
+operationId
+tenant
+trace context
+command type
+payload
+```
+
+It does **not** know:
+
+```text
+Ledger
+Account
+Fraud
+PostgreSQL
+JdbcTemplate
+```
+
+That is the boundary we want.
+
+---
+
+# 5. But then what happens to NATS?
+
+This is where it gets interesting.
+
+We can preserve NATS as the **internal transport abstraction**, even while running in the same JVM.
+
+There are two modes:
+
+### Mode A — in-process
+
+```text
+Edge
+ │
+ ▼
+WalletCommandIngress
+ │
+ ▼
+Core
+```
+
+### Mode B — NATS
+
+```text
+Edge
+ │
+ ▼
+NATS
+ │
+ ▼
+Core
+```
+
+Both implement the same contract:
+
+```text
+WalletCommandIngress
+```
+
+So the architecture becomes:
+
+```text
+                    WalletCommandIngress
+                            │
+             ┌──────────────┴──────────────┐
+             │                             │
+       InProcessAdapter              NatsAdapter
+             │                             │
+             ▼                             ▼
+          Wallet Core                     NATS
+```
+
+This is **much more interesting than simply splitting packages**.
+
+It means we can benchmark:
+
+```text
+Edge → Core
+```
+
+with:
+
+* direct in-process invocation;
+* NATS;
+* potentially another IPC mechanism later.
+
+without changing Edge's business code.
+
+---
+
+# 6. But I would NOT remove NATS immediately
+
+There's a subtle architectural advantage in retaining the NATS boundary.
+
+Your current design already has:
+
+```text
+HTTP
+ ↓
+durable acceptance
+ ↓
+command
+ ↓
+core processing
+```
+
+If we replace NATS with a direct call:
+
+```text
+Edge
+ ↓
+Core
+```
+
+we risk losing the asynchronous isolation that 000.9 was specifically designed to establish.
+
+So I would make the **logical boundary mandatory**, but the **physical transport configurable**.
+
+Something like:
+
+```text
+                 EDGE
+                   │
+                   │ WalletCommandIngress
+                   ▼
+          ┌───────────────────┐
+          │ Command Transport │
+          └─────────┬─────────┘
+                    │
+          ┌─────────┴──────────┐
+          │                    │
+       in-process             NATS
+          │                    │
+          ▼                    ▼
+       Core API              Core
+```
+
+But for the financial production profile, I'd probably keep:
+
+```text
+Edge → JetStream → Core
+```
+
+until benchmarks demonstrate that same-JVM transport provides enough benefit without sacrificing the resilience properties we want.
+
+---
+
+# 7. This gives us a very nice evolutionary architecture
+
+### Stage 1 — now
+
+```text
+┌──────────────────────────── JVM ─────────────────────────┐
+
+ HTTP → EDGE → NATS → WALLET CORE → Ledger
+
+└──────────────────────────────────────────────────────────┘
+```
+
+### Stage 2 — 000.9.1
+
+Enforce:
+
+```text
+EDGE ≠ CORE
+```
+
+logically.
+
+Still:
+
+```text
+same JVM
+```
+
+### Stage 3 — future
+
+```text
+┌──────────── JVM ────────────┐
+│ EDGE                        │
+└─────────────┬───────────────┘
+              │ NATS
+┌─────────────▼───────────────┐
+│ WALLET CORE JVM              │
+│ Ledger / Fraud / Accounts   │
+└──────────────────────────────┘
+```
+
+### Stage 4 — selective extraction
+
+Perhaps:
+
+```text
+EDGE
+ │
+ ├── Wallet Core
+ │
+ ├── Fraud Intelligence
+ │
+ └── Analytics
+```
+
+becomes independently deployable **only where justified**.
+
+No forced microservice decomposition.
+
+---
+
+# 8. Where OSGi becomes useful
+
+I wouldn't use OSGi merely because we want modularity.
+
+I'd consider it if you eventually want:
+
+* runtime module replacement;
+* plugin architecture;
+* independently versioned modules;
+* optional capabilities;
+* dynamic service registration;
+* multiple implementations of the same capability;
+* appliance/vendor-specific modules.
+
+For example:
+
+```text
+Wallet Runtime
+│
+├── wallet-core
+├── fraud-core
+├── edge
+│
+├── postgres-adapter
+├── nats-adapter
+│
+└── optional
+    ├── gpu-fraud-plugin
+    ├── hsm-plugin
+    └── accelerator-plugin
+```
+
+That's where OSGi starts becoming compelling.
+
+But if all you need is:
+
+> "don't let Edge import Wallet internals"
+
+then **OSGi is overkill**.
+
+Spring Modulith + JPMS/package architecture gets you most of the value at dramatically lower complexity.
+
+---
+
+# 9. I would therefore make SPEC-000.9.1 about "Modular Runtime Boundary"
+
+I wouldn't call it:
+
+> Edge/Core separation
+
+because that prematurely dictates implementation.
+
+Something like:
+
+# `SPEC-000.9.1 — Edge/Core Modular Runtime Boundary`
+
+**Mantra:**
+
+> **Separate Edge from Wallet Core at the architectural and dependency level while preserving a single-JVM deployment option; make the transport boundary replaceable without coupling Edge to financial domain internals.**
+
+That is a very strong architectural milestone.
+
+---
+
+## Core requirements I'd propose
+
+### `REQ-MOD-001` — Explicit module ownership
+
+Edge MUST NOT directly depend on:
+
+```text
+ledger implementation
+fraud implementation
+account persistence
+wallet repositories
+JDBC
+```
+
+---
+
+### `REQ-MOD-002` — Stable Core API
+
+Wallet Core MUST expose a minimal command ingress contract:
+
+```java
+WalletCommandIngress
+```
+
+Edge MUST depend only on that contract.
+
+---
+
+### `REQ-MOD-003` — Transport independence
+
+The contract MUST support at least:
+
+```text
+InProcessWalletCommandIngress
+NatsWalletCommandIngress
+```
+
+without changes to Edge business logic.
+
+---
+
+### `REQ-MOD-004` — No domain leakage
+
+Edge MUST NOT receive:
+
+```text
+LedgerAccount
+WalletEntity
+FraudEntity
+JPA entity
+JdbcTemplate result
+```
+
+Instead:
+
+```text
+CommandEnvelope
+CommandAcceptance
+OperationStatus
+```
+
+---
+
+### `REQ-MOD-005` — Architecture verification
+
+Build/test MUST fail if Edge introduces an unauthorized dependency on Core internals.
+
+This is where Modulith is particularly valuable.
+
+---
+
+### `REQ-MOD-006` — Same-JVM deployment
+
+The system MUST support:
+
+```text
+edge + core
+```
+
+in the same JVM without changing their public contracts.
+
+---
+
+### `REQ-MOD-007` — Future extraction
+
+The Edge/Core boundary MUST be sufficiently transport-independent that Core can later be moved to another JVM/process without changing Edge's application-layer contract.
+
+---
+
+# 10. And then we can compare the technologies explicitly
+
+I would put this decision table into the PLAN:
+
+| Capability                | Packages | Spring Modulith | JPMS | OSGi |
+| ------------------------- | -------: | --------------: | ---: | ---: |
+| Logical boundaries        |       🟡 |              🟢 |   🟢 |   🟢 |
+| Dependency enforcement    |       🔴 |              🟢 |   🟢 |   🟢 |
+| Spring integration        |       🟢 |            🟢🟢 |   🟡 |   🟡 |
+| Runtime isolation         |       🔴 |              🟡 |   🟡 |   🟢 |
+| Dynamic modules           |       🔴 |              🔴 |   🔴 |   🟢 |
+| Complexity                |       🟢 |              🟢 |   🟡 |   🔴 |
+| Future process extraction |       🟡 |              🟢 |   🟢 |   🟢 |
+| Architecture tests        |       🔴 |            🟢🟢 |   🟢 |   🟢 |
+| Fits current Wallet       |       🟡 |            🟢🟢 |   🟢 |   🟡 |
+
+My initial choice:
+
+> **Spring Modulith + disciplined package/API boundaries, with JPMS kept as a future option rather than introducing OSGi now.**
+
+---
+
+# 11. One particularly important refinement
+
+I would also revisit the name:
+
+```text
+EdgeCommandConsumer
+```
+
+Now that we're formally introducing this boundary, it should become:
+
+```text
+CoreCommandConsumer
+```
+
+because its ownership is obvious:
+
+```text
+:edge
+  └── EdgeCommandPublisher
+
+:wallet-core
+  └── CoreCommandConsumer
+```
+
+And the contract between them:
+
+```text
+CommandEnvelope
+        │
+        ▼
+WalletCommandIngress
+        │
+        ▼
+CoreCommandConsumer
+        │
+        ├── Fraud
+        ├── Account
+        └── Ledger
+```
+
+That gives us a very clean architectural story.
+
+---
+
+## My recommendation
+
+I would **not modify SPEC-000.9 itself**.
+
+Keep it as the implementation of the current same-JVM Edge capability.
+
+Create:
+
+```text
+SPEC-000.9
+    Reactive Edge Gateway & Ingress Resilience
+             │
+             ▼
+SPEC-000.9.1
+    Edge/Core Modular Runtime Boundary
+```
+
+where 000.9.1 is **not another feature spec**, but an architectural hardening/specification that establishes the boundary.
+
+And I would investigate three implementation levels in the 000.9.1 PLAN:
+
+```text
+Level 1
+Spring Modulith
+        ↓
+Level 2
+Spring Modulith + strict API modules
+        ↓
+Level 3
+OSGi-style service boundary / JPMS
+```
+
+with **Level 2 as the likely target**, while keeping the contracts deliberately compatible with Level 3.
+
+The key idea is: **make Edge and Core separate in architecture before making them separate in processes.** That gives you most of the benefits of microservice decomposition without paying the operational cost prematurely.

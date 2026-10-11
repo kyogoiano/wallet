@@ -1,0 +1,29 @@
+{
+  "caseId": "CASE-003-account-takeover",
+  "archetype": "ACCOUNT_TAKEOVER",
+  "targetSubject": "MASK_USER_TARGET",
+  "evidenceItems": [
+    {
+      "id": "AUTH-005",
+      "type": "FAILED_AUTH_BURST",
+      "subject": "MASK_USER_TARGET",
+      "facts": { "failedAuthAttempts": 8, "windowHours": 1 }
+    },
+    {
+      "id": "DEVICE-002",
+      "type": "NEW_DEVICE_SWITCH",
+      "subject": "MASK_USER_TARGET",
+      "facts": { "previousDevice": "DEVICE_ALPHA", "newDevice": "DEVICE_BETA" }
+    }
+  ],
+  "expectedClaims": [
+    {
+      "type": "DEVICE_ANOMALY",
+      "evidenceReferences": ["DEVICE-002"]
+    },
+    {
+      "type": "ARCHETYPE_SIMILARITY",
+      "evidenceReferences": ["AUTH-005"]
+    }
+  ]
+}

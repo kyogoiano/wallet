@@ -1,0 +1,494 @@
+Perfeito. Com a atualização, a `SPEC-001` ficou **substancialmente mais madura** e, na minha opinião, está praticamente pronta para o **Gate 1 — Ratification**.
+
+A principal evolução foi que agora ela não define apenas *o que* o módulo faz, mas também fecha melhor as semânticas que poderiam gerar ambiguidades perigosas na implementação.
+
+## Veredito
+
+### 🟢 `SPEC-001 — READY FOR GATE 1 RATIFICATION`
+
+Eu não vejo mais nenhum bloqueador arquitetural sério.
+
+A estrutura está coerente com o baseline que você estabeleceu na `SPEC-000`:
+
+```text
+br.com.wallet
+│
+├── ledger
+│   ├── api
+│   └── internal     🔒 sealed
+│
+└── savings
+    ├── api
+    └── internal
+```
+
+E a relação entre os módulos está exatamente onde queríamos:
+
+```text
+savings
+   │
+   │ observes
+   ▼
+ledger.api events
+   │
+   │ decides
+   ▼
+Savings Rule Engine
+   │
+   │ invokes
+   ▼
+ledger.api.TransferFundsUseCase
+   │
+   ▼
+Financial Core
+```
+
+Isso mantém o princípio fundamental: **o Savings nunca ganha autoridade financeira própria**.
+
+---
+
+# O que ficou muito melhor
+
+## 1. Separação entre idempotência e origem
+
+Essa foi provavelmente a melhoria mais importante.
+
+Agora temos conceitualmente:
+
+```text
+operation_id
+      │
+      └── garante deduplicação
+
+origin
+      │
+      └── explica causalidade
+```
+
+Isso é muito melhor do que tentar detectar um savings sweep olhando apenas para o formato do UUID/hash.
+
+O evento pode evoluir para algo semelhante a:
+
+```java
+TransferCompletedEvent(
+    UUID operationId,
+    UUID sourceWalletId,
+    UUID destinationWalletId,
+    Money amount,
+    TransactionOrigin origin
+)
+```
+
+onde:
+
+```java
+public enum TransactionOrigin {
+    USER,
+    SAVINGS_AUTOMATION,
+    SYSTEM,
+    REVERSAL
+}
+```
+
+Isso vai ser reutilizável no futuro para:
+
+```text
+GOAL_AUTOMATION
+SUBSCRIPTION_AUTOMATION
+AI_APPROVED
+SYSTEM
+```
+
+Talvez eu já pensasse em um nome um pouco mais genérico que `TransactionOrigin`, dependendo do modelo atual do Ledger:
+
+```text
+OperationOrigin
+```
+
+ou:
+
+```text
+CommandOrigin
+```
+
+Porque a origem pertence à **causalidade do comando/operação**, não necessariamente à transação contábil.
+
+---
+
+# 2. Threshold com semântica eventual ficou correto
+
+A decisão de avaliar o saldo no momento do processamento assíncrono é muito mais honesta.
+
+O fluxo agora é:
+
+```text
+Deposit
+   │
+   ▼
+DepositCompletedEvent
+   │
+   ▼
+async processing
+   │
+   ▼
+Get current balance
+   │
+   ▼
+evaluate threshold
+```
+
+E não:
+
+```text
+Deposit event
+   │
+   └── assume balance = X forever ❌
+```
+
+Isso respeita o fato de que estamos deliberadamente construindo uma capability assíncrona.
+
+A consequência importante é:
+
+> **Savings is eventually consistent with the triggering financial event.**
+
+Eu colocaria literalmente essa frase na SPEC, talvez como um novo invariante ou princípio:
+
+### `I-SAVINGS-005 — Eventual Capability Consistency`
+
+> Savings automation is eventually consistent with the financial events that trigger it. Rule evaluation operates on the state observable at processing time, while the Financial Core remains the authoritative source for final transaction validity.
+
+Isso documenta uma característica arquitetural muito importante.
+
+---
+
+# 3. A autoridade final voltou corretamente para o Ledger
+
+Gostei da mudança conceitual em `I-SAVINGS-004`.
+
+O Savings pode calcular:
+
+```text
+intendedSweep
+```
+
+mas não deve tentar ser uma segunda implementação das garantias financeiras.
+
+O modelo correto é:
+
+```text
+Savings
+    │
+    │ proposes
+    ▼
+Ledger
+    │
+    ├── authorization
+    ├── idempotency
+    ├── fraud
+    ├── sufficient funds
+    └── ACID transaction
+```
+
+Isso evita o clássico problema:
+
+```text
+Capability logic
++
+duplicated financial validation
++
+concurrency
+=
+eventual inconsistencies
+```
+
+Muito melhor.
+
+---
+
+# 4. A política de múltiplas regras agora precisa ficar explícita no algoritmo
+
+Esse é o único ponto que eu ainda deixaria **muito explícito antes do PLAN**.
+
+Se você adotou avaliação ordenada, eu documentaria a ordem como contrato.
+
+Por exemplo:
+
+```text
+DepositCompletedEvent
+        │
+        ▼
+1. Percentage Sweep
+        │
+        ▼
+refresh / determine available liquidity
+        │
+        ▼
+2. Threshold Sweep
+```
+
+Para `Round-Up`, ele naturalmente pertence ao fluxo:
+
+```text
+TransferCompletedEvent
+        │
+        ▼
+Round-Up Rules
+```
+
+Então não há uma competição direta entre os três para o mesmo evento.
+
+Eu evitaria deixar isso apenas implícito.
+
+Criaria:
+
+### `REQ-SAV-009 — Deterministic Rule Evaluation Order`
+
+> For a given triggering event, applicable savings rules SHALL be evaluated in a deterministic and documented order. For deposit events, Percentage Sweep SHALL be evaluated before Threshold Excess Sweep.
+
+Isso torna o comportamento reproduzível nos testes.
+
+---
+
+# 5. Savings Wallet como `targetWalletId` foi a escolha certa
+
+Eu acho que essa decisão simplifica muito a primeira implementação.
+
+```java
+SavingsPlan(
+    sourceWalletId,
+    targetWalletId
+)
+```
+
+O Savings não precisa inventar:
+
+```text
+SavingsAccount
+SavingsBalance
+SavingsLedger
+```
+
+Tudo continua sendo:
+
+```text
+Wallet A
+   │
+   │ TransferFunds
+   ▼
+Wallet B
+```
+
+A inteligência está no módulo `savings`.
+
+A integridade financeira está no `ledger`.
+
+Excelente separação.
+
+---
+
+# Um pequeno refinamento que eu faria na estrutura do módulo
+
+Hoje você tem algo parecido com:
+
+```text
+savings
+├── api
+│   ├── domain
+│   └── dto
+└── internal
+```
+
+Eu consideraria, no futuro `PLAN-001`, algo assim:
+
+```text
+br.com.wallet.savings
+│
+├── api
+│   ├── SavingsPlanUseCase
+│   ├── SavingsQueryUseCase
+│   └── model
+│
+└── internal
+    ├── domain
+    │   ├── SavingsPlan
+    │   ├── SavingsRule
+    │   └── SavingsRuleType
+    │
+    ├── application
+    │   ├── SavingsPlanService
+    │   └── SavingsExecutionService
+    │
+    ├── event
+    │   └── SavingsEventListener
+    │
+    ├── engine
+    │   ├── SavingsRuleEngine
+    │   ├── RoundUpCalculator
+    │   ├── PercentageCalculator
+    │   └── ThresholdCalculator
+    │
+    └── persistence
+```
+
+A única razão para isso é evitar que o domínio interno seja automaticamente promovido a contrato público.
+
+Mas eu não bloquearia a SPEC por isso. Isso é uma decisão de `PLAN`.
+
+---
+
+# Uma questão que eu manteria para o PLAN: durabilidade do processamento do evento
+
+Agora que usamos:
+
+```java
+@ApplicationModuleListener
+```
+
+precisamos decidir exatamente qual garantia queremos.
+
+Há uma diferença importante entre:
+
+```text
+Event delivered
+```
+
+e:
+
+```text
+Savings sweep durably completed
+```
+
+O cenário:
+
+```text
+Deposit
+   │
+   ▼
+Event persisted / published
+   │
+   ▼
+Savings listener starts
+   │
+   ├── crash
+   │
+   └── ?
+```
+
+precisa ser tratado no `PLAN-001`.
+
+A boa notícia é que isso agora pode ser resolvido sem mudar a SPEC, porque a SPEC já define:
+
+```text
+I-SAVINGS-003
+fault isolation
+```
+
+e:
+
+```text
+I-SAVINGS-001
+deterministic operation_id
+```
+
+Portanto, podemos fazer retries seguros.
+
+O fluxo desejável seria conceitualmente:
+
+```text
+Financial Event
+      │
+      ▼
+Durable Event Processing
+      │
+      ▼
+Savings Evaluation
+      │
+      ▼
+deterministic operation_id
+      │
+      ▼
+TransferFunds
+      │
+      ├── SUCCESS
+      │
+      └── retryable failure
+               │
+               ▼
+             RETRY
+```
+
+E, graças ao `operation_id` determinístico:
+
+```text
+retry
+   +
+same operation_id
+   =
+idempotent
+```
+
+Isso é uma combinação muito boa.
+
+---
+
+# Minha recomendação para os próximos artefatos
+
+Eu seguiria agora estritamente o pipeline:
+
+```text
+SPEC-001
+    │
+    ▼
+GATE 1 — RATIFICATION
+    │
+    ▼
+PLAN-001
+    │
+    ├── ADR-001 Event Delivery & Retry
+    ├── ADR-002 Savings Persistence Model
+    ├── ADR-003 Operation Origin / Causality Metadata
+    ├── ADR-004 Savings Rule Evaluation Model
+    └── Threat / Failure Analysis
+           │
+           ▼
+TASKS-001
+           │
+           ▼
+TDD IMPLEMENTATION
+```
+
+Eu evitaria começar a escrever código agora.
+
+O `PLAN-001` precisa decidir principalmente **como o Savings recebe e processa eventos de forma confiável**, porque essa escolha vai afetar:
+
+* `SavingsExecutionHistory`;
+* retry;
+* deduplicação;
+* transações;
+* `@ApplicationModuleListener`;
+* integração com o mecanismo de eventos existente;
+* observabilidade.
+
+## Minha conclusão
+
+A evolução da `SPEC-001` está muito boa. Ela agora tem uma propriedade que eu considero essencial para uma feature financeira:
+
+```text
+Savings decides
+Ledger validates
+Ledger executes
+Savings observes result
+```
+
+Isso cria uma capability realmente independente sem criar um segundo sistema financeiro paralelo.
+
+Eu seguiria para **Gate 1**, com apenas dois pequenos refinamentos opcionais antes de congelar:
+
+1. adicionar explicitamente `I-SAVINGS-005 — Eventual Capability Consistency`;
+2. formalizar `REQ-SAV-009 — Deterministic Rule Evaluation Order`.
+
+Depois disso, para mim, a próxima etapa é claramente:
+
+# `PLAN-001 — Smart Savings Automation Architecture & Implementation Plan`
+
+E eu começaria o PLAN pela decisão mais importante de todas: **o lifecycle confiável de `DepositCompletedEvent` / `TransferCompletedEvent` até a execução idempotente do Savings Sweep**.

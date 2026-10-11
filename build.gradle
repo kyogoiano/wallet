@@ -1,75 +1,121 @@
 plugins {
 	id 'java'
-	id 'org.springframework.boot' version '4.1.0'
+	id 'jacoco'
+	id 'org.springframework.boot' version '4.2.0-M2'
 	id 'io.spring.dependency-management' version '1.1.7'
 }
 
 group = 'br.com.wallet'
 version = '0.0.1-SNAPSHOT'
 
+ext {
+	springVersion = "7.1.0-M2"
+	openApiVersion = "3.1.1"
+	jnatsVersion = "2.26.4"
+	lettuceVersion = "7.8.0.RELEASE"
+	otlpAppenderVersion = "2.28.1-alpha"
+	nettyVersion = "4.2.18.Final"
+	modulithVersion = "2.2.0-M2"
+	archunitVersion = "1.5.1"
+	asmVersion = "9.10.1"
+	caffeineVersion = "3.3.0"
+	springAiVersion = "2.1.0-M1"
+}
+
+dependencyManagement {
+	imports {
+		mavenBom "org.springframework.modulith:spring-modulith-bom:${modulithVersion}"
+		mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
+	}
+	dependencies {
+		dependency "com.tngtech.archunit:archunit:${archunitVersion}"
+		dependency "com.tngtech.archunit:archunit-junit5:${archunitVersion}"
+		dependency "com.tngtech.archunit:archunit-junit5-api:${archunitVersion}"
+		dependency "com.tngtech.archunit:archunit-junit5-engine:${archunitVersion}"
+		dependency "org.ow2.asm:asm:${asmVersion}"
+		dependency "org.ow2.asm:asm-commons:${asmVersion}"
+	}
+}
+
 java {
 	toolchain {
-		languageVersion = JavaLanguageVersion.of(26)
+		languageVersion = JavaLanguageVersion.of(27)
 	}
 }
 
 repositories {
 	mavenCentral()
-}
-
-
-ext {
-	springVersion = "7.0.8"
-	openApiVersion = "3.1.0"
-	jnatsVersion = "2.26.2"
-	lettuceVersion = "7.7.0.RELEASE"
-	otlpAppenderVersion = "2.28.1-alpha"
-	nettyVersion = "4.2.17.Final"
+	maven { url 'https://repo.spring.io/milestone' }
+	maven { url 'https://repo.spring.io/snapshot' }
 }
 
 subprojects {
 	apply plugin: 'java'
+	apply plugin: 'jacoco'
 	apply plugin: 'io.spring.dependency-management'
 
 	version = '0.0.1-SNAPSHOT'
 
 	dependencyManagement {
 		imports {
-			mavenBom "org.springframework.boot:spring-boot-dependencies:4.1.0"
+			mavenBom "org.springframework.boot:spring-boot-dependencies:4.2.0-M2"
+			mavenBom "org.springframework.modulith:spring-modulith-bom:2.2.0-M2"
 		}
 	}
 
+
 	java {
 		toolchain {
-			languageVersion = JavaLanguageVersion.of(26)
+			languageVersion = JavaLanguageVersion.of(27)
 		}
 	}
 
 	repositories {
 		mavenCentral()
+		maven { url 'https://repo.spring.io/milestone' }
+		maven { url 'https://repo.spring.io/snapshot' }
 	}
 
-	bootJar {
-		enabled = false
+	if (project.name != 'edge') {
+		bootJar {
+			enabled = false
+		}
 	}
 
 	jar {
 		enabled = true
 	}
 
+	tasks.withType(Test).configureEach {
+		jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
+		systemProperty 'otel.sdk.disabled', 'true'
+		finalizedBy 'jacocoTestReport'
+	}
+
+	tasks.named('jacocoTestReport', JacocoReport) {
+		reports {
+			xml.required = true
+			html.required = true
+			csv.required = false
+		}
+	}
+
 	dependencies {
 		implementation 'org.springframework.boot:spring-boot-starter'
+		implementation 'org.springframework.modulith:spring-modulith-starter-core'
 	}
 }
 
 bootJar {
 	enabled = true
+	archiveFileName = 'wallet-core.jar'
 }
 
 dependencies {
 	// Project dependencies
 	implementation project(':core')
 	implementation project(':fraud')
+	implementation project(':edge')
 
 	// Spring Boot Starters for the main application
 	implementation 'org.springframework.boot:spring-boot-starter'
@@ -88,12 +134,26 @@ dependencies {
 	implementation("io.lettuce:lettuce-core:${lettuceVersion}")
 	implementation("io.netty:netty-transport-native-epoll")
 	implementation("io.netty:netty-transport-native-epoll:${nettyVersion}:linux-x86_64")
+	implementation 'org.springframework.ai:spring-ai-starter-mcp-server-webmvc'
 
 	// Test dependencies
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
 	testImplementation 'org.springframework.boot:spring-boot-starter-webmvc-test'
 	implementation 'org.springframework.boot:spring-boot-webtestclient'
 	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+
+	// Spring Modulith
+	implementation 'org.springframework.modulith:spring-modulith-starter-core'
+	testImplementation 'org.springframework.modulith:spring-modulith-starter-test'
+	testImplementation 'org.springframework.modulith:spring-modulith-docs'
+	implementation 'org.springframework.modulith:spring-modulith-events-api'
+	implementation 'org.springframework.modulith:spring-modulith-events-jdbc'
+	implementation 'org.springframework.modulith:spring-modulith-events-jackson'
+
+	// ArchUnit & ASM for Java 27 bytecode support (major version 71)
+	testImplementation "com.tngtech.archunit:archunit:${archunitVersion}"
+	testImplementation "com.tngtech.archunit:archunit-junit5:${archunitVersion}"
+	testImplementation "org.ow2.asm:asm:${asmVersion}"
 
 	testImplementation 'org.springframework.boot:spring-boot-testcontainers'
 	testImplementation 'org.testcontainers:testcontainers-junit-jupiter'
@@ -103,5 +163,89 @@ dependencies {
 }
 
 tasks.named('test') {
-	useJUnitPlatform()
+	useJUnitPlatform {
+		excludeTags 'integration-slm'
+	}
+	jvmArgs '-XX:+EnableDynamicAgentLoading', '-Dnet.bytebuddy.experimental=true'
+	systemProperty 'otel.sdk.disabled', 'true'
+	def snapTmp = new File("${System.getProperty('user.home')}/snap/antigravity-cli/common/tmp")
+	if (snapTmp.isDirectory()) {
+		jvmArgs "-Djava.io.tmpdir=${snapTmp.absolutePath}", "-Djna.tmpdir=${snapTmp.absolutePath}"
+	}
+	finalizedBy jacocoTestReport
+}
+
+tasks.register('slmTest', Test) {
+	description = 'Runs containerized local SLM integration tests (REQ-VEC-012, History 30)'
+	group = 'verification'
+	useJUnitPlatform {
+		includeTags 'integration-slm'
+	}
+}
+
+jacocoTestReport {
+	dependsOn tasks.named('test')
+	dependsOn subprojects.collect { it.tasks.withType(Test) }
+
+	additionalSourceDirs.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	sourceDirectories.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	classDirectories.from(files(sourceSets.main.output, subprojects.collect { it.sourceSets.main.output }))
+	executionData.from(files({
+		def execFiles = [layout.buildDirectory.file('jacoco/test.exec').get().asFile]
+		subprojects.each { sp ->
+			execFiles.add(sp.layout.buildDirectory.file('jacoco/test.exec').get().asFile)
+		}
+		execFiles.findAll { it.exists() }
+	}))
+
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+	}
+}
+
+tasks.register('jacocoRootReport', JacocoReport) {
+	description = 'Generates aggregated JaCoCo coverage report across all projects (root, edge, core, fraud)'
+	group = 'verification'
+	dependsOn tasks.named('test')
+	dependsOn subprojects.collect { it.tasks.withType(Test) }
+
+	additionalSourceDirs.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	sourceDirectories.from(files(sourceSets.main.allSource.srcDirs, subprojects.collect { it.sourceSets.main.allSource.srcDirs }))
+	classDirectories.from(files(sourceSets.main.output, subprojects.collect { it.sourceSets.main.output }))
+	executionData.from(files({
+		def execFiles = [layout.buildDirectory.file('jacoco/test.exec').get().asFile]
+		subprojects.each { sp ->
+			execFiles.add(sp.layout.buildDirectory.file('jacoco/test.exec').get().asFile)
+		}
+		execFiles.findAll { it.exists() }
+	}))
+
+	reports {
+		xml.required = true
+		html.required = true
+		csv.required = false
+		html.outputLocation = layout.buildDirectory.dir('reports/jacoco/aggregate/html')
+		xml.outputLocation = layout.buildDirectory.file('reports/jacoco/aggregate/jacocoTestReport.xml')
+	}
+}
+
+jacocoTestCoverageVerification {
+	dependsOn jacocoTestReport
+	classDirectories.from(files(sourceSets.main.output, subprojects.collect { it.sourceSets.main.output }))
+	executionData.from(files({
+		def execFiles = [layout.buildDirectory.file('jacoco/test.exec').get().asFile]
+		subprojects.each { sp ->
+			execFiles.add(sp.layout.buildDirectory.file('jacoco/test.exec').get().asFile)
+		}
+		execFiles.findAll { it.exists() }
+	}))
+	violationRules {
+		rule {
+			limit {
+				minimum = 0.70
+			}
+		}
+	}
 }

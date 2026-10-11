@@ -1,0 +1,57 @@
+package br.com.wallet.unit.ledger.persistence;
+
+import br.com.wallet.ledger.internal.persistence.WalletOperationsDao;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.InjectMocks;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+import java.util.Optional;
+import java.util.UUID;
+
+import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class WalletOperationsDaoTest {
+
+    @Mock
+    JdbcTemplate jdbc;
+
+    @InjectMocks
+    WalletOperationsDao dao;
+
+    @Test
+    void shouldReturnTrueWhenInsertSucceeds() {
+        when(jdbc.update(anyString(), any(UUID.class), any()))
+                .thenReturn(1);
+
+        var result = dao.startOperation(UUID.randomUUID());
+
+        assertThat(result).isTrue();
+    }
+
+    @Test
+    void shouldFailOperationSuccessfully() {
+        UUID opId = UUID.randomUUID();
+        when(jdbc.update(anyString(), any(), any(), any(), any())).thenReturn(1);
+
+        dao.failOperation(opId, "Insufficient funds", "BUSINESS");
+
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("Insufficient funds"), org.mockito.ArgumentMatchers.eq("BUSINESS"), org.mockito.ArgumentMatchers.eq("tenant-alpha"));
+    }
+
+    @Test
+    void shouldCompleteOperationSuccessfully() {
+        UUID opId = UUID.randomUUID();
+        when(jdbc.update(anyString(), any(UUID.class), any())).thenReturn(1);
+
+        dao.completeOperation(opId);
+
+        org.mockito.Mockito.verify(jdbc).update(anyString(), org.mockito.ArgumentMatchers.eq(opId), org.mockito.ArgumentMatchers.eq("tenant-alpha"));
+    }
+}

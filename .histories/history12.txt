@@ -1,0 +1,879 @@
+Sim. E eu faria essa `SPEC-000.5` **antes de qualquer Neo4j/GraphRAG implementation**.
+
+O objetivo deveria ser melhorar o antifraud de V3 de um **motor predominantemente transaction-centric** para um **hybrid fraud intelligence engine**, mas sem transformar a Wallet em uma plataforma pesada de Graph/AI.
+
+A pesquisa que você trouxe aponta justamente para uma arquitetura interessante: grafos ajudam a detectar relações que regras isoladas não enxergam; temporalidade é fundamental para evitar *future leakage*; e LLM/GraphRAG pode enriquecer investigação, mas não precisa estar no caminho síncrono da transação. O trabalho FLAG, por exemplo, combina GNN com LLM para incorporar informação textual e enfrenta explicitamente *neighborhood camouflage* e limitações de tamanho de contexto. ([DBLP][1])
+
+E o Codelab do Google mostra uma alternativa importante ao Neo4j: **Property Graph sobre dados relacionais existentes**, combinando vector search + GQL + LLM, sem necessariamente manter um banco de grafos operacional separado. O próprio exemplo usa BigQuery como camada gráfica e reporta custo de laboratório inferior a US$2. ([Google Codelabs][2])
+
+Mais importante para o nosso caso: o artigo da Neo4j sobre temporal graphs reforça que simplesmente construir um grafo estático pode introduzir *future leakage*. A solução proposta mantém componentes temporais e evita a explosão `O(n²)` causada por transformar entidades compartilhadas de alto grau em cliques. ([Neo4j Graph Intelligence Platform][3])
+
+Eu transformaria tudo isso em uma spec **technology-agnostic**, com Neo4j apenas como candidato.
+
+---
+
+# SPEC-000.5 — Fraud Intelligence & Temporal Relationship Engine
+
+**Status:** Draft / Clarification
+**Domain:** `br.com.wallet.fraud`
+**Target:** Wallet Service V4.x
+**Type:** Fraud Engine Evolution / Intelligence Infrastructure
+
+## 1. Intent
+
+Evoluir o atual `br.com.wallet.fraud` de um mecanismo baseado principalmente em regras individuais e sinais transacionais para um **Hybrid Fraud Intelligence Engine**, capaz de detectar:
+
+* relações suspeitas entre usuários;
+* reutilização de dispositivos, IPs, telefones, cartões e outros atributos;
+* fan-in / fan-out;
+* estruturas de mule accounts;
+* fraud rings;
+* ciclos de transferência;
+* comportamento temporal;
+* propagação de risco entre entidades relacionadas;
+* padrões semânticos presentes em eventos e dados enriquecidos.
+
+A evolução **não deverá substituir o Fraud Gate atual**.
+
+O princípio arquitetural será:
+
+```text
+                    TRANSACTION
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │   Fraud Gate V3     │
+              │                     │
+              │ Local Rules         │
+              │ Redis/Dragonfly     │
+              │ Replay Protection   │
+              └──────────┬──────────┘
+                         │
+                    decision
+                         │
+              ┌──────────▼──────────┐
+              │ Transaction Core    │
+              └─────────────────────┘
+                         │
+                         │ async
+                         ▼
+              ┌─────────────────────┐
+              │ Fraud Intelligence  │
+              │       Layer         │
+              │                     │
+              │ Relationship Graph  │
+              │ Temporal Features   │
+              │ Risk Propagation    │
+              │ Pattern Detection   │
+              └──────────┬──────────┘
+                         │
+                         ▼
+              ┌─────────────────────┐
+              │ Investigation / AI  │
+              │ GraphRAG / LLM      │
+              └─────────────────────┘
+```
+
+**The financial transaction path remains deterministic and bounded.**
+
+---
+
+# 2. Business Motivation
+
+O antifraud atual consegue responder muito bem:
+
+> "Essa transação individual parece suspeita?"
+
+O próximo nível precisa responder:
+
+> "Essa transação faz parte de uma estrutura suspeita?"
+
+Por exemplo:
+
+```text
+User A
+  │
+  ├── Device X
+  │
+  ├── IP 10.0.1.10
+  │
+  └── transfers
+          │
+          ▼
+       User B
+          │
+          ├── Device X
+          │
+          └── transfers
+                  │
+                  ▼
+               User C
+```
+
+Individualmente:
+
+```text
+A → B       normal
+B → C       normal
+```
+
+Relacionalmente:
+
+```text
+A ──┐
+    ├── Device X ── B
+C ──┘
+```
+
+o padrão pode ser altamente relevante.
+
+Esse é o principal gap que queremos atacar.
+
+---
+
+# 3. Architectural Principles
+
+### `I-FRAUD-001 — Transaction Path Preservation`
+
+Nenhum componente Graph, ML, embedding ou LLM poderá tornar-se requisito obrigatório para completar uma transação financeira.
+
+```text
+Graph unavailable
+      ↓
+Transaction still executes according to V3 Fraud Gate
+```
+
+---
+
+### `I-FRAUD-002 — Deterministic Core`
+
+As decisões síncronas de fraude devem continuar sendo:
+
+* determinísticas;
+* bounded;
+* observáveis;
+* testáveis;
+* de latência previsível.
+
+---
+
+### `I-FRAUD-003 — Async Intelligence`
+
+Relationship analysis, graph enrichment, clustering, embeddings e LLM reasoning SHALL execute asynchronously.
+
+```text
+Ledger Event
+     │
+     ├──────────────► Core continues
+     │
+     └──► Fraud Intelligence Pipeline
+```
+
+---
+
+### `I-FRAUD-004 — Temporal Truth`
+
+Nenhum feature utilizado para treinamento ou avaliação de fraude poderá utilizar informação que não estivesse disponível no instante da decisão.
+
+Formalmente:
+
+$$
+Features(e,t) = f(G_{\leq t})
+$$
+
+e nunca:
+
+$$
+Features(e,t) = f(G_{future})
+$$
+
+Essa preocupação é central em sistemas temporais de fraude; grafos estáticos podem contaminar treinamento e avaliação com relações que só apareceram posteriormente. ([Neo4j Graph Intelligence Platform][3])
+
+---
+
+### `I-FRAUD-005 — No Graph Vendor Lock-in`
+
+O domínio antifraud SHALL NOT depend directly on Neo4j APIs.
+
+O sistema deverá abstrair:
+
+```java
+FraudRelationshipStore
+FraudGraphQuery
+FraudFeatureProvider
+```
+
+Assim podemos implementar:
+
+```text
+Option A  PostgreSQL
+Option B  Redis/Dragonfly projections
+Option C  Neo4j
+Option D  BigQuery Property Graph
+Option E  another graph engine
+```
+
+sem reescrever o domínio.
+
+---
+
+### `I-FRAUD-006 — Cost Efficiency First`
+
+Uma solução tecnologicamente sofisticada não será aceita simplesmente por apresentar melhores métricas.
+
+A escolha deverá considerar:
+
+$$
+ROI =
+\frac{
+FraudDetectionGain
++
+FalsePositiveReduction
++
+InvestigationEfficiency
+}{
+InfrastructureCost
++
+OperationalComplexity
++
+MaintenanceCost
+}
+$$
+
+---
+
+# 4. Evolution Layers
+
+Eu dividiria a evolução em **quatro camadas**.
+
+## Layer 1 — Relationship Data
+
+Começamos apenas capturando relações.
+
+```text
+User
+Account
+Transaction
+Device
+IP
+Phone
+Email
+Card
+Merchant
+Beneficiary
+Address
+```
+
+Relacionamentos:
+
+```text
+OWNS
+USES
+LOGGED_FROM
+TRANSFERRED_TO
+PAID
+REGISTERED_WITH
+SHARES
+```
+
+Não precisamos de Graph DB para isso inicialmente.
+
+---
+
+# Layer 2 — Temporal Graph Features
+
+Construímos features como:
+
+### Shared Entity
+
+```text
+users sharing device
+users sharing IP
+accounts sharing phone
+```
+
+### Fan-in
+
+```text
+many users → one account
+```
+
+### Fan-out
+
+```text
+one account → many users
+```
+
+### Velocity topology
+
+```text
+A → B → C → D
+```
+
+em:
+
+```text
+5 min
+1 hour
+24 hours
+7 days
+```
+
+### Circular flow
+
+```text
+A → B → C → A
+```
+
+### Rapid pass-through
+
+```text
+A → B
+    ↓
+    C
+    ↓
+    D
+```
+
+em uma janela curta.
+
+---
+
+# Layer 3 — Risk Propagation
+
+Essa é uma evolução particularmente interessante.
+
+Hoje:
+
+```text
+User A = FRAUD
+```
+
+pode bloquear A.
+
+A nova camada permite:
+
+```text
+User A
+  │
+  ├── Device X
+  │      │
+  │      ├── User B
+  │      └── User C
+  │
+  └── Account D
+```
+
+e calcular:
+
+$$
+Risk(B)=f(
+DirectRisk(B),
+NeighborRisk,
+RelationshipStrength,
+TemporalProximity
+)
+$$
+
+Mas **não devemos simplesmente copiar o score do vizinho**.
+
+Precisamos de decay:
+
+$$
+R_{propagated}
+=
+R_{source}
+\times
+w_{relationship}
+\times
+e^{-\lambda \Delta t}
+$$
+
+Isso permite que relações antigas tenham menos influência.
+
+---
+
+# Layer 4 — AI / GraphRAG
+
+Somente depois das três anteriores.
+
+O AI layer recebe:
+
+```text
+Fraud Case
+     │
+     ├── transaction
+     ├── entities
+     ├── graph neighborhood
+     ├── temporal relationships
+     ├── risk features
+     └── historical evidence
+```
+
+e produz:
+
+```text
+Fraud Investigation Context
+```
+
+Não:
+
+```text
+LLM → approve/reject transaction
+```
+
+O Google demonstra exatamente essa separação conceitual: vector search pode encontrar entidades relevantes e então um property graph faz traversal multi-hop para reconstruir a cadeia de fundos antes de entregar contexto ao LLM. ([Google Codelabs][2])
+
+---
+
+# 5. Technology Strategy
+
+Aqui eu faria uma mudança importante em relação à ideia original:
+
+## ❌ Não escolher Neo4j agora.
+
+Primeiro definimos um benchmark.
+
+### Candidate A — PostgreSQL
+
+Provavelmente o candidato mais interessante para V1.
+
+Já temos:
+
+```text
+PostgreSQL
+    +
+ledger
+    +
+transaction history
+    +
+events
+```
+
+Podemos criar:
+
+```text
+fraud_entities
+fraud_relationships
+fraud_features
+```
+
+e usar recursive CTEs / materialized projections.
+
+**Vantagens**
+
+* zero nova infraestrutura;
+* zero novo backup;
+* zero novo monitoring;
+* zero novo deployment;
+* SQL conhecido;
+* excelente custo operacional.
+
+**Desvantagem**
+
+Multi-hop graph traversal não é o ponto forte.
+
+---
+
+### Candidate B — DragonflyDB
+
+Como acabamos de migrar Redis → Dragonfly, podemos explorar projections extremamente rápidas:
+
+```text
+entity:{id}:neighbors
+user:{id}:devices
+device:{id}:users
+ip:{id}:users
+```
+
+Excelente para:
+
+```text
+1-hop
+2-hop
+velocity
+set intersection
+```
+
+Mas não tentaria transformar Dragonfly em um graph database.
+
+---
+
+### Candidate C — Neo4j
+
+É o candidato especializado.
+
+Tem excelentes recursos para:
+
+* traversal;
+* graph algorithms;
+* temporal graphs;
+* community detection;
+* GDS;
+* visualization.
+
+A própria Neo4j demonstra modelos temporais específicos para fraude e chama atenção para problemas como clique explosion em entidades compartilhadas de alto grau. ([Neo4j Graph Intelligence Platform][3])
+
+**Mas:**
+
+```text
++ powerful
++ mature graph ecosystem
+- another database
+- operational cost
+- memory footprint
+- backup
+- monitoring
+- data synchronization
+```
+
+---
+
+### Candidate D — BigQuery Property Graph
+
+Esse é o candidato que eu **não descartaria**.
+
+O Codelab do Google mostra que podemos criar um Property Graph diretamente sobre tabelas relacionais existentes, evitando uma cópia separada dos dados. ([Google Codelabs][2])
+
+Isso é particularmente interessante para:
+
+```text
+historical investigation
+offline analytics
+model training
+GraphRAG
+fraud research
+```
+
+mas provavelmente **não é o nosso realtime fraud store**.
+
+---
+
+# 6. Proposed Hybrid Architecture
+
+Minha preferência inicial seria:
+
+```text
+                 ┌──────────────────────┐
+                 │ PostgreSQL            │
+                 │ Source of Truth       │
+                 └──────────┬───────────┘
+                            │
+                       NATS events
+                            │
+                            ▼
+                ┌────────────────────────┐
+                │ Fraud Projection       │
+                │ Consumer               │
+                └───────────┬────────────┘
+                            │
+                ┌───────────┴────────────┐
+                ▼                        ▼
+        Dragonfly projections      PostgreSQL
+        hot relationships          graph history
+                │                        │
+                └───────────┬────────────┘
+                            │
+                            ▼
+                   Fraud Feature Engine
+                            │
+             ┌──────────────┼──────────────┐
+             ▼              ▼              ▼
+          Rules          Graph          Temporal
+          V3             features       features
+             │              │              │
+             └──────────────┼──────────────┘
+                            ▼
+                       Risk Profile
+                            │
+                            ▼
+                     Investigation
+                            │
+                            ▼
+                    GraphRAG / AI
+```
+
+Isso nos dá uma propriedade excelente:
+
+**não precisamos decidir hoje se teremos Neo4j.**
+
+---
+
+# 7. Functional Requirements — Initial
+
+### `REQ-FRAUD-001`
+
+O sistema SHALL capture relationship events required to construct a fraud relationship model.
+
+### `REQ-FRAUD-002`
+
+O sistema SHALL maintain temporal metadata for every relationship:
+
+```text
+created_at
+valid_from
+valid_until
+last_seen
+```
+
+### `REQ-FRAUD-003`
+
+O sistema SHALL calculate relationship features:
+
+* degree;
+* fan-in;
+* fan-out;
+* shared entities;
+* transaction velocity;
+* path length;
+* cycle detection;
+* temporal proximity.
+
+### `REQ-FRAUD-004`
+
+O sistema SHALL support multi-hop investigation queries up to configurable depth.
+
+Inicialmente:
+
+```text
+depth = 2
+```
+
+e posteriormente:
+
+```text
+depth = 3
+depth = N
+```
+
+### `REQ-FRAUD-005`
+
+The system SHALL calculate propagated risk without directly mutating the primary fraud decision.
+
+### `REQ-FRAUD-006`
+
+The intelligence layer SHALL operate asynchronously from the transaction execution path.
+
+### `REQ-FRAUD-007`
+
+The architecture SHALL support at least two relationship-store implementations.
+
+Isso é importante para podermos comparar:
+
+```text
+Postgres
+vs
+Neo4j
+```
+
+sem acoplamento.
+
+### `REQ-FRAUD-008`
+
+The system SHALL expose investigation-oriented graph queries.
+
+### `REQ-FRAUD-009`
+
+The system SHALL support point-in-time graph reconstruction.
+
+### `REQ-FRAUD-010`
+
+Graph features used for model training SHALL be generated using only information available at the evaluation timestamp.
+
+---
+
+# 8. Performance Requirements
+
+Eu não colocaria "sub-ms graph traversal" como requisito.
+
+Seria artificial.
+
+Separaria:
+
+### Transaction path
+
+```text
+P99 < 1 ms
+```
+
+para as regras hot-path existentes.
+
+### Intelligence pipeline
+
+```text
+P95 < 100 ms
+```
+
+para feature enrichment simples.
+
+### Investigation
+
+```text
+P95 < 1 s
+```
+
+para graph queries.
+
+### GraphRAG
+
+```text
+P95 < 5 s
+```
+
+porque já estamos falando de investigação/AI.
+
+Isso mantém o sistema honesto.
+
+---
+
+# 9. Cost/Complexity Benchmark
+
+Essa será uma parte obrigatória da spec.
+
+Antes de escolher Neo4j:
+
+| Dimension           | PostgreSQL |       Dragonfly |  Neo4j | BigQuery |
+| ------------------- | ---------: | --------------: | -----: | -------: |
+| New infrastructure  |        Low | Already present |   High |   Medium |
+| Operational cost    |      ★★★★★ |           ★★★★★ |     ★★ |      ★★★ |
+| 1-hop               |      ★★★★★ |           ★★★★★ |  ★★★★★ |      ★★★ |
+| Multi-hop           |        ★★★ |             ★★★ |  ★★★★★ |    ★★★★★ |
+| Temporal graph      |        ★★★ |              ★★ |  ★★★★★ |     ★★★★ |
+| Realtime            |       ★★★★ |           ★★★★★ |   ★★★★ |       ★★ |
+| Graph algorithms    |         ★★ |               ★ |  ★★★★★ |      ★★★ |
+| GraphRAG            |        ★★★ |              ★★ |  ★★★★★ |    ★★★★★ |
+| Maintenance         |      ★★★★★ |           ★★★★★ |     ★★ |      ★★★ |
+| Vendor lock-in      |        Low |             Low | Medium |     High |
+| Existing Wallet fit |      ★★★★★ |           ★★★★★ |     ★★ |      ★★★ |
+
+**Isso não é uma decisão final — é a hipótese inicial que o benchmark deve validar.**
+
+---
+
+# 10. Experimental Gate
+
+Antes de `PLAN-000.5`, eu colocaria um **Gate 0**.
+
+Criar um dataset sintético de, por exemplo:
+
+```text
+1M users
+5M accounts
+50M transactions
+10M devices
+5M IP addresses
+```
+
+e gerar cenários:
+
+```text
+A → B → C → D
+A → B → A
+100 users → 1 account
+1 user → 100 accounts
+shared device rings
+shared IP rings
+temporal mule behavior
+```
+
+Então comparar:
+
+```text
+PostgreSQL
+Dragonfly projection
+Neo4j
+```
+
+para:
+
+```text
+1-hop latency
+2-hop latency
+3-hop latency
+memory
+CPU
+storage
+ingestion throughput
+query throughput
+operational complexity
+```
+
+Só depois disso decidimos se:
+
+> **"Neo4j é necessário."**
+
+---
+
+# 11. AI / GraphRAG is NOT V1
+
+Eu deixaria explicitamente:
+
+```text
+Phase 1
+Relationship Foundation
+
+Phase 2
+Temporal Features
+
+Phase 3
+Risk Propagation
+
+Phase 4
+Graph Investigation
+
+Phase 5
+GraphRAG / LLM
+
+Phase 6
+GNN / learned models
+```
+
+Isso também conversa muito bem com o paper **FLAG**: a proposta não é simplesmente "jogar um LLM no grafo", mas combinar informação textual e estrutural para melhorar a detecção; justamente os problemas de *neighborhood camouflage* e contexto excessivo mostram por que precisamos construir boas features/representações antes do LLM. ([DBLP][1])
+
+---
+
+## Minha recomendação para o `000.5`
+
+Eu **não chamaria a spec de "Neo4j Fraud" nem de "GraphRAG Fraud"**.
+
+O nome deveria ser algo como:
+
+> **`SPEC-000.5 — Fraud Intelligence & Temporal Relationship Engine`**
+
+porque o verdadeiro objetivo é:
+
+```text
+             V3
+              │
+              ▼
+      Transaction Fraud
+              │
+              │
+       ┌──────┴──────┐
+       ▼             ▼
+   Temporal       Relationship
+   Intelligence   Intelligence
+       │             │
+       └──────┬──────┘
+              ▼
+        Risk Propagation
+              │
+              ▼
+       Investigation Graph
+              │
+              ▼
+          GraphRAG
+              │
+              ▼
+          AI Analyst
+```
+
+E tem uma consequência arquitetural que considero **muito importante para o seu projeto**: como você já tem **NATS + Outbox + FraudConsumer + Dragonfly**, não precisamos colocar esse grafo dentro do `FraudGate`. O `FraudConsumer` pode virar o início de uma **Fraud Intelligence Pipeline**, consumindo os mesmos eventos e construindo as projeções de relacionamento de forma assíncrona.
+
+Isso preserva exatamente a filosofia que construímos nas outras specs: **o core financeiro continua pequeno e determinístico; a inteligência cresce na periferia.**
+
+Se formos seguir SDD rigorosamente, eu considero essa versão um bom **Draft 0.1**; o próximo passo seria transformar isso em uma SPEC formal completa, com `I-FRAUD-*`, `REQ-FRAUD-*`, acceptance criteria, threat model e principalmente **Decision Matrix para PostgreSQL vs Dragonfly vs Neo4j vs BigQuery**, antes de escrever o `PLAN-000.5`.
+
+[1]: https://dblp.org/rec/conf/kdd/YangLW00025.html?utm_source=chatgpt.com "dblp: FLAG: Fraud Detection with LLM-enhanced Graph Neural Network."
+[2]: https://codelabs.developers.google.com/codelabs/graphrag-with-bigquery "Anti-Money Laundering & Fraud Prevention with BigQuery GraphRAG  |  Google Codelabs"
+[3]: https://neo4j.com/blog/developer/mastering-fraud-detection-temporal-graph/ "Mastering fraud detection with temporal graph modeling"

@@ -1,0 +1,403 @@
+Yes — with the **actual PLAN-000.9.2** in front of us, I would change my previous assessment somewhat: the plan has already incorporated most of the corrections we discussed. It explicitly documents independent scaling, single-writer storage, durability differences, shutdown ordering, and the 000.9.3 security hook.
+
+However, there is an important issue:
+
+## I would **not execute TASKS-000.9.2 as currently marked**
+
+The plan is good, but the **TASKS document and the PLAN/SPEC appear to have drifted**.
+
+The task breakdown you pasted refers to:
+
+```text
+REQ-TOP-003  Plan A
+REQ-TOP-004  Plan B
+REQ-TOP-005  Plan C
+REQ-TOP-006  Plan D
+...
+```
+
+while the actual PLAN now uses:
+
+```text
+Plan A = Local Dev
+Plan B = Low-Cost Non-K8s
+Plan C = Enterprise Rancher/Harvester
+Plan D = GKE
+```
+
+and, more importantly, the plan has introduced concepts that the task matrix doesn't consistently reflect:
+
+* `I-MESSAGING-001`
+* `I-STORAGE-002`
+* `I-LIFECYCLE-001`
+* `I-LIFECYCLE-002`
+* `REQ-TOP-014`
+* the corrected `N >= 1, M >= 1`
+* explicit security plumbing for 000.9.3.
+
+For example, the plan explicitly records the corrected independent-scaling decision:
+
+> `N ≥ 1, M ≥ 1` as independent variables, with Core replicas joining the JetStream competing-consumer group.
+
+That's exactly what we wanted.
+
+---
+
+# The plan itself is now structurally strong
+
+The topology is coherent:
+
+```text
+                  Internet
+                     │
+                     ▼
+                Load Balancer
+                     │
+              ┌──────┴──────┐
+              ▼             ▼
+           Edge N          ...
+              │
+              ▼
+        NATS JetStream
+              │
+        ┌─────┼─────┐
+        ▼     ▼     ▼
+      Core1 Core2 CoreM
+        │     │     │
+        └─────┼─────┘
+              ▼
+        PostgreSQL
+              +
+          Dragonfly
+```
+
+And the plan correctly treats Edge's `/spool` as **per-instance single-writer storage**, rather than a shared distributed queue.
+
+The storage durability distinction is also now excellent:
+
+* HostPath → node-local durability
+* CSI RWO → pod-reschedule durability **where supported**
+
+That is exactly the qualification we needed.
+
+---
+
+# But I see 6 things to fix before execution
+
+## 1. PLAN says PostgreSQL 17/19 while the project context has PostgreSQL 18.x
+
+The plan diagram says:
+
+> PostgreSQL 17/19
+
+That is suspicious.
+
+Your actual wallet project has been targeting PostgreSQL 18.x.
+
+I would **not hard-code `17/19`** into this deployment plan unless there is a deliberate compatibility matrix.
+
+Better:
+
+```text
+PostgreSQL 18.x
+```
+
+or:
+
+```text
+PostgreSQL version defined by the current Core persistence baseline
+```
+
+Otherwise the deployment plan is introducing unexplained version drift.
+
+---
+
+# 2. `Valhalla JDK 27` needs verification
+
+The plan says:
+
+> Eclipse Temurin / Valhalla JDK 27
+
+This should be checked against the actual image you're going to build.
+
+I would avoid architecture documentation claiming a specific distribution/tag unless the Docker build is actually pinned to a reproducible image.
+
+Prefer:
+
+```text
+JDK 27 runtime
+```
+
+and then the Dockerfile pins the actual distribution/version.
+
+This becomes especially important for your security goal because later 000.9.3 will rely on JDK 27 crypto/TLS capabilities.
+
+---
+
+# 3. The Plan B description still mixes Docker Compose and Rancher/K3s
+
+This section is conceptually muddled:
+
+> “Docker Compose or free Rancher Open Source capabilities (e.g. lightweight node agent / single-node K3s).”
+
+If **Plan B is explicitly the low-cost non-Kubernetes appliance**, I'd make it:
+
+```text
+Plan B
+Docker Engine
+Docker Compose
+Host filesystem / NVMe
+No Kubernetes
+```
+
+Then Plan C starts the Kubernetes/Rancher/Harvester family.
+
+Otherwise your deployment matrix becomes:
+
+```text
+Plan B
+   ├── Docker
+   └── Kubernetes/K3s
+```
+
+which defeats the purpose of having a clean cost tier.
+
+I'd remove K3s/Rancher from Plan B.
+
+---
+
+# 4. The Core service being `headless` is worth reconsidering
+
+The plan says:
+
+```text
+core-service.yaml → ClusterIP headless internal only
+```
+
+But Core is accessed through NATS.
+
+Therefore Core doesn't actually need service-based discovery for financial commands.
+
+The only HTTP interface is:
+
+```text
+8081 management
+```
+
+So I'd strongly prefer:
+
+```text
+Core
+  no public Service
+  management endpoint only
+```
+
+or, if Kubernetes requires a Service for health/management:
+
+```text
+ClusterIP
+```
+
+but **not headless unless something actually consumes the DNS records**.
+
+The architectural principle should be:
+
+> NATS is the Core discovery/scaling mechanism.
+
+This reinforces `I-MESSAGING-001`.
+
+---
+
+# 5. Security hook is good, but 000.9.3 must own TLS termination semantics
+
+The plan says:
+
+> TLS 1.3 Termination: Ingress manifests and Docker Compose support TLS certificates mounted into `/etc/ssl/certs/`.
+
+That's useful infrastructure plumbing, but be careful with the word **termination**.
+
+There are actually potentially three TLS boundaries:
+
+```text
+Client
+  │ TLS 1.3
+  ▼
+Ingress/LB
+  │
+  │ TLS or plaintext
+  ▼
+Edge
+  │
+  │ TLS
+  ▼
+NATS
+  │
+  │ TLS
+  ▼
+Core
+```
+
+000.9.2 should provide the ability to configure these.
+
+But **000.9.3 should decide the security policy**.
+
+I'd change the plan language to:
+
+> TLS-capable ingress and internal transport configuration MUST be supported; TLS termination and re-encryption policy are deployment-profile concerns and are finalized by SPEC-000.9.3.
+
+That keeps the boundaries clean.
+
+---
+
+# 6. Most important: the TASKS document needs regeneration
+
+This is the part I'd fix **before touching implementation**.
+
+The task document you pasted says:
+
+```text
+REQ-TOP-001
+REQ-TOP-002
+...
+REQ-TOP-015
+```
+
+but the plan now contains additional architectural contracts.
+
+For example, the PLAN explicitly has:
+
+```text
+I-MESSAGING-001
+I-STORAGE-002
+REQ-TOP-014
+I-LIFECYCLE-001
+I-LIFECYCLE-002
+```
+
+Yet the task matrix you supplied doesn't have a clean one-to-one mapping for all of them.
+
+That violates the spirit of your own:
+
+> bi-directional equivalence reconciliation (`I-SDD-003`)
+
+So before implementation:
+
+```text
+SPEC
+  ↕
+PLAN
+  ↕
+TASKS
+  ↕
+TESTS
+  ↕
+SUMMARY
+```
+
+must converge.
+
+---
+
+# There is also a naming inconsistency
+
+Your task list says:
+
+```text
+REQ-TOP-008 = storage persistence
+REQ-TOP-009 = watermark
+REQ-TOP-010 = lifecycle
+REQ-TOP-011 = ACK
+REQ-TOP-012 = port/security
+```
+
+But the actual PLAN sections use:
+
+```text
+3.2 → I-STORAGE-002
+3.3 → I-EDGE-005
+5.2 → I-LIFECYCLE-001
+5.3 → I-LIFECYCLE-002
+6 → REQ-TOP-014
+```
+
+This is exactly the kind of drift that causes an implementation agent to satisfy an old task while believing it satisfied the new architecture.
+
+**I'd regenerate TASKS-000.9.2 from the current SPEC + PLAN rather than manually patching it.**
+
+---
+
+# One thing I particularly like
+
+The plan now has a very clean security transition:
+
+```text
+000.9.2
+────────────────────────────
+container/runtime foundation
+
+  TLS capability
+  secret injection
+  internal Core isolation
+  non-root
+  network boundaries
+             │
+             ▼
+000.9.3
+────────────────────────────
+security semantics
+
+  HMAC
+  credential identity
+  tenant derivation
+  rate limiting
+  authorization
+```
+
+That's exactly the sequencing we want.
+
+The plan explicitly calls this a **security infrastructure hook for Phase 000.9.3**, rather than trying to pull HMAC into the containerization phase.
+
+---
+
+# My recommended final sequence
+
+I would now freeze the architecture as:
+
+```text
+SPEC-000.9.1
+Process separation
+        │
+        ▼
+PLAN-000.9.2
+Container/platform topology
+        │
+        ▼
+TASKS-000.9.2
+Regenerated from current plan
+        │
+        ▼
+IMPLEMENT 000.9.2
+        │
+        ├── Docker
+        ├── Compose A
+        ├── Appliance B
+        ├── Kubernetes C/D
+        ├── spool durability
+        ├── independent scaling
+        └── lifecycle
+        │
+        ▼
+CONVERGENCE GATE
+        │
+        ▼
+SPEC-000.9.3
+HMAC + tenant security
+```
+
+### Verdict
+
+**PLAN-000.9.2 itself: ready with minor cleanup.**
+
+**TASKS-000.9.2: not ready to execute yet because it needs to be reconciled with the current SPEC/PLAN.**
+
+I would make those 4–6 small corrections, then **regenerate TASKS-000.9.2*. That gives us a clean architectural checkpoint.

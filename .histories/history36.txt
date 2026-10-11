@@ -1,0 +1,604 @@
+Sim — essa revisão ficou **bem mais madura** e, principalmente, corrigiu o ponto mais perigoso da arquitetura original: confundir **aceitação em memória** com **aceitação financeira durável**.
+
+Minha avaliação é que agora temos uma base suficientemente sólida para transformar isso em uma SPEC-000.9 profissional.
+
+## O que ficou especialmente correto
+
+### 1. `202 ACCEPTED` agora tem semântica financeira real
+
+Este é o principal acerto:
+
+> `202` só existe depois de `JetStream PUBACK` **ou** `fsync` do journal.
+
+Isso cria uma propriedade muito clara:
+
+```text
+Client receives 202
+        ↓
+The command MUST survive process crash
+```
+
+Ou seja:
+
+```text
+202 ACCEPTED
+    ⇓
+Durable Acceptance Guarantee
+```
+
+E o fallback:
+
+```text
+NATS unavailable
+      ↓
+DurableSpilloverJournal.append()
+      ↓
+fsync()
+      ↓
+202 ACCEPTED
+```
+
+Enquanto:
+
+```text
+NATS unavailable
+Journal full / disk failure
+      ↓
+503 Service Unavailable
+```
+
+Para um sistema financeiro, eu considero isso **não negociável**.
+
+---
+
+# Minha recomendação: adicionar mais 3 invariantes antes de congelar a SPEC
+
+Você já mencionou `I-EDGE-001` e `I-EDGE-002`, mas eu formalizaria explicitamente mais alguns.
+
+---
+
+## I-EDGE-003 — Idempotent Durable Acceptance
+
+O maior problema de um Edge durável não é apenas garantir que a mensagem não desapareça.
+
+É garantir que ela não seja **executada duas vezes**.
+
+Cenário:
+
+```text
+1. Edge receives request
+2. Journal fsync succeeds
+3. Edge crashes before HTTP response
+4. Client times out
+5. Client retries
+```
+
+Agora temos potencialmente:
+
+```text
+Journal → operation X
+Retry   → operation X
+```
+
+Portanto:
+
+> **Uma operação aceita duravelmente MUST possuir uma identidade determinística e ser deduplicável em todos os caminhos de recuperação e replay.**
+
+Eu colocaria:
+
+```text
+I-EDGE-003 — Durable Acceptance Idempotency
+
+Every accepted command MUST have a deterministic idempotency identity.
+
+The same logical operation MUST NOT result in multiple durable executions,
+regardless of:
+
+- client retries;
+- edge crash before HTTP response;
+- journal replay;
+- NATS publish retry;
+- edge restart.
+```
+
+A identidade poderia ser:
+
+```text
+operationId
+```
+
+e no NATS:
+
+```text
+Nats-Msg-Id = operationId
+```
+
+Isso conversa perfeitamente com seu `I-DEDUP-001`.
+
+---
+
+# I-EDGE-004 — Journal Recovery Before Traffic Admission
+
+Você já descreveu isso conceitualmente, mas merece virar invariant.
+
+```text
+Edge restart
+      ↓
+Recover journal
+      ↓
+Replay undelivered commands
+      ↓
+Only then
+      ↓
+READY = true
+      ↓
+Accept new traffic
+```
+
+Formalmente:
+
+> **An Edge instance MUST NOT advertise readiness while durable journal recovery is incomplete.**
+
+Algo como:
+
+```text
+I-EDGE-004 — Crash Recovery Readiness Gate
+
+An Edge node MUST remain NOT_READY until all recoverable
+unacknowledged journal records have been scanned and scheduled
+for replay or deterministically classified.
+```
+
+Isso evita:
+
+```text
+Restart
+   ↓
+Load balancer sends traffic immediately
+   ↓
+Old spool forgotten
+   ↓
+New traffic mixed with unrecovered commands
+```
+
+---
+
+# I-EDGE-005 — Journal Capacity Is a Safety Boundary
+
+Também considero essencial.
+
+Você já diz:
+
+```text
+spool full → 503
+```
+
+Mas precisamos definir isso como comportamento deliberado, não como acidente operacional.
+
+Eu sugiro:
+
+```text
+I-EDGE-005 — Bounded Durable Capacity
+
+The durable spillover journal MUST have explicit:
+
+- maximum disk capacity;
+- high-water mark;
+- critical-water mark;
+- admission policy.
+
+At critical capacity, new commands MUST NOT receive 202
+unless durable capacity is successfully reserved.
+```
+
+Uma política poderia ser:
+
+| Journal utilization | Behavior                        |
+| ------------------- | ------------------------------- |
+| `< 70%`             | Normal                          |
+| `70–85%`            | Alert                           |
+| `85–95%`            | Prefer NATS, restrict spillover |
+| `>95%`              | Reject degraded acceptance      |
+| `100%`              | 503                             |
+
+Isso é muito importante porque **disco cheio também é uma forma de outage**.
+
+---
+
+# Arquitetura que eu adotaria para SPEC-000.9
+
+Eu faria o Edge assim:
+
+```mermaid
+flowchart LR
+    C[Client] --> T[L0 Transport Limits]
+    T --> R1[L1 Perimeter Rate Limit]
+    R1 --> R2[L2 Local Tenant Token Bucket]
+    R2 --> B[Bounded Inflight Bulkhead]
+
+    B --> CB[Circuit Breaker]
+    CB --> TO[Publish Timeout]
+
+    TO -->|Healthy| NATS[NATS JetStream]
+
+    TO -->|Unavailable| HANDOFF[LMAX Disruptor]
+
+    HANDOFF --> JOURNAL[DurableSpilloverJournal]
+    JOURNAL --> FSYNC[fsync]
+
+    FSYNC -->|Success| ACCEPT[202 Accepted]
+    FSYNC -->|Failure| REJECT[503]
+
+    NATS -->|PUBACK| ACCEPT
+
+    JOURNAL --> DRAINER[Recovery Drainer]
+    DRAINER --> NATS
+```
+
+A separação conceitual está ótima:
+
+### Disruptor
+
+Responsável por:
+
+```text
+✔ handoff
+✔ batching
+✔ backpressure
+✔ worker coordination
+```
+
+Mas nunca:
+
+```text
+❌ durability
+❌ acceptance guarantee
+```
+
+---
+
+# Sobre RocksDB vs TidesDB
+
+Para **esta SPEC-000.9**, eu manteria exatamente a decisão que você tomou:
+
+> **Não acoplar o design a RocksDB nem TidesDB ainda.**
+
+E sinceramente, para um **append-only financial spillover journal**, eu não começaria com nenhum dos dois.
+
+O caminho mais profissional é:
+
+```text
+DurableSpilloverJournal
+        │
+        ├── SegmentedFileJournal   ← baseline
+        │
+        ├── RocksDbJournal         ← optional future
+        │
+        └── AlternativeJournal     ← future
+```
+
+Porque o workload é essencialmente:
+
+```text
+append → fsync → sequential replay
+```
+
+Isso é quase o cenário ideal para:
+
+```text
+Preallocated segmented files
+Sequential append
+CRC
+fsync boundary
+Sequential drain
+```
+
+Um KV store adiciona coisas que talvez você nem queira:
+
+* compaction;
+* write amplification;
+* WAL adicional;
+* tuning complexity;
+* recovery complexity.
+
+Para NVMe, um log segmentado bem implementado provavelmente será **mais previsível**.
+
+Então eu manteria:
+
+### SPEC-000.9
+
+```text
+Segmented File Journal as baseline
+```
+
+### Future experiment / benchmark
+
+```text
+RocksDB vs TidesDB vs Segmented Journal
+```
+
+Não faria uma decisão arquitetural baseada apenas em benchmarks genéricos de throughput.
+
+O benchmark precisa ser o seu workload:
+
+```text
+financial command
+↓
+4–16 KB payload
+↓
+append
+↓
+fsync
+↓
+crash
+↓
+recovery
+↓
+deduplicated replay
+```
+
+---
+
+# Um ponto importante: `fsync` por mensagem pode destruir o throughput
+
+Aqui existe uma tensão que precisamos tratar explicitamente.
+
+Se fizermos:
+
+```text
+request
+ → append
+ → fsync
+ → 202
+```
+
+para **cada operação individual**, dezenas de milhares de operações por segundo podem se tornar difíceis dependendo do storage.
+
+Eu introduziria **group commit**.
+
+Exemplo:
+
+```text
+Command A ─┐
+Command B ─┼── append batch ── fsync ── acknowledge A/B/C
+Command C ─┘
+```
+
+Com uma janela muito pequena:
+
+```text
+max batch latency: 1 ms
+or
+max batch size: N commands
+```
+
+O invariant continua sendo:
+
+> nenhuma operação recebe 202 antes do `fsync` que contém seu registro.
+
+Mas várias operações podem compartilhar o mesmo flush.
+
+Isso pode ser uma parte crítica da performance da appliance.
+
+---
+
+# Journal record: eu evoluiria um pouco o formato
+
+Seu formato:
+
+```text
+[Length: 4B]
+[CRC32: 4B]
+[OperationId: 16B]
+[Timestamp: 8B]
+[Payload: NB]
+```
+
+está bom como base, mas eu acrescentaria versionamento e flags:
+
+```text
+[Magic: 4B]
+[Version: 2B]
+[Flags: 2B]
+
+[Length: 4B]
+[CRC32C: 4B]
+
+[OperationId: 16B]
+[Timestamp: 8B]
+
+[PayloadLength: 4B]
+[Payload: NB]
+```
+
+Especialmente:
+
+```text
+Magic
+Version
+```
+
+porque journals tendem a sobreviver muito mais que versões da aplicação.
+
+E eu consideraria **CRC32C**, que possui suporte acelerado em CPUs modernas.
+
+---
+
+# O modelo de readiness deveria ser explícito
+
+Eu criaria estados internos:
+
+```java
+enum EdgeReadinessState {
+    STARTING,
+    RECOVERING_JOURNAL,
+    DRAINING_BACKLOG,
+    READY,
+    DEGRADED,
+    FULL
+}
+```
+
+Algo como:
+
+```text
+STARTING
+   ↓
+RECOVERING_JOURNAL
+   ↓
+READY
+```
+
+Se NATS cair:
+
+```text
+READY
+  ↓
+DEGRADED
+```
+
+Se journal atingir limite:
+
+```text
+DEGRADED
+  ↓
+FULL
+```
+
+E o load balancer poderia usar isso.
+
+Por exemplo:
+
+```text
+READY      → accepts traffic
+DEGRADED   → accepts traffic if durable spool available
+FULL       → 503
+RECOVERING → not ready
+```
+
+Isso tornaria o comportamento operacional extremamente claro.
+
+---
+
+# Minha recomendação para a ordem da SPEC
+
+Eu faria a SPEC-000.9 em torno de **quatro pilares**, não apenas WebFlux + circuit breaker.
+
+## Pillar A — Durable Acceptance
+
+```text
+REQ-EDGE-001
+Durable acceptance semantics
+```
+
+## Pillar B — Bounded Ingress
+
+```text
+REQ-EDGE-002
+Rate limiting + inflight bulkheading
+```
+
+## Pillar C — Resilient Delivery
+
+```text
+REQ-EDGE-003
+NATS primary path + durable spillover
+```
+
+## Pillar D — Crash Recovery
+
+```text
+REQ-EDGE-004
+Journal recovery + deterministic replay
+```
+
+---
+
+# E eu faria estes testes obrigatórios
+
+Além do seu Test Triad:
+
+### 🔥 Crash-after-fsync test
+
+```text
+Given:
+  command persisted and fsync completed
+
+When:
+  process crashes before HTTP response
+
+Then:
+  after restart command is replayed exactly-once logically
+```
+
+Esse teste é provavelmente um dos mais importantes da SPEC inteira.
+
+---
+
+### 🔥 Broker outage test
+
+```text
+Given:
+  NATS unavailable
+
+When:
+  command arrives
+
+Then:
+  command is journaled and fsync'd
+  AND HTTP 202 is returned
+```
+
+---
+
+### 🔥 Double failure test
+
+```text
+Given:
+  NATS unavailable
+  AND journal unavailable
+
+Then:
+  HTTP 503 is returned
+  AND no 202 is ever emitted
+```
+
+---
+
+### 🔥 Journal replay deduplication
+
+```text
+Given:
+  command already reached NATS
+  but edge crashed before journal acknowledgement cleanup
+
+When:
+  journal recovery replays the record
+
+Then:
+  NATS / downstream deduplication prevents duplicate execution
+```
+
+---
+
+## Minha conclusão
+
+**A direção agora está excelente.** A revisão baseada no History 35 elevou a proposta de uma simples arquitetura de "alta performance" para uma arquitetura com **semântica correta de aceitação financeira**.
+
+Minha recomendação é:
+
+> **Não trocar RocksDB por TidesDB agora.**
+>
+> O baseline correto para SPEC-000.9 é o `DurableSpilloverJournal` com **segmented append-only journal**, deixando RocksDB/TidesDB como implementações experimentais futuras.
+
+E antes de escrever a SPEC definitiva, eu consolidaria oficialmente estes invariantes:
+
+```text
+I-EDGE-001 — Durable Acceptance Semantics
+I-EDGE-002 — Bounded Inflight & Bulkheading
+I-EDGE-003 — Idempotent Durable Acceptance
+I-EDGE-004 — Recovery Before Traffic Admission
+I-EDGE-005 — Bounded Durable Capacity
+```
+
+Com isso, a **SPEC-000.9** fica pronta para ser escrita de forma muito mais rigorosa e profissional — e depois podemos derivar um **PLAN-000.9** com TDD e benchmarks específicos para o journal, incluindo comparação futura entre **Segmented Journal × RocksDB × TidesDB**.

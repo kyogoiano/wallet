@@ -1,0 +1,472 @@
+Sim — e acho que isso pode ficar **muito mais interessante do que simplesmente adicionar mais endpoints à Wallet**.
+
+O caminho que eu exploraria é criar uma arquitetura de **Wallet Core + Capability Plugins**: o core continua responsável por ledger, saldo, transferências, idempotência e consistência; funcionalidades modernas entram como módulos desacoplados que consomem eventos e, quando necessário, executam operações através de interfaces controladas.
+
+Vou olhar rapidamente o que fintechs modernas estão efetivamente adotando para não basearmos a escolha só em tendências.
+
+
+Pesquisando o cenário de 2026, eu vejo uma convergência muito clara: **wallets estão deixando de ser apenas “onde o dinheiro fica” e passando a ser uma plataforma programável de decisões e ações financeiras**.
+
+IA financeira, Open Finance, pagamentos programáveis, controle de assinaturas, cartões virtuais e agentes capazes de executar operações aparecem como tendências concretas. ([Deloitte][1])
+
+## Minha proposta para a nossa Wallet: **Programmable Wallet / Smart Money Plugin**
+
+Em vez de implementarmos simplesmente, por exemplo, cashback ou round-up savings, eu criaria uma funcionalidade que aproveita muito bem a arquitetura que já estamos construindo:
+
+> **Wallet Automation Engine**
+> Um plugin que permite ao usuário — e futuramente a um AI Financial Copilot — criar regras para observar eventos financeiros e executar ações automaticamente.
+
+Algo assim:
+
+```text
+                    ┌─────────────────────┐
+                    │     Wallet Core     │
+                    │                     │
+                    │ Ledger              │
+                    │ Transfers           │
+                    │ Balance             │
+                    │ Idempotency         │
+                    │ Transactional Outbox│
+                    └──────────┬──────────┘
+                               │
+                          Domain Events
+                               │
+                               ▼
+              ┌────────────────────────────────┐
+              │   Wallet Automation Platform   │
+              │                                │
+              │  Rule Engine                   │
+              │  Policy Engine                 │
+              │  Risk / Fraud Check            │
+              │  Simulation                    │
+              │  Execution                     │
+              └───────────┬────────────────────┘
+                          │
+              ┌───────────┼────────────┐
+              ▼           ▼            ▼
+         Savings      Spending       AI Copilot
+         Plugin       Plugin         Plugin
+```
+
+Acho que isso conversa **perfeitamente com o nosso projeto atual**, porque você já possui:
+
+* ledger;
+* transferências;
+* idempotência;
+* Transactional Outbox;
+* eventos via NATS JetStream;
+* motor antifraude;
+* Redis para estado de alta velocidade.
+
+Ou seja: a infraestrutura para uma feature realmente moderna já está quase toda lá.
+
+---
+
+# 1. Exemplos de automações
+
+### Round-up automático
+
+```text
+Payment: R$ 47,30
+
+Rule:
+ROUND_UP_TO R$ 50,00
+
+Action:
+Move R$ 2,70 → Savings Wallet
+```
+
+Mas isso seria apenas o caso mais básico.
+
+---
+
+### Saldo inteligente
+
+```text
+WHEN balance > R$ 10.000
+
+AND projected_cashflow_30d > R$ 3.000
+
+THEN
+    move R$ 2.000
+    → Investment Wallet
+```
+
+Naturalmente, inicialmente podemos implementar uma versão simulada.
+
+---
+
+### Reserva automática
+
+```text
+WHEN salary_received
+
+THEN
+
+10% → Emergency Fund
+5%  → Investment
+5%  → Travel Wallet
+```
+
+Isso é basicamente **programmable money** aplicado dentro da nossa Wallet. Pagamentos programáveis e infraestrutura financeira modular estão se tornando uma direção importante do setor. ([Modern Treasury][2])
+
+---
+
+# 2. A parte realmente interessante: **Financial Copilot Plugin**
+
+Aqui eu acho que temos algo muito mais inovador para implementar.
+
+Em vez de o usuário criar regras manualmente:
+
+> "Sempre que eu receber mais de R$ 5.000, guarde 10%."
+
+Ele poderia dizer:
+
+> **"Quero guardar R$ 20 mil em 12 meses sem comprometer meu fluxo de caixa."**
+
+A IA não movimenta dinheiro diretamente.
+
+Ela produz uma proposta:
+
+```json
+{
+  "goal": "SAVE_R$20000",
+  "deadline": "2027-08-22",
+
+  "strategy": {
+    "type": "ADAPTIVE_SAVINGS",
+    "base_contribution": 1200,
+    "min_balance": 3000,
+    "cashflow_safety_margin": 0.20
+  }
+}
+```
+
+Então o sistema apresenta:
+
+```text
+Proposed Automation
+────────────────────────────────
+
+Goal:
+Save R$ 20.000
+
+Estimated completion:
+11 months
+
+Monthly contribution:
+R$ 1.200
+
+Protection:
+Never reduce available balance
+below R$ 3.000
+
+[Approve]
+```
+
+Somente após aprovação:
+
+```text
+AutomationRuleCreated
+```
+
+A partir daí, **não existe IA no caminho crítico da transferência**.
+
+Isso é importante.
+
+---
+
+# 3. Eu separaria em dois níveis
+
+## Level 1 — Deterministic Automation
+
+100% baseado em regras.
+
+```text
+IF event.type == MONEY_RECEIVED
+AND amount > 5000
+THEN transfer 10% TO savings_wallet
+```
+
+Arquiteturalmente simples e extremamente testável.
+
+---
+
+## Level 2 — AI-assisted Automation
+
+A IA apenas:
+
+```text
+Natural Language
+        │
+        ▼
+┌──────────────────┐
+│ Intent Extraction │
+└────────┬─────────┘
+         ▼
+┌──────────────────┐
+│ Rule Generator   │
+└────────┬─────────┘
+         ▼
+     Validation
+         │
+         ▼
+    Simulation
+         │
+         ▼
+ Human Approval
+         │
+         ▼
+  Deterministic
+    Execution
+```
+
+Isso segue uma direção que está ganhando força: interfaces financeiras baseadas em linguagem natural e agentes financeiros, mas com controles e confirmação humana para ações sensíveis. ([Stripe][3])
+
+---
+
+# 4. Como eu transformaria isso em um plugin
+
+Eu evitaria colocar regras diretamente dentro do `WalletService`.
+
+Criaria algo como:
+
+```text
+wallet-core
+│
+├── wallet-domain
+├── wallet-ledger
+├── wallet-application
+│
+├── wallet-events
+│
+└── wallet-plugin-api
+         │
+         │
+         ├── savings-automation-plugin
+         │
+         ├── subscription-manager-plugin
+         │
+         ├── cashback-plugin
+         │
+         └── financial-copilot-plugin
+```
+
+A interface poderia começar extremamente pequena:
+
+```java
+public interface WalletPlugin {
+
+    PluginDescriptor descriptor();
+
+    void onEvent(WalletEvent event);
+}
+```
+
+Mas eu provavelmente evoluiria rapidamente para separar:
+
+```java
+public interface WalletEventHandler<E extends WalletEvent> {
+
+    Class<E> eventType();
+
+    void handle(E event);
+}
+```
+
+E:
+
+```java
+public interface WalletCapability {
+
+    CapabilityDescriptor descriptor();
+}
+```
+
+Assim evitamos transformar o plugin system em um "God SPI".
+
+---
+
+# 5. O primeiro plugin que eu implementaria
+
+Minha escolha seria:
+
+## 🥇 **Smart Savings Automation**
+
+Porque ele nos permite testar praticamente toda a arquitetura futura sem depender de:
+
+* integração bancária real;
+* Open Finance;
+* emissão de cartão;
+* parceiro externo;
+* modelo de IA;
+* questões regulatórias complexas.
+
+E podemos evoluí-lo progressivamente.
+
+### V1
+
+```text
+Fixed Percentage Rule
+
+WHEN MONEY_RECEIVED
+THEN move X% to Savings
+```
+
+---
+
+### V2
+
+```text
+Round-up Rule
+
+WHEN MONEY_SPENT
+THEN round up transaction
+AND move difference to Savings
+```
+
+---
+
+### V3
+
+```text
+Balance Threshold
+
+WHEN balance > threshold
+THEN move excess amount
+```
+
+---
+
+### V4
+
+```text
+Goal-based automation
+
+Goal: R$ 20.000
+
+Deadline: 12 months
+
+System calculates contribution strategy.
+```
+
+---
+
+### V5
+
+```text
+AI Financial Copilot
+```
+
+O copilot observa o comportamento e sugere:
+
+> "Você recebeu R$ 8.000 este mês. Com base na sua meta e no fluxo recente, posso aumentar sua contribuição de R$ 500 para R$ 850. Quer aplicar esta alteração?"
+
+Mas novamente:
+
+```text
+AI
+ ↓
+Suggestion
+
+Human
+ ↓
+Approval
+
+Deterministic Rule
+ ↓
+Wallet Execution
+```
+
+---
+
+# 6. Outra alternativa extremamente interessante: Subscription Intelligence Plugin
+
+A Visa lançou recentemente uma solução de gerenciamento de assinaturas com switching, cancelamento, alertas e insights dentro do aplicativo. Isso mostra que **subscription intelligence** está se tornando uma capability relevante das wallets modernas. ([Visa Inc.][4])
+
+Poderíamos criar:
+
+```text
+SubscriptionDetected
+        │
+        ▼
+┌────────────────────────┐
+│ Subscription Intelligence│
+└────────────┬───────────┘
+             │
+     ┌───────┼─────────┐
+     ▼       ▼         ▼
+
+ Detect    Predict    Alert
+
+Netflix   Renewal    Price Change
+R$39,90   in 3 days  +12%
+```
+
+Isso seria muito legal para o portfólio, mas depende de termos eventos de pagamentos com merchant/category, então talvez não seja o melhor **primeiro plugin**.
+
+---
+
+# Minha recomendação
+
+Eu faria uma sequência assim:
+
+```text
+                WALLET CORE
+                     │
+                     ▼
+          ┌─────────────────────┐
+          │ Plugin / Capability │
+          │        API          │
+          └──────────┬──────────┘
+                     │
+                     ▼
+      SMART SAVINGS AUTOMATION PLUGIN
+                     │
+        ┌────────────┼────────────┐
+        ▼            ▼            ▼
+
+   Percentage      Round-Up     Threshold
+                     │
+                     ▼
+              Goal Engine
+                     │
+                     ▼
+            Financial Copilot
+```
+
+Isso nos dá uma evolução muito coerente:
+
+**V1 → deterministic rules**
+
+↓
+
+**V2 → event-driven automations**
+
+↓
+
+**V3 → goal optimization**
+
+↓
+
+**V4 → AI suggestions**
+
+↓
+
+**V5 → controlled financial agent**
+
+E, arquiteturalmente, pode virar uma espécie de **mini plataforma de fintech extensível**, semelhante ao movimento do mercado para contas financeiras modulares e embedded capabilities, em vez de uma wallet monolítica com cada feature acoplada ao core. ([Stripe][5])
+
+Minha sugestão é começarmos pelo **ADR/arquitetura do Plugin API**, mas antes de escrever código eu faria uma comparação entre **3 candidatas**:
+
+1. **Smart Savings & Programmable Money** — minha favorita.
+2. **Subscription Intelligence** — muito próxima do que fintechs estão lançando agora.
+3. **AI Financial Copilot** — mais inovadora, mas construída em cima das duas anteriores.
+
+Podemos então escolher **uma como SPEC-XXX oficial da Wallet**, definir o bounded context, eventos, SPI, modelo de dados e roadmap de V1 a V5.
+
+[1]: https://www.deloitte.com/br/pt/Industries/financial-services/research/pesquisa-febraban-tecnologia-bancaria.html?utm_source=chatgpt.com "Pesquisa Febraban de Tecnologia Bancária 2026 | Deloitte Brasil"
+[2]: https://www.moderntreasury.com/journal/2026-fintech-predictions-key-trends-in-payments-banking-and-financial-infrastructure?utm_source=chatgpt.com "Fintech Predictions for 2026"
+[3]: https://stripe.com/blog/everything-we-announced-at-sessions-2026?utm_source=chatgpt.com "Everything we announced at Sessions 2026"
+[4]: https://visa.gcs-web.com/news-releases/news-release-details/visa-launches-enhanced-subscription-manager-giving-consumers?utm_source=chatgpt.com "Visa Launches Enhanced Subscription Manager, Giving Consumers Greater Control Over Recurring Payments | Visa Inc."
+[5]: https://stripe.com/en-br/treasury/platforms?utm_source=chatgpt.com "Stripe Treasury for Platforms | Financial Services APIs"

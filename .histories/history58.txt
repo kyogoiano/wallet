@@ -1,0 +1,637 @@
+Yes. This version is substantially better than the previous 000.9.3 draft. The history is now internally consistent with the decisions we made: HMAC-only, JDK 27, no JWT/OIDC, versioned canonicalization, no nonce, zero-DB Edge, and the Edge/Core trust boundary.
+
+I would **not ratify it quite yet**, though. There are a few architectural points I'd fix before generating `PLAN-000.9.3` and `TASKS-000.9.3`.
+
+## My assessment
+
+**Current: ~9.2/10**
+
+After the changes below: **~9.7–9.8/10**.
+
+The good news is that these are mostly *hardening/precision* changes rather than a redesign.
+
+---
+
+# 1. The biggest issue: SSE + HMAC
+
+This is the one I would definitely fix.
+
+You currently say:
+
+> `GET /operations/{opId}/stream` MUST enforce HMAC-SHA-256 authentication.
+
+But the architecture from 000.9.1/000.9.2 wants an SSE stream, and a browser's native:
+
+```javascript
+new EventSource(url)
+```
+
+cannot send arbitrary `X-Key-Id`, `X-Signature`, `X-Timestamp`, etc. headers.
+
+So we have a protocol mismatch.
+
+### I recommend changing the design to:
+
+**Mutation:**
+
+```text
+POST /operations
+   X-Key-Id
+   X-Timestamp
+   X-Operation-Id
+   X-Signature
+   body
+```
+
+**SSE:**
+
+Use an authenticated `fetch()` streaming connection rather than native `EventSource`:
+
+```text
+fetch("/operations/{opId}/stream", {
+    headers: {
+        "X-Key-Id": "...",
+        "X-Timestamp": "...",
+        "X-Signature": "..."
+    }
+})
+```
+
+and consume the response as an SSE stream.
+
+That preserves:
+
+* standard SSE wire format
+* HTTP streaming
+* HMAC headers
+* no token in URL
+* no special authentication endpoint
+
+I'd therefore change:
+
+```text
+REQ-SEC-001
+Financial endpoints and SSE streams MUST enforce HMAC...
+```
+
+to explicitly say:
+
+> SSE clients MUST use an HTTP streaming client capable of supplying HMAC authentication headers. Native browser `EventSource` authentication is not a V1 requirement.
+
+That prevents someone implementing an impossible requirement later.
+
+---
+
+# 2. Canonicalization needs one more level of precision
+
+You have:
+
+```text
+WALLET-HMAC-V1
+METHOD
+PATH
+QUERY
+KEY-ID
+TIMESTAMP
+OP-ID
+SHA256(BODY)
+```
+
+which is good.
+
+But we need to define what **PATH** and **QUERY** mean.
+
+Otherwise:
+
+```text
+?a=1&b=2
+```
+
+and
+
+```text
+?b=2&a=1
+```
+
+can generate different signatures depending on the client.
+
+I'd add something like:
+
+```text
+Canonical Path:
+  RFC 3986 normalized path
+
+Canonical Query:
+  parameters sorted lexicographically by encoded key,
+  then encoded value; duplicate parameters preserved
+
+Body:
+  exact transmitted UTF-8 bytes
+```
+
+Also explicitly define:
+
+* UTF-8
+* `\n` as separator
+* no trailing newline
+* lowercase hex for SHA-256
+* HTTP method uppercase
+* empty query = empty line
+* empty body = SHA-256 of zero bytes
+
+This is important because **HMAC itself is easy; canonicalization interoperability is the difficult part.**
+
+---
+
+# 3. Replay protection needs a small conceptual correction
+
+You currently have:
+
+> timestamp fresh AND `operationId` has not produced a financial effect.
+
+This is good for **financial idempotency**, but it isn't quite the same thing as Edge replay prevention.
+
+Imagine:
+
+```text
+t=0   legitimate request
+t=1   attacker replays same request
+t=2   Core hasn't processed original yet
+```
+
+Both requests can pass the Edge timestamp check.
+
+The important thing is that the **financial effect remains exactly once**, which your existing `operationId` mechanism handles.
+
+So I'd change the terminology from:
+
+> Replay Resistance
+
+to:
+
+> **Replay Admission & Financial Idempotency**
+
+And define two guarantees:
+
+```text
+Edge:
+  timestamp freshness limits replay window
+
+Core:
+  operationId provides financial idempotency
+
+Invariant:
+  FinancialEffects(operationId) <= 1
+```
+
+This is much more precise.
+
+I would **not introduce another nonce/replay database**. That would violate the simplicity objective we've been following.
+
+---
+
+# 4. The rate limiter isn't globally fair with multiple Edge replicas
+
+This is subtle and important.
+
+You currently say:
+
+> Token buckets track capacity per `RateLimitKey(tenantId, principalId)` and tenant exhaustion MUST NOT deplete peer tenant capacity.
+
+But each Edge has local memory.
+
+With:
+
+```text
+Edge 1 → tenant A → 100 req/s
+Edge 2 → tenant A → 100 req/s
+Edge 3 → tenant A → 100 req/s
+```
+
+the effective limit becomes roughly:
+
+```text
+300 req/s
+```
+
+if traffic distributes across three instances.
+
+That's actually desirable for performance, but it means the current wording should distinguish:
+
+### Local V1 limiter
+
+```text
+RateLimitKey(tenantId, principalId)
+        ↓
+local token bucket
+        ↓
+O(1)
+```
+
+### Distributed limiter
+
+Your existing `REQ-SEC-012` already allows DragonflyDB as a future fallback.
+
+I'd explicitly state:
+
+> V1 local limits are **per Edge instance**. Global tenant quotas across replicas are not guaranteed until distributed limiting is enabled.
+
+Then 000.9.3 doesn't accidentally promise something the implementation cannot mathematically guarantee.
+
+---
+
+# 5. The bounded LRU isn't necessarily safe as written
+
+Your test says:
+
+> Memory exhaustion → bounded LRU cache.
+
+This deserves a guardrail.
+
+Suppose an attacker generates:
+
+```text
+principal-0001
+principal-0002
+...
+principal-1000000
+```
+
+If old buckets are evicted, the attacker can potentially regain a fresh bucket.
+
+I'd define:
+
+```text
+Maximum active RateLimitKey cardinality
+```
+
+and an explicit behavior when capacity is reached.
+
+For example:
+
+```text
+if new key and limiter capacity exhausted:
+    fail closed / 429
+```
+
+or use a bounded admission structure.
+
+I wouldn't over-engineer this yet. Just make **bounded cardinality + defined saturation behavior** a MUST.
+
+---
+
+# 6. `I-SEC-009` needs to become more concrete
+
+This is currently:
+
+> Core accepts commands only from authenticated Edge publishers. NATS headers are trusted only after transport identity is verified.
+
+Conceptually correct, but "authenticated Edge publisher" needs a concrete mechanism.
+
+Because in 000.9.2 we already established:
+
+```text
+Edge
+  ↓
+NATS TLS/authentication
+  ↓
+Core
+```
+
+The security boundary should say something like:
+
+```text
+NATS identity for Edge publishers MUST be distinct from
+Core and non-Edge identities.
+
+Edge publisher credentials MUST have publish permission only
+for commands.wallet.> and status-related subjects as required.
+
+Core MUST NOT accept financial commands from arbitrary NATS users.
+```
+
+That gives us a real security boundary rather than:
+
+```text
+NATS connection authenticated = trusted
+```
+
+which is too broad.
+
+This is particularly important because your `CommandEnvelope` tenant fields are explicitly transported through NATS.
+
+---
+
+# 7. I'd make credential rotation a MUST
+
+Currently:
+
+```text
+REQ-SEC-010 [SHOULD]
+Support overlapping credentials...
+```
+
+For an appliance/security architecture, I think this should be:
+
+```text
+REQ-SEC-010 [MUST]
+Support at least two simultaneously valid credential versions
+during rotation, with explicit activation and retirement.
+```
+
+Why?
+
+Because otherwise rotating:
+
+```text
+key-A → key-B
+```
+
+can cause a hard authentication outage.
+
+The implementation can remain very simple:
+
+```text
+CredentialSnapshot
+ ├── active key A
+ └── active key B
+
+rotation:
+ A + B
+    ↓
+ B only
+```
+
+No database lookup and no request-path refresh.
+
+That fits perfectly with your immutable credential snapshot design.
+
+---
+
+# 8. Database tenant model is good, but I'd add the indexes carefully
+
+This part is directionally right:
+
+```text
+accounts
+ledger
+wallet_operations
+    tenant_id
+```
+
+and especially:
+
+```text
+tenant_id VARCHAR(64) NOT NULL DEFAULT 'default'
+```
+
+with the explicit statement that `default` is migration-only.
+
+I'd additionally make sure the indexes reflect the **actual access patterns**, rather than just adding:
+
+```sql
+(tenant_id, id)
+```
+
+For example, `wallet_operations` is likely to query:
+
+```sql
+WHERE tenant_id = ?
+  AND operation_id = ?
+```
+
+so I'd expect:
+
+```sql
+UNIQUE (tenant_id, operation_id)
+```
+
+or whatever exact idempotency constraint the existing schema uses.
+
+Likewise, don't blindly duplicate indexes if `id` is already globally unique and the access pattern doesn't require the composite index.
+
+This belongs in the PLAN/TASKS implementation detail rather than making the SPEC overly prescriptive.
+
+---
+
+# 9. One thing I particularly like: `X-Tenant-Id` is explicitly neutralized
+
+This is exactly the right model:
+
+```text
+Client
+   │
+   │ X-Tenant-Id = "tenant-B"   ← untrusted
+   │
+   ▼
+HMAC verification
+   │
+   ▼
+Credential(key-A)
+   │
+   └── tenantId = tenant-A
+```
+
+Therefore:
+
+```text
+tenantId = tenant-A
+```
+
+and **not**:
+
+```text
+tenantId = X-Tenant-Id
+```
+
+Your invariant makes this explicit.
+
+I'd keep this exactly as-is.
+
+---
+
+# 10. Fraud integration is correctly appearing here
+
+This line is important:
+
+> Risk profiles and velocity counters partition keys by `tenantId` in DragonflyDB.
+
+That closes a potential hole from the earlier fraud specs.
+
+We don't want:
+
+```text
+tenant A
+user 123
+velocity key → user:123
+```
+
+because tenant B could also have:
+
+```text
+user 123
+```
+
+Instead:
+
+```text
+fraud:velocity:{tenantId}:{userId}
+```
+
+This should probably become an explicit invariant/requirement somewhere, because otherwise 000.9.3 protects the financial ledger but leaves the fraud subsystem potentially cross-tenant.
+
+I'd add:
+
+```text
+I-SEC-010 (Tenant-Scoped Risk State)
+All tenant-scoped fraud, velocity, risk and graph-hot-cache keys
+MUST include tenantId in their logical namespace.
+```
+
+This also gives us a clean bridge into your 000.5–000.8 fraud architecture.
+
+---
+
+# 11. I'd add one requirement for logging/observability
+
+You already say:
+
+```text
+tenant.id
+principal.id
+```
+
+but not secrets.
+
+I'd explicitly prohibit:
+
+```text
+HMAC secret
+X-Signature
+raw Authorization credentials
+CredentialMaterial
+```
+
+from logs/traces.
+
+And I'd be cautious with:
+
+```text
+operationId
+principalId
+tenantId
+```
+
+because they're potentially sensitive depending on deployment.
+
+Something like:
+
+```text
+REQ-SEC-011 [SHOULD]
+Security telemetry MAY include tenant.id, principal.id and operation.id,
+but MUST NOT include CredentialMaterial, HMAC signatures, or secrets.
+```
+
+---
+
+# 12. One structural change: separate authentication from authorization
+
+The current spec sometimes mixes these concepts.
+
+I'd make the mental model explicit:
+
+```text
+                 EDGE
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+ Authentication        Admission
+ HMAC                   timestamp
+ key validity           rate limit
+ tenant derivation      operationId
+        │                   │
+        └─────────┬─────────┘
+                  │
+                NATS
+                  │
+                  ▼
+                 CORE
+                  │
+             Authorization
+                  │
+       account tenant ownership
+                  │
+                  ▼
+              PostgreSQL
+```
+
+This is a very clean boundary.
+
+**Edge proves who/which tenant the caller is.**
+
+**Core proves what that tenant is allowed to mutate.**
+
+That distinction is one of the strongest aspects of this architecture.
+
+---
+
+# Proposed final invariant set
+
+I would end up with approximately:
+
+```text
+I-SEC-001  No implicit identity
+I-SEC-002  Cryptographic HMAC ingress
+I-SEC-003  Zero relational dependency at Edge
+I-SEC-004  Tenant identity derivation
+I-SEC-005  Core transactional tenant isolation
+I-SEC-006  Replay admission + financial idempotency
+I-SEC-007  Tenant fair-share rate limiting
+I-SEC-008  Fail-closed security gate
+I-SEC-009  Trusted Edge origin
+I-SEC-010  Tenant-scoped fraud/risk state
+```
+
+That's a very coherent security model.
+
+## Recommended 000.9.3 sequence
+
+I'd now lock the architecture in this order:
+
+```text
+000.9.1
+Edge/Core process separation
+        │
+        ▼
+000.9.2
+Physical/container topology
+        │
+        ├── OCI
+        ├── NATS TLS/auth plumbing
+        ├── secrets injection
+        ├── storage
+        └── lifecycle
+        │
+        ▼
+000.9.3
+HMAC + tenant security boundary
+        │
+        ├── canonical HMAC
+        ├── credential snapshot
+        ├── rate limiting
+        ├── tenant propagation
+        ├── Core ownership checks
+        └── tenant-scoped fraud
+        │
+        ▼
+000.10
+Financial payload encryption / cryptographic protection
+        │
+        ▼
+000.11
+DLQ / spillover / replay
+```
+
+So **I would keep the overall SPEC**, make the 8–10 changes above, and then generate `PLAN-000.9.3`.
+
+The two changes I consider **non-negotiable before implementation** are **SSE authentication** and **precise NATS publisher trust**. The rest are mostly hardening and contract precision.

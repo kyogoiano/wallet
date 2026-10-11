@@ -1,0 +1,438 @@
+Agora sim. Essa versão está **bem mais madura e coerente com a revisão da SPEC-000.9**. Eu diria que saiu de “precisa de revisão arquitetural” para **“Ready for Implementation”**, mas ainda faria alguns ajustes pequenos antes de congelar a History 40.
+
+Os quatro grandes problemas que tínhamos levantado foram efetivamente tratados:
+
+* ✅ 0-RTT financeiro
+* ✅ ACK/checkpoint durável do journal
+* ✅ SSE durable bootstrap
+* ✅ separação `Edge` → `CoreCommandConsumer`
+* ✅ idempotency conflict
+* ✅ ACK/NAK/DLQ semântica
+* ✅ fair scheduling
+* ✅ corrupção sem DLQ
+* ✅ segurança do journal
+* ✅ benchmark separado do broker path
+
+Há, porém, **6 pontos que eu ainda corrigiria**.
+
+---
+
+# 1. 🔴 TASK-1.3 ainda contradiz a recomendação sobre preallocation
+
+Está:
+
+> `64MB segment preallocation and zero-fill using FileChannel.force(true)`
+
+O problema não é `force(true)` em si. O problema é a expressão **“preallocation” + zero-fill**, que não garante necessariamente alocação física dos blocos em todos os filesystems.
+
+Eu mudaria para:
+
+```text
+- [x] TASK-1.3 [GREEN]: Implement `SegmentedFileJournal` with fixed-size
+64MB segments and an explicit deployment-compatible physical allocation
+strategy, avoiding sparse-file assumptions. Ensure segment metadata and
+allocated capacity are durably persisted before the segment becomes
+eligible for writes.
+```
+
+Se vocês decidirem deliberadamente usar zero-fill como estratégia de preallocation no filesystem alvo, tudo bem — mas isso deveria ser uma **decisão de implementação**, não uma propriedade universal garantida pelo `FileChannel`.
+
+---
+
+# 2. 🔴 TASK-2.2: “atomic FileChannel.force” deve sair
+
+Está:
+
+> establishing `FileChannel.force(false)` durability barrier
+
+Isso está bom.
+
+Mas a versão anterior tinha:
+
+> atomic `FileChannel.force(false)`
+
+Eu evitaria a palavra **atomic**.
+
+`force()` é uma **durability barrier**, não uma transação atômica.
+
+Melhor:
+
+```text
+FileChannel.force(false) as the durability barrier before completing
+accepted journal futures.
+```
+
+Isso é conceitualmente muito mais preciso.
+
+---
+
+# 3. 🟠 TASK-4.4 + 4.6 precisam definir melhor o que é “reclaim”
+
+Aqui está uma questão que eu considero importante.
+
+Você tem:
+
+```text
+TASK-4.4
+SpoolAckTracker
+
+TASK-4.6
+durable journal acknowledgement/checkpoint metadata
+```
+
+Ótimo.
+
+Mas ainda falta dizer **qual unidade é reclaimable**.
+
+Imagine:
+
+```text
+Segment 001
+
+record 1 → ACK
+record 2 → ACK
+record 3 → NOT ACK
+record 4 → ACK
+```
+
+Não podemos simplesmente:
+
+```text
+reclaim(record 1)
+reclaim(record 2)
+reclaim(record 4)
+```
+
+se a implementação é append-only segmentada.
+
+A solução simples é:
+
+> um segmento só pode ser reclaimed quando **todos os records necessários daquele segmento tiverem confirmação durável**.
+
+Então eu adicionaria à TASK-4.6:
+
+```text
+A segment MUST NOT be reclaimed until all records contained in the
+segment have durable JetStream publish confirmation.
+```
+
+Ou, se quiser permitir reclaim parcial no futuro, isso precisa entrar explicitamente no formato/protocolo.
+
+Para V1, eu escolheria **segment-level reclamation**. É muito mais simples.
+
+---
+
+# 4. 🟠 TASK-5.8 precisa virar teste de verdade
+
+Está:
+
+> `[RED/GREEN]: Verify multi-instance SSE delivery...`
+
+Isso é um pouco diferente do restante do documento.
+
+Você está seguindo:
+
+```text
+RED → GREEN → REFACTOR
+```
+
+Então eu faria:
+
+```text
+- [ ] TASK-5.8 [RED]: Write a multi-instance integration test asserting
+      that an operation status generated on one edge instance is
+      delivered to an SSE subscriber connected to another edge instance.
+
+- [ ] TASK-5.9 [GREEN]: Implement NATS-backed status event fan-out from
+      the shared operation-status topic to each edge-local
+      `OperationStatusHub`.
+```
+
+E então moveria a autorização para:
+
+```text
+TASK-5.10 RED
+TASK-5.11 GREEN
+```
+
+Isso mantém a sequência TDD limpa.
+
+---
+
+# 5. 🔴 A traceability está faltando algumas tasks novas
+
+A matriz está boa, mas não está **100% bidirecional**.
+
+Por exemplo:
+
+### `TASK-5.4 / 5.5`
+
+Está coberta por `REQ-EDG-020`. ✅
+
+### `TASK-5.6 / 5.7`
+
+Coberta por `REQ-EDG-019`, `I-EDGE-007`. ✅
+
+### `TASK-5.8`
+
+Está implicitamente relacionada a `REQ-EDG-019`, mas a matriz poderia deixar explícito:
+
+```text
+REQ-EDG-019, I-EDGE-007
+EdgeStreamClusterIT.shouldDeliverStatusAcrossEdgeNodes()
+TASK-5.8, TASK-5.9
+```
+
+### `TASK-5.9 / 5.10`
+
+**Não aparecem na matriz.**
+
+Adicionar:
+
+| Requirement / Invariant              | Priority | Planned Verification Test                                        | Task IDs                 |
+| ------------------------------------ | -------: | ---------------------------------------------------------------- | ------------------------ |
+| SSE authorization / tenant isolation | `[MUST]` | `EdgeStreamSecurityIT.shouldRejectUnauthorizedOperationStream()` | `TASK-5.10`, `TASK-5.11` |
+
+Dependendo de como você numerar após separar 5.8.
+
+---
+
+# 6. 🟠 TASK-7.3 está excelente, mas há uma sutileza com DLQ
+
+Você escreveu:
+
+> poison messages route to `commands.dlq.*` and commit `msg.ack()`
+
+Isso é válido **se o próprio consumer publicar a mensagem no DLQ antes do ACK**.
+
+A sequência deve ser:
+
+```text
+commands.wallet.*
+       │
+       ▼
+deserialize
+       │
+       X poison
+       │
+       ▼
+publish → commands.dlq.*
+       │
+       ▼
+PUBACK DLQ confirmed
+       │
+       ▼
+ACK original
+```
+
+Não:
+
+```text
+publish DLQ
+   ↓
+ACK original
+```
+
+sem verificar se o publish do DLQ foi confirmado.
+
+Eu colocaria explicitamente:
+
+```text
+shouldRoutePoisonMessageToDlq():
+    publish DLQ message
+    await durable JetStream publish acknowledgement
+    ack original message
+```
+
+Isso é especialmente importante porque você está construindo justamente uma arquitetura que evita perda de mensagens.
+
+---
+
+# 7. 🔴 Falta uma coisa importante no `operationId` fingerprint
+
+TASK-3.7 diz:
+
+> exact same payload = idempotent
+> different payload = 409
+
+Excelente.
+
+Mas eu recomendo definir que o fingerprint seja calculado sobre uma representação **canônica**.
+
+Caso contrário:
+
+```json
+{"amount":100,"account":"A"}
+```
+
+e
+
+```json
+{"account":"A","amount":100}
+```
+
+podem produzir hashes diferentes dependendo de como forem serializados.
+
+Eu colocaria:
+
+```text
+operationId + canonical command representation
+```
+
+e algo como:
+
+```text
+SHA-256(canonicalCommandPayload)
+```
+
+Não precisa necessariamente ser SHA-256 se vocês já possuem outro mecanismo no projeto, mas o conceito de **canonicalization** precisa estar no contrato.
+
+TASK-3.8 poderia virar:
+
+```text
+Implement deterministic operationId/payload fingerprint validation
+using canonical command serialization.
+```
+
+---
+
+# 8. 🟢 Um ponto que ficou muito bom: 202
+
+A arquitetura agora fica conceitualmente muito mais clara:
+
+```text
+POST
+ │
+ ▼
+Edge
+ │
+ ├── NATS durable PubAck
+ │
+ │       OR
+ │
+ └── local journal durable commit
+ │
+ ▼
+202 ACCEPTED
+ │
+ ▼
+client observes status
+ │
+ ├── PROCESSING
+ ├── COMPLETED
+ └── FAILED / BLOCKED
+```
+
+Isso é importante porque o:
+
+> `202 ACCEPTED`
+
+não significa:
+
+> “transferência aprovada”.
+
+Significa:
+
+> **“o comando foi aceito de forma durável para processamento.”**
+
+E depois:
+
+```text
+Fraud
+Ledger
+Business rules
+```
+
+determinam o resultado financeiro.
+
+Eu manteria exatamente essa semântica.
+
+---
+
+# 9. Um ponto que eu adicionaria à SPEC/TASKS: `Location`
+
+Não é obrigatório para a arquitetura, mas para uma API `202` eu consideraria muito útil:
+
+```http
+HTTP/1.1 202 Accepted
+Location: /operations/{operationId}
+```
+
+E:
+
+```text
+GET /operations/{operationId}
+```
+
+seria a fonte REST durável, enquanto:
+
+```text
+GET /operations/{operationId}/stream
+```
+
+seria o mecanismo realtime.
+
+Assim temos:
+
+```text
+                 ┌── GET /operations/{id}
+                 │       durable snapshot
+                 │
+operationId ─────┤
+                 │
+                 └── GET /operations/{id}/stream
+                         realtime projection
+```
+
+Isso resolve elegantemente o problema de SSE perdido.
+
+Se isso já estiver em outra SPEC, não precisa duplicar.
+
+---
+
+# 10. Minha classificação da History 40
+
+Eu classificaria assim:
+
+| Área                      | Estado                           |
+| ------------------------- | -------------------------------- |
+| Durable broker acceptance | 🟢                               |
+| Local durable spillover   | 🟢                               |
+| Journal framing           | 🟢                               |
+| CRC/recovery              | 🟢                               |
+| Group commit              | 🟢                               |
+| Capacity protection       | 🟢                               |
+| Rate limiting             | 🟢                               |
+| Bulkhead                  | 🟢                               |
+| Circuit breaker           | 🟢                               |
+| Crash recovery            | 🟢                               |
+| Durable ACK state         | 🟢 após 4.5/4.6                  |
+| Fair replay               | 🟢                               |
+| SSE                       | 🟢 arquitetura                   |
+| SSE durability            | 🟢                               |
+| SSE multi-node            | 🟡 — task ainda não implementada |
+| HTTP/3                    | 🟢                               |
+| 0-RTT financial safety    | 🟢 contrato                      |
+| Idempotency               | 🟢                               |
+| Core separation           | 🟢                               |
+| ACK/NAK/DLQ               | 🟢                               |
+| Security                  | 🟢 contrato para 000.10          |
+| Performance               | 🟡 benchmark pendente            |
+
+## Veredito
+
+**Eu aprovaria a History 40 para implementação**, com uma pequena revisão antes do commit:
+
+### MUST antes de congelar
+
+1. **TASK-1.3** → não prometer physical preallocation via `FileChannel` genericamente.
+2. **TASK-2.2** → trocar “atomic force” por “durability barrier”.
+3. **TASK-4.6** → definir claramente condição de segment reclaim.
+4. **TASK-5.8** → separar RED/GREEN.
+5. **Adicionar TASK de autorização SSE na traceability.**
+6. **TASK-7.3** → DLQ publish precisa de durable PubAck antes do ACK original.
+7. **TASK-3.8** → fingerprint baseado em canonical payload.
+
+Depois desses ajustes, eu consideraria o documento **arquiteturalmente fechado** e passaria para implementação sem introduzir mais tecnologia.
+
+E, principalmente, eu **não adicionaria RocksDB/TidesDB agora**. O desenho atual de `SegmentedFileJournal + durable ACK/checkpoint + Journal SPI` está muito mais coerente com o workload de spool sequencial. A eventual necessidade de keyed lookup pode ser medida no benchmark `TASK-6.5` e, só então, justificar uma implementação alternativa do SPI.

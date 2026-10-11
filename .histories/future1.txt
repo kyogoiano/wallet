@@ -1,0 +1,205 @@
+A spec ficou bem mais forte. Ela deixou de ser uma avaliação genérica de `pg_vexec` e passou a considerar as características concretas do Wallet Service: **vetores comportamentais de 16 dimensões, recuperação semântica de 768 dimensões, isolamento multi-tenant e execução em appliances virtualizados**.
+
+Eu manteria o status `[COULD]` e a proibição de implantação em produção. Antes de considerá-la pronta para orientar um benchmark, porém, ajustaria alguns pontos técnicos importantes. O principal é separar **o ganho do executor vetorizado, o ganho das instruções SIMD e o ganho de índices vetoriais**, pois são mecanismos diferentes e o experimento atual pode misturá-los.
+
+## 1. Correções técnicas prioritárias
+
+### 1.1. Um vetor de 16 dimensões não ocupa necessariamente uma cache line L1
+
+A afirmação:
+
+> At D=16, a float4 vector occupies exactly 64 bytes (one L1 cache line) and fits in a single AVX-512 register (512 bits).
+
+Está correta quanto ao tamanho dos **dados de 16 valores `float32`**: são 64 bytes, equivalentes a 512 bits. Mas há três ressalvas:
+
+- Uma cache line de 64 bytes é comum, não uma garantia universal do hardware.
+- O tamanho lógico de um vetor não equivale necessariamente ao tamanho de sua representação física completa no PostgreSQL. O armazenamento pode incluir cabeçalhos e outros metadados.
+- A representação caber em um registrador AVX-512 não garante que o executor utilize uma única instrução vetorizada para processá-la.
+
+Eu reformularia para não transformar uma propriedade dos dados em uma garantia sobre o comportamento da CPU ou do executor.
+
+### 1.2. `pg_vexec` não deve ser tratado como sinônimo de SIMD
+
+O objetivo é avaliar execução vetorizada por blocos, mas isso não demonstra, por si só, que todas as operações relevantes usarão AVX-512 ou que haverá ganho em qualquer consulta.
+
+A avaliação deve distinguir:
+
+1. **Executor:** processamento em lotes em vez de iteração tradicional por tupla.
+2. **Operações matemáticas:** implementação dos cálculos de distância e similaridade.
+3. **Hardware:** instruções realmente utilizadas pela implementação e pela VM.
+4. **Plano de execução:** possibilidade de o otimizador selecionar o caminho experimental.
+
+Por isso, eu evitaria exigir que todas as consultas experimentais apresentem execução SIMD ou rejeitar a solução simplesmente porque uma consulta específica não a utiliza. O requisito correto é comprovar o caminho executado nas consultas que se pretende acelerar.
+
+### 1.3. W2 precisa separar varredura exata de busca aproximada
+
+O workload atual compara:
+
+> Evaluate AVX-512 flat scan vs HNSW index.
+
+Essa comparação mistura duas variáveis: estratégia de busca e mecanismo de execução. Uma varredura exata e uma busca aproximada não oferecem necessariamente o mesmo compromisso entre latência e qualidade dos resultados.
+
+Eu separaria os testes:
+
+- **W2a — Exact scan:** comparação entre as configurações C0, C1 e C2 usando a mesma consulta exata.
+- **W2b — ANN/HNSW:** avaliação separada da busca aproximada, com parâmetros equivalentes e métricas de recall.
+
+Isso permite responder se `pg_vexec` acelera uma operação comparável, sem atribuir ao executor um ganho que veio da mudança de algoritmo.
+
+### 1.4. A equivalência numérica precisa de uma definição mais precisa
+
+A spec exige:
+
+> 100% parity on nearest-neighbor IDs and scores.
+
+É um critério adequado para resultados exatos, desde que se defina como comparar os resultados. Entretanto, diferenças na ordem de operações de ponto flutuante podem produzir pequenas diferenças numéricas, mesmo quando a implementação está correta.
+
+Recomendo separar:
+
+- **Busca exata:** validar os IDs e a ordenação dos resultados, além dos scores segundo uma tolerância numérica previamente definida.
+- **Busca aproximada:** avaliar `Recall@k`, IDs retornados e diferenças de ranking em relação à referência exata.
+- **Casos de empate:** estabelecer como tratar scores iguais ou praticamente iguais.
+
+Se o requisito de igualdade bit a bit for realmente necessário, ele deve ser declarado como tal e validado separadamente. Não é prudente pressupor que dois executores matematicamente equivalentes produzirão sempre os mesmos bits.
+
+## 2. Pontos importantes sobre Harvester e virtualização
+
+A seção de compatibilidade é particularmente boa porque reconhece que suporte à instrução no processador físico não garante que ela esteja disponível para o processo PostgreSQL dentro da VM.
+
+A documentação do KubeVirt confirma que `host-passthrough` expõe à VM o processador do host. Entretanto, a documentação do Harvester também alerta que essa configuração pode impedir a migração de VMs entre hosts com CPUs diferentes. Para clusters heterogêneos, um modelo de CPU explícito comum aos nós pode ser mais adequado. [KubeVirt.io](https://kubevirt.io/user-guide/compute/virtual_hardware/?utm_source=chatgpt.com)
+
+Eu ajustaria a Gate B em três aspectos.
+
+### 2.1. Não tornar `host-passthrough` um requisito universal
+
+Em vez de exigir uma configuração específica, eu exigiria comprovação das capacidades efetivamente expostas à VM.
+
+Isso permite avaliar dois perfis:
+
+- **Perfil de desempenho:** CPU com instruções avançadas expostas, incluindo AVX-512 quando disponível.
+- **Perfil de compatibilidade:** modelo de CPU comum aos nós que precisam suportar migração.
+
+A adoção não deve depender de AVX-512 se o benchmark demonstrar ganhos relevantes com AVX2, ou se o hardware de produção não disponibilizar AVX-512.
+
+### 2.2. Distinguir ausência de instrução de fallback do executor
+
+Estes são problemas diferentes:
+
+- **Ausência de instrução:** a VM não expõe o conjunto de instruções necessário.
+- **Fallback:** o código escolhe outro caminho de execução, por exemplo, uma implementação escalar.
+- **Falha de execução:** o processo tenta executar uma instrução indisponível e termina com `SIGILL`.
+
+O benchmark precisa identificar qual caminho foi efetivamente executado. A ausência de `SIGILL`, isoladamente, não prova que houve execução vetorizada.
+
+### 2.3. Validar migração e heterogeneidade quando aplicáveis
+
+Se os appliances de destino precisam suportar migração de VMs, o teste deve contemplar a migração entre os nós elegíveis e verificar que as capacidades de CPU permanecem compatíveis.
+
+Não é necessário impor isso a todo ambiente de pesquisa. Basta definir a matriz de compatibilidade de acordo com os perfis reais de implantação.
+
+---
+
+## 3. W3 precisa identificar o armazenamento vetorial que será testado
+
+A spec identifica corretamente o Tier B como RAG de 768 dimensões, mas o baseline enumera apenas `vector(16)` em `fraud_entity_features` e `fraud_archetype_centroids`.
+
+Isso deixa uma lacuna importante: **onde serão armazenados os vetores de 768 dimensões utilizados no benchmark?**
+
+Não afirmaria que existe uma tabela ou índice específico sem verificar o repositório. Em vez disso, registraria um pré-requisito:
+
+- Identificar a tabela ou projeção analítica que armazenará os embeddings de 768 dimensões.
+- Definir o esquema relacional, a estratégia de indexação e os predicados multi-tenant.
+- Se esse armazenamento ainda não existir, criar um dataset exclusivamente experimental, sem alterar o esquema de produção.
+- Definir como os embeddings serão gerados e versionados, mantendo modelo, dimensão e parâmetros equivalentes entre C0, C1 e C2.
+
+Também separaria o benchmark de recuperação semântica do processo de ingestão. O custo de gerar embeddings não deve contaminar a medição do executor SQL.
+
+### Uma observação sobre a fronteira de segurança
+
+O filtro `WHERE tenant_id = ?` é necessário, mas não demonstra, sozinho, a preservação do isolamento multi-tenant.
+
+A avaliação deve confirmar que o mecanismo de execução experimental não altera a semântica da consulta nem permite que filtros sejam omitidos ou aplicados incorretamente. O conjunto de testes precisa incluir consultas sem resultados, tenants com volumes muito diferentes e tentativas de acesso cruzado.
+
+O requisito não deve ser apenas que a consulta seja rápida: ela deve continuar respeitando a mesma fronteira de segurança da configuração de referência.
+
+---
+
+## 4. A metodologia precisa controlar melhor as variáveis
+
+A comparação C0/C1/C2 é uma das melhores decisões da spec. Ela permite separar o efeito da atualização do PostgreSQL do efeito da extensão experimental.
+
+Eu manteria exatamente essa estrutura, acrescentando os controles abaixo.
+
+| Dimensão | Ajuste recomendado |
+|---|---|
+| Hardware | Mesma classe de CPU, memória, armazenamento e configuração de virtualização. |
+| Dados | Mesmo dataset lógico, distribuição de dimensões e cardinalidade em todas as configurações. |
+| Cache | Executar cenários com cache aquecido e, quando relevante, cenários frios controlados. |
+| Concorrência | Registrar sessões e consultas simultâneas no banco, não apenas o número de virtual threads do cliente. |
+| Repetibilidade | Realizar execuções repetidas e registrar variabilidade e intervalos de confiança. |
+| Planos | Guardar planos de execução e confirmar qual mecanismo foi realmente utilizado. |
+| Índices | Comparar configurações equivalentes e separar varreduras exatas de busca aproximada. |
+| Correção | Comparar IDs, scores, ordenação, recall e comportamento dos filtros multi-tenant. |
+
+O ponto sobre virtual threads é importante para o ambiente Java: 64 virtual threads no cliente não significam necessariamente 64 consultas simultâneas no PostgreSQL. Pool de conexões, concorrência efetiva e limites do servidor precisam fazer parte da medição.
+
+### Sobre W4: a curva de seletividade
+
+Os valores de 0,1%, 1%, 10% e 100% são um bom começo, mas a spec deveria definir o significado de seletividade.
+
+Sugestão: documentar a porcentagem de linhas que satisfazem o predicado de tenant e manter a distribuição dos dados controlada.
+
+O cenário de 100% deve ser tratado como caso de controle sem redução efetiva da cardinalidade pelo filtro. Também vale variar o tamanho total do dataset e a distribuição de linhas por tenant, porque dois bancos com a mesma seletividade podem apresentar comportamentos diferentes.
+
+---
+
+## 5. Os limiares de decisão precisam de uma regra mais robusta
+
+O requisito de redução de latência de pelo menos 30% é objetivo e útil. Contudo, a formulação atual permite adotar a solução com base em um único workload favorável.
+
+Eu manteria o limiar, mas definiria que ele se aplica a um workload representativo previamente escolhido como prioritário. O resultado precisa ser repetível e demonstrar que o ganho não vem de uma mudança de algoritmo, de um plano diferente ou de condições de cache desiguais.
+
+Também acrescentaria:
+
+- Ausência de regressões de correção e de isolamento.
+- Ausência de instabilidade e de falhas de execução.
+- Ausência de regressões operacionais que inviabilizem o uso da extensão.
+- Registro do consumo adicional de CPU e memória, não apenas da latência.
+- Critérios definidos antes da execução dos testes, evitando ajustar a regra de adoção para favorecer os resultados observados.
+
+O limiar de regressão de 10% para W1 faz sentido como hipótese inicial, mas deve ser avaliado com execuções repetidas. Em tabelas de até 20 registros, diferenças absolutas muito pequenas podem produzir variações percentuais elevadas.
+
+Eu também distinguiria **rejeitar a extensão** de **rejeitar sua utilização para determinado workload**. Um resultado desfavorável em W1 pode indicar que o custo de preparação dos lotes não compensa em tabelas pequenas, sem invalidar a extensão para W3.
+
+---
+
+## 6. Uma ressalva sobre o estado do PostgreSQL 19
+
+A spec está datada de 11 de outubro de 2026, portanto vale registrar o estado das dependências como parte da evidência de entrada.
+
+Na consulta atual, o site oficial do PostgreSQL ainda informa o lançamento do **PostgreSQL 19 Beta 4, em 24 de setembro de 2026**. A página oficial esclarece que a versão beta serve para testar funcionalidades e que detalhes ainda podem mudar antes da disponibilidade geral. [PostgreSQL](https://www.postgresql.org/?menu_code=246\&utm_source=chatgpt.com)
+
+O catálogo consultado para `vexec` indica PostgreSQL 19 como versão suportada e classifica o projeto como *Preview*. Ele também indica que a extensão precisa ser pré-carregada. Isso reforça a necessidade de avaliar o impacto operacional da configuração, e não apenas o desempenho das consultas. [PG Center](https://pg.center/e/vexec/?utm_source=chatgpt.com)
+
+Portanto, a Gate A está correta em exigir maturidade antes de qualquer decisão de adoção. Eu acrescentaria que a compatibilidade precisa ser comprovada para as **versões exatas** de PostgreSQL, `pgvector`, `pg_vexec` e `vexec_pgvector` utilizadas no teste, incluindo o processo de atualização e recuperação.
+
+---
+
+## 7. Minha recomendação para a spec
+
+Eu não reestruturaria o documento inteiro. A organização está boa e os invariantes são úteis. Faria uma revisão incremental com estas prioridades:
+
+| Prioridade | Alteração |
+|---|---|
+| **Must** | Corrigir a afirmação sobre cache line e esclarecer que dimensão e tamanho lógico não garantem execução SIMD. |
+| **Must** | Separar varredura exata de HNSW/ANN e definir como a correção dos resultados será avaliada. |
+| **Must** | Identificar a origem do dataset W3 e definir como os filtros multi-tenant serão validados. |
+| **Must** | Definir o que comprova execução vetorizada e como detectar fallback, sem depender apenas da ausência de `SIGILL`. |
+| **Must** | Especificar os controles de hardware, cache, concorrência e repetibilidade do benchmark. |
+| **Should** | Comparar perfis de CPU para desempenho e compatibilidade com migração em Harvester. |
+| **Should** | Registrar consumo de recursos e variabilidade estatística, além de latência e QPS. |
+| **Could** | Acrescentar uma análise de custo operacional e manutenção da extensão, incluindo pré-carregamento e atualizações. |
+
+**Veredito:** a spec está conceitualmente madura para uma proposta de avaliação futura, mas eu ainda não a consideraria pronta para execução do benchmark sem essas correções. O risco principal não é deixar de obter os 30% de ganho; é obter um resultado que pareça demonstrar esse ganho, mas que não consiga separar o efeito do executor, do hardware, do plano de consulta e do algoritmo de busca.
+
+Com esses ajustes, o ADR final poderá tomar uma decisão tecnicamente defensável entre adotar a extensão para workloads específicos, adiar a avaliação ou rejeitá-la.

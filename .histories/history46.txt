@@ -1,0 +1,671 @@
+Yes. I reviewed the draft, and I think **the direction is very good**. It captures the key architectural transition we just discussed: 000.9 was about a resilient Edge; 000.9.1 now makes **Edge/Core independent runtime units**.
+
+The strongest parts are:
+
+* independent `EdgeApplication` / `CoreApplication`;
+* NATS as the IPC boundary;
+* Edge with zero DB dependency;
+* explicit contract boundary;
+* independent public/internal ports;
+* multi-process as production default;
+* optional monolith mode for development;
+* no direct synchronous Edge → Core RPC;
+* explicit SSE fanout across Edge instances.
+
+However, **given the discussion we just had about multiple pods, on-prem, RKE2/Rancher/vCluster/GKE/Cloud Foundry**, I think this draft is currently about **70–80% of the architecture we actually want**.
+
+There are a few things I'd change before calling it ratified.
+
+---
+
+# 1. The biggest missing pillar: Runtime portability
+
+Currently the spec says:
+
+> independently executable OS runtimes
+
+That's correct, but it stops one layer too early.
+
+We want:
+
+```text
+Java application
+      │
+      ▼
+OCI container
+      │
+      ├── Docker/Podman
+      ├── Kubernetes
+      ├── RKE2
+      ├── GKE
+      ├── Rancher
+      ├── vCluster
+      └── potentially Cloud Foundry
+```
+
+The current spec doesn't establish that.
+
+I'd add a new invariant:
+
+### `I-RUNTIME-002 — Portable Runtime Contract`
+
+> Edge and Core MUST be distributable as OCI-compatible container images and MUST NOT depend on a specific container runtime, Kubernetes distribution, cloud provider, or orchestration control plane.
+
+This becomes extremely important later.
+
+---
+
+# 2. I would NOT put vCluster into this spec
+
+I agree with our previous conclusion.
+
+Don't make:
+
+```text
+RKE2 + Rancher + vCluster
+```
+
+an architectural dependency.
+
+Instead:
+
+```text
+                 Wallet
+                   │
+             OCI containers
+                   │
+        ┌──────────┼──────────┐
+        ▼          ▼          ▼
+     Docker       K8s        CF
+                    │
+             ┌──────┴──────┐
+             ▼             ▼
+            RKE2          GKE
+             │
+          Rancher
+             │
+          vCluster
+```
+
+The application shouldn't know any of this exists.
+
+So I'd put vCluster/Rancher/GKE into the **future deployment specification**, probably `SPEC-000.9.2`.
+
+---
+
+# 3. There's a subtle problem with `I-PROCESS-001`
+
+You currently have:
+
+> A fatal crash, deadlock, or OOM in Core MUST NOT terminate or degrade Edge ingress acceptance.
+
+The **terminate** part is excellent.
+
+The **"or degrade"** part is too strong.
+
+Imagine:
+
+```text
+Core crashes
++
+NATS unavailable
++
+Edge journal reaches 95%
+```
+
+Edge absolutely *will* degrade/reject traffic.
+
+That's already an explicit invariant from 000.9.
+
+So I'd change this to:
+
+> A fatal crash, deadlock, or OOM in Core MUST NOT directly terminate Edge. Edge MAY degrade only according to its independently defined admission, journal, and capacity policies.
+
+This avoids creating an impossible guarantee.
+
+---
+
+# 4. The biggest conceptual issue: `I-RUNTIME-001`
+
+You currently define:
+
+```text
+Behavior(Edge_multi-process) ≡ Behavior(Edge_monolith)
+```
+
+This is a good intention, but **strict behavioral equivalence is impossible** once transport changes.
+
+For example:
+
+```text
+multi-process:
+
+Edge
+ ↓
+NATS
+ ↓
+Core
+
+
+monolith:
+
+Edge
+ ↓
+InProcessBridge
+ ↓
+Core
+```
+
+You no longer have:
+
+* network failure;
+* NATS acknowledgement;
+* serialization/deserialization;
+* NATS headers;
+* broker backpressure;
+* distributed delivery;
+* consumer redelivery.
+
+So the business result may be equivalent, but the **failure semantics aren't**.
+
+I'd redefine it:
+
+> Domain command semantics MUST remain equivalent between profiles; transport, timing, failure and observability semantics MAY differ.
+
+That's much more defensible.
+
+---
+
+# 5. The monolith mode deserves a warning
+
+This requirement:
+
+> `wallet.runtime.mode` (`multi-process` default, `monolith` for single-JVM testing)
+
+is useful.
+
+But I would make sure it **cannot accidentally become production architecture**.
+
+I'd define:
+
+```text
+multi-process = production-supported
+monolith = development/test profile
+```
+
+And perhaps:
+
+```text
+wallet.runtime.mode=monolith
+```
+
+should emit a startup warning.
+
+Otherwise six months from now someone might deploy the monolithic profile because "it works."
+
+---
+
+# 6. `REQ-PRC-006` is very good, but there's an architectural opportunity
+
+You currently say:
+
+> Edge dispatches commands to Core strictly over NATS JetStream.
+
+Excellent.
+
+But we should explicitly establish:
+
+```text
+Edge
+  │
+  │ EdgeCommandPublisher
+  ▼
+NATS
+  │
+  │ CoreCommandConsumer
+  ▼
+Core
+```
+
+and **not**:
+
+```text
+Edge
+ │
+ ├── NATS
+ ├── CoreCommandGateway
+ ├── TransferUseCase
+ └── ...
+```
+
+Your `REQ-PRC-004` already moves in this direction, but I'd make the **dependency direction** explicit.
+
+Something like:
+
+```text
+Edge → Contracts ← Core
+Edge → NATS adapter
+Core → NATS adapter
+```
+
+Never:
+
+```text
+Edge → Core implementation
+```
+
+This is especially important once we start producing multiple containers.
+
+---
+
+# 7. I'd add explicit horizontal-scaling invariants
+
+This is the biggest omission considering your latest question.
+
+We need to say that multiple instances are first-class.
+
+For example:
+
+### `I-SCALE-001 — Horizontal Instance Independence`
+
+> Edge and Core MUST support multiple concurrent instances without requiring instance affinity or shared in-memory state for financial correctness.
+
+Then:
+
+```text
+Edge × N
+Core × M
+```
+
+must work.
+
+And:
+
+```text
+operationId
+```
+
+remains the correlation/idempotency identity.
+
+This is essential.
+
+---
+
+# 8. And another one for Core
+
+### `I-CONSUME-001 — Distributed Command Consumption`
+
+> Core instances MUST safely consume commands concurrently from JetStream without duplicate financial effects.
+
+This ties directly into your existing:
+
+```text
+I-IDEMPOTENCY-001
+```
+
+and:
+
+```text
+Nats-Msg-Id
+```
+
+architecture.
+
+So:
+
+```text
+        NATS
+          │
+   ┌──────┼──────┐
+   ▼      ▼      ▼
+ Core-1 Core-2 Core-3
+```
+
+is explicitly supported.
+
+---
+
+# 9. We should introduce graceful shutdown
+
+Once we have pods/containers, this becomes mandatory.
+
+Imagine Kubernetes says:
+
+```text
+SIGTERM
+```
+
+to Core.
+
+We don't want:
+
+```text
+Core
+ ↓
+SIGTERM
+ ↓
+dies immediately
+ ↓
+message being processed
+```
+
+We want:
+
+```text
+SIGTERM
+   │
+   ▼
+stop accepting new work
+   │
+   ▼
+finish/invalidate current processing
+   │
+   ▼
+ACK only completed messages
+   │
+   ▼
+drain
+   │
+   ▼
+shutdown
+```
+
+So I'd add:
+
+### `REQ-PRC-013 — Graceful Runtime Termination`
+
+Both Edge and Core MUST support graceful shutdown within a configurable termination window.
+
+And move the current:
+
+```text
+REQ-PRC-013 WON'T Direct synchronous HTTP/REST
+```
+
+to another number.
+
+---
+
+# 10. Kubernetes readiness/liveness semantics should appear—but not Kubernetes APIs
+
+This is subtle.
+
+We don't want Java code saying:
+
+```java
+if (runningOnKubernetes()) ...
+```
+
+But we absolutely want standardized health semantics:
+
+```text
+/startup
+/readiness
+/liveness
+```
+
+or Spring Boot Actuator equivalents.
+
+For Edge:
+
+```text
+STARTING
+ ↓
+journal recovery
+ ↓
+NATS connection
+ ↓
+READY
+```
+
+For Core:
+
+```text
+STARTING
+ ↓
+DB migration/schema compatibility
+ ↓
+NATS consumer ready
+ ↓
+READY
+```
+
+This allows Kubernetes, Cloud Foundry or another orchestrator to manage the application without application-level coupling.
+
+---
+
+# 11. Resource isolation should be explicit
+
+This was one of the reasons you brought up multiple pods in the first place.
+
+We should establish:
+
+```text
+Edge resource profile ≠ Core resource profile
+```
+
+For example:
+
+```text
+EDGE
+CPU: high network concurrency
+RAM: relatively low
+DB: 0
+journal: local storage
+
+CORE
+CPU: higher
+RAM: higher
+DB: PostgreSQL
+NATS consumers
+```
+
+So:
+
+### `I-RESOURCE-001`
+
+> Edge and Core MUST expose independently configurable CPU, memory, concurrency and connection-pool limits and MUST NOT require shared process-wide resource pools.
+
+This is what allows:
+
+```text
+Edge × 20
+Core × 5
+```
+
+without the architecture fighting us.
+
+---
+
+# 12. One more thing: local journal + pods
+
+This is probably the most important operational issue that isn't yet represented.
+
+In 000.9 we have:
+
+```text
+Edge
+ └── segmented journal
+```
+
+Now:
+
+```text
+Edge-1
+ └── journal-1
+
+Edge-2
+ └── journal-2
+
+Edge-3
+ └── journal-3
+```
+
+That's perfectly valid.
+
+But we MUST explicitly say:
+
+> **The journal is node-local and must never be treated as a shared distributed queue.**
+
+Each Edge instance owns its own journal.
+
+Recovery happens locally:
+
+```text
+Edge-2 restarted
+      │
+      ▼
+journal-2 recovery
+      │
+      ▼
+NATS
+```
+
+Not:
+
+```text
+Edge-1 → Edge-2 journal
+```
+
+This will become extremely important when we write the Kubernetes deployment spec.
+
+---
+
+# 13. I would also introduce topology-aware deployment later
+
+Not necessarily in 000.9.1, but the architecture should leave room for:
+
+```text
+             zone-a
+       ┌───────────────┐
+       │ Edge-1 Core-1 │
+       └───────────────┘
+
+             zone-b
+       ┌───────────────┐
+       │ Edge-2 Core-2 │
+       └───────────────┘
+
+             zone-c
+       ┌───────────────┐
+       │ Edge-3 Core-3 │
+       └───────────────┘
+```
+
+Then NATS and PostgreSQL have their own HA topology.
+
+That belongs in 000.9.2, but 000.9.1 should not accidentally prevent it.
+
+---
+
+# 14. I would restructure the pillars slightly
+
+Your current structure:
+
+```text
+A Process
+B Contract
+C IPC
+D Port/Dual Profile
+Operational Governance
+```
+
+is good.
+
+I'd evolve it to:
+
+```text
+A — Process & Failure Isolation
+B — Contract & Dependency Isolation
+C — Durable IPC
+D — Horizontal Scaling
+E — Runtime Profiles & Container Portability
+F — Lifecycle & Resource Governance
+```
+
+That better reflects what we're actually trying to accomplish.
+
+---
+
+# 15. The resulting architecture becomes very clean
+
+I'd want the spec to ultimately establish this:
+
+```text
+                     WALLET PLATFORM
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+        EDGE RUNTIME                CORE RUNTIME
+             │                           │
+       EdgeApplication              CoreApplication
+             │                           │
+        OCI container                OCI container
+             │                           │
+       ┌─────┴─────┐               ┌─────┴─────┐
+       │           │               │           │
+     Edge-1      Edge-2          Core-1      Core-2
+       │           │               │           │
+       └─────┬─────┘               └─────┬─────┘
+             │                           │
+             └────────── NATS ───────────┘
+                           │
+                  ┌────────┴────────┐
+                  │                 │
+             PostgreSQL          Dragonfly
+```
+
+And then the deployment layer becomes:
+
+```text
+                   OCI
+                    │
+       ┌────────────┼─────────────┐
+       │            │             │
+   Docker/Podman  Kubernetes   Cloud Foundry
+                    │
+          ┌─────────┼─────────┐
+          │         │         │
+         GKE       RKE2     OpenShift
+                    │
+                 Rancher
+                    │
+                 vCluster
+```
+
+**None of that leaks upward into Edge/Core.**
+
+---
+
+## My verdict on this first draft
+
+**Architecture: 9/10.**
+
+The fundamental decision is right.
+
+The draft already correctly captures the most important transition: **Spring modularity alone wasn't sufficient; Edge/Core now become separate OS runtimes with NATS between them.**
+
+Before implementation, I'd make **one more revision** to explicitly establish:
+
+1. **horizontal scaling (`Edge × N`, `Core × M`)**;
+2. **OCI/container portability**;
+3. **resource isolation**;
+4. **graceful shutdown**;
+5. **health/readiness semantics independent of Kubernetes**;
+6. **node-local journal semantics**;
+7. soften the strict multi-process/monolith behavioral-equivalence invariant;
+8. clarify that Core crash cannot *directly* kill Edge, but Edge can still degrade under its own capacity policies.
+
+Then I'd keep **RKE2/Rancher/vCluster/GKE/Cloud Foundry out of 000.9.1** and make `SPEC-000.9.2` the deployment/platform specification.
+
+That gives us a very clean SDD chain:
+
+**000.9 → resilient Edge**
+
+→ **000.9.1 → independently executable Edge/Core**
+
+→ **000.9.2 → portable container/Kubernetes/appliance runtime**
+
+→ later **deployment profiles / HA / autoscaling / DR**
+
+That separation is, in my opinion, the right level of abstraction for the Wallet architecture you're building.

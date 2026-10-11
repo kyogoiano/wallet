@@ -1,0 +1,623 @@
+Sim — essa revisão da **SPEC-000.5** ficou bem mais madura. E, olhando agora com o restante da sequência `000.5 → 000.6 → 000.7 → 000.8`, eu faria **alguns ajustes antes de considerá-la realmente “Ratified”**.
+
+A arquitetura geral eu manteria:
+
+> **NATS = backbone assíncrono externo**
+> **PostgreSQL = source of truth do grafo**
+> **DragonflyDB = materialização hot/read-optimized**
+> **Fraud Gate = somente O(1)**
+
+E isso casa muito bem com a decisão que tomamos sobre Spring Modulith: **não substituir NATS**. Modulith fica para eventos internos entre módulos; NATS continua sendo o boundary assíncrono durável do Fraud Intelligence.
+
+### O ponto mais importante: há um problema temporal na modelagem atual
+
+Hoje você tem:
+
+```sql
+fraud_relationships
+(
+    source_id,
+    target_id,
+    relationship_type,
+    first_seen_at,
+    last_seen_at,
+    tx_count,
+    total_amount
+)
+```
+
+e:
+
+> `G≤t` filtering on `last_seen_at <= :queryTimestamp`
+
+Isso **não é suficiente para garantir `I-FRAUD-003`**.
+
+Imagine:
+
+```text
+10:00  A → B
+10:05  B → C
+11:00  A → B
+```
+
+Depois da segunda ocorrência, a relação `A → B` terá:
+
+```text
+first_seen_at = 10:00
+last_seen_at  = 11:00
+```
+
+Se eu perguntar:
+
+```text
+"qual era o grafo às 10:30?"
+```
+
+e fizer:
+
+```sql
+WHERE last_seen_at <= '10:30'
+```
+
+vou eliminar `A → B`, apesar de ela **já existir às 10:30**.
+
+Então a regra:
+
+```text
+last_seen_at <= queryTimestamp
+```
+
+não representa corretamente um grafo temporal.
+
+---
+
+# Eu mudaria a modelagem para duas camadas
+
+Isso é particularmente importante porque o **000.6 depende diretamente do 000.5**.
+
+### Current projection
+
+Mantemos:
+
+```text
+fraud_relationships
+```
+
+como estado agregado atual:
+
+```text
+A → B
+    first_seen
+    last_seen
+    tx_count
+    total_amount
+```
+
+Excelente para:
+
+* consultas atuais;
+* fan-in/fan-out;
+* shared entities;
+* materialização;
+* queries rápidas.
+
+Mas acrescentaria uma tabela temporal/eventual:
+
+```text
+fraud_relationship_events
+```
+
+por exemplo:
+
+```sql
+CREATE TABLE fraud_relationship_events (
+    id UUID PRIMARY KEY,
+    source_id UUID NOT NULL,
+    target_id UUID NOT NULL,
+    relationship_type VARCHAR(32) NOT NULL,
+    occurred_at TIMESTAMP WITH TIME ZONE NOT NULL,
+    operation_id UUID,
+    amount NUMERIC(19,4),
+    metadata JSONB
+);
+
+CREATE INDEX idx_fraud_rel_events_source_time
+    ON fraud_relationship_events(source_id, occurred_at);
+
+CREATE INDEX idx_fraud_rel_events_target_time
+    ON fraud_relationship_events(target_id, occurred_at);
+
+CREATE INDEX idx_fraud_rel_events_type_time
+    ON fraud_relationship_events(relationship_type, occurred_at);
+```
+
+Aí temos:
+
+```text
+                  ┌────────────────────┐
+                  │ fraud_relationships│
+                  │ current projection │
+                  └─────────▲──────────┘
+                            │
+                            │ aggregate
+                            │
+                  ┌─────────┴──────────┐
+                  │ relationship_events│
+                  │ temporal evidence  │
+                  └────────────────────┘
+```
+
+Isso é **muito mais poderoso** para o que vem depois.
+
+---
+
+# Isso resolve também o problema dos ciclos
+
+Seu requisito:
+
+> A → B → C → A dentro de 60 minutos
+
+não deveria depender apenas de `fraud_relationships`.
+
+Porque a tabela agregada poderia dizer:
+
+```text
+A → B last_seen = 10:00
+B → C last_seen = 10:02
+C → A last_seen = 18:00
+```
+
+Mas talvez tenha acontecido:
+
+```text
+A → B 09:59
+B → C 10:01
+C → A 10:03
+```
+
+O agregado atual não preserva essa sequência.
+
+Para detectar:
+
+```text
+A → B → C → A
+```
+
+precisamos consultar os eventos temporais.
+
+E isso fica extremamente interessante para o futuro:
+
+```text
+000.5
+   │
+   ├── relational graph
+   ├── temporal evidence
+   └── graph patterns
+          │
+          ▼
+000.6
+   │
+   └── risk propagation + temporal decay
+          │
+          ▼
+000.7
+   │
+   └── behavioral vectors / pgvector
+          │
+          ▼
+000.8
+   │
+   └── ensemble / micro-ML
+```
+
+Essa separação ficou excelente.
+
+---
+
+# Segundo ponto: `graph_risk >= 0.80` precisa de uma função
+
+Aqui:
+
+> Then it must return the cycle path `[A, B, C, A]` and flag `graph_risk >= 0.80`.
+
+Eu evitaria colocar isso como um valor "mágico".
+
+Por exemplo:
+
+```text
+cycle detected = 0.80
+```
+
+não explica por que.
+
+Melhor criar um **Graph Risk Scoring Model**, ainda determinístico.
+
+Algo como:
+
+```text
+graphRisk =
+    cycleScore
+  + fanInScore
+  + fanOutScore
+  + sharedIdentityScore
+  + velocityTopologyScore
+```
+
+seguido de:
+
+```text
+graphRisk = min(1.0, weightedScore)
+```
+
+Ou, melhor ainda, inicialmente manter os sinais separados:
+
+```java
+record GraphRiskSignals(
+    double cycleRisk,
+    double fanInRisk,
+    double fanOutRisk,
+    double sharedIdentityRisk,
+    double muleHubRisk
+) {}
+```
+
+e depois:
+
+```java
+GraphRiskScore calculate(GraphRiskSignals signals)
+```
+
+Isso vai facilitar **absurdamente** o `000.8`, porque o micro-ML poderá aprender em cima desses features sem destruir o modelo determinístico.
+
+---
+
+# Terceiro ponto: eu mudaria o conceito de `final_risk`
+
+Você tem:
+
+```text
+direct_risk
+graph_risk
+behavioral_risk
+propagated_risk
+final_risk
+```
+
+Isso está correto conceitualmente.
+
+Mas eu colocaria uma regra explícita:
+
+```text
+final_risk NÃO é responsabilidade do SPEC-000.5
+```
+
+Porque:
+
+```text
+000.5 → graph_risk
+000.6 → propagated_risk
+000.7 → behavioral_risk
+000.8 → final_risk
+```
+
+Ou seja:
+
+```text
+             ┌──────────────┐
+             │ direct_risk  │
+             └──────┬───────┘
+                    │
+       ┌────────────┼────────────┐
+       ▼            ▼            ▼
+   graph_risk  propagated_risk behavioral_risk
+       │            │            │
+       └────────────┼────────────┘
+                    ▼
+              SPEC-000.8
+                    │
+                    ▼
+               final_risk
+```
+
+Isso cria uma arquitetura muito limpa.
+
+O `000.5` **não deve tentar ser o Fraud Engine definitivo**.
+
+Ele constrói inteligência estrutural.
+
+---
+
+# Quarto ponto: NATS + Modulith
+
+Aqui eu manteria exatamente a arquitetura que discutimos.
+
+Seu:
+
+```java
+FraudGraphEventListener
+```
+
+é um **NATS consumer**, não:
+
+```java
+@ApplicationModuleListener
+```
+
+porque o evento vem de fora do processo/módulo.
+
+Então:
+
+```text
+Ledger
+   │
+   ▼
+Transactional Outbox
+   │
+   ▼
+NATS JetStream
+   │
+   ▼
+FraudGraphEventListener
+   │
+   ▼
+GraphProjector
+   │
+   ├── PostgreSQL
+   │
+   └── Graph Pattern Engine
+           │
+           ▼
+       Dragonfly
+```
+
+Já dentro do módulo fraud:
+
+```text
+GraphProjector
+       │
+       ▼
+ApplicationEventPublisher
+       │
+       ▼
+@ApplicationModuleListener
+       │
+       ├── RiskMaterializer
+       ├── Audit
+       └── Metrics
+```
+
+**Essa combinação NATS + Modulith é melhor do que escolher um ou outro.**
+
+NATS resolve:
+
+> process boundary / durability / replay / independent consumers.
+
+Modulith resolve:
+
+> internal module boundary / decoupling / transaction-aware local events.
+
+---
+
+# Quinto ponto: o Dragonfly deve ser explicitamente "derived state"
+
+Eu adicionaria um invariant:
+
+### `I-FRAUD-007 — Derived Hot State`
+
+> Dragonfly graph-risk values MUST be considered derived/cache state and MUST be reconstructible exclusively from PostgreSQL graph projections and/or durable events.
+
+Isso é importante.
+
+Nunca queremos:
+
+```text
+PostgreSQL ──┐
+             ├── source of truth
+Dragonfly ───┘
+```
+
+Queremos:
+
+```text
+             Source of Truth
+                  │
+                  ▼
+             PostgreSQL
+                  │
+                  ▼
+             Materializer
+                  │
+                  ▼
+             Dragonfly
+             derived state
+```
+
+Se Dragonfly morrer:
+
+```text
+Dragonfly = empty
+```
+
+não perdemos inteligência.
+
+Reconstruímos.
+
+Isso combina perfeitamente com a decisão de usar Dragonfly no `000.0.1`.
+
+---
+
+# Sexto ponto: eu adicionaria replay/rebuild
+
+Essa arquitetura praticamente pede:
+
+```text
+FraudGraphRebuildJob
+```
+
+Porque amanhã você pode mudar:
+
+```text
+graph_risk v1
+```
+
+para:
+
+```text
+graph_risk v2
+```
+
+e precisar recalcular.
+
+Então adicionaria ao escopo:
+
+### `REQ-FRAUD-007 — Graph Projection Rebuildability`
+
+> The relational graph projection MUST be rebuildable from durable domain events without requiring access to DragonflyDB state.
+
+Isso é uma característica arquitetural muito valiosa.
+
+---
+
+# E tem outra consequência muito boa
+
+Com:
+
+```text
+fraud_relationship_events
+```
+
+você não precisa necessariamente partir imediatamente para Neo4j.
+
+Podemos fazer:
+
+```text
+                PostgreSQL
+        ┌─────────────────────────┐
+        │                         │
+        │ fraud_entities          │
+        │ fraud_relationships     │
+        │ fraud_relationship_events│
+        │                         │
+        │ Recursive CTE           │
+        │ Temporal queries        │
+        │ pgvector                │
+        └─────────────────────────┘
+                  │
+                  ▼
+              Dragonfly
+```
+
+E somente se aparecer um problema real de:
+
+* cardinalidade;
+* traversal;
+* latência;
+* memória;
+* complexidade das queries;
+
+aí podemos introduzir:
+
+```text
+Neo4j / Memgraph / outro graph engine
+```
+
+atrás de:
+
+```java
+FraudGraphQuery
+FraudRelationshipStore
+```
+
+que você já definiu.
+
+**Isso é exatamente o tipo de arquitetura que eu escolheria para o Wallet.**
+
+---
+
+# Minha versão final da arquitetura
+
+Eu chegaria a isto:
+
+```text
+                       ┌─────────────────────┐
+                       │    WALLET / LEDGER  │
+                       └──────────┬──────────┘
+                                  │
+                            Transactional
+                               Outbox
+                                  │
+                                  ▼
+                         ┌─────────────────┐
+                         │   NATS JetStream│
+                         └────────┬────────┘
+                                  │
+                     ┌────────────┴────────────┐
+                     │                         │
+                     ▼                         ▼
+              Fraud Graph               Other Consumers
+               Listener
+                     │
+                     ▼
+              Graph Projector
+                     │
+          ┌──────────┴──────────┐
+          ▼                     ▼
+   Relationship Events      Current Graph
+          │                     │
+          ▼                     ▼
+ fraud_relationship_events  fraud_relationships
+          │                     │
+          └──────────┬──────────┘
+                     ▼
+             Graph Pattern Engine
+                     │
+          ┌──────────┴──────────┐
+          ▼                     ▼
+    graph_risk             graph signals
+          │
+          ▼
+     Materializer
+          │
+          ▼
+      Dragonfly
+          │
+          │ O(1)
+          ▼
+     Fraud Gate V3
+```
+
+E posteriormente:
+
+```text
+000.5
+Graph Projection
+       │
+       ├──────────────┐
+       ▼              ▼
+000.6             000.7
+Propagation       Behavioral
+Decay             Embeddings
+       │              │
+       └──────┬───────┘
+              ▼
+           000.8
+        Micro-ML / Fusion
+              │
+              ▼
+          final_risk
+```
+
+## Portanto: eu aprovaria o `000.5`, mas com 4 alterações antes do código
+
+**Obrigatórias:**
+
+1. **Adicionar `fraud_relationship_events`** para preservar a dimensão temporal.
+2. Corrigir `I-FRAUD-003`: `G≤t` não pode ser derivado apenas de `last_seen_at`.
+3. Separar explicitamente `graph_risk` de `final_risk`.
+4. Adicionar **rebuild/replayability** da projeção.
+
+E eu faria uma quinta alteração menor:
+
+5. Definir formalmente como `graph_risk` é calculado, em vez de simplesmente afirmar `cycle → >= 0.80`.
+
+Com isso, o `000.5` deixa de ser simplesmente "vamos colocar um grafo no PostgreSQL" e passa a ser uma **foundation de Fraud Intelligence temporal**, sobre a qual os `000.6`, `000.7` e `000.8` conseguem evoluir sem refatorarmos o coração do antifraud depois.

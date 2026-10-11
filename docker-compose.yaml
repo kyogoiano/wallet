@@ -3,7 +3,7 @@ version: "3.9"
 services:
 
   nats:
-    image: nats:2.14.5-alpine
+    image: nats:2.15.0-alpine
     container_name: nats_main
     restart: always
     ports:
@@ -29,7 +29,7 @@ services:
       - NATS_TOKEN=dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
 
   postgres:
-    image: postgres:19beta3-alpine
+    image: pgvector/pgvector:pg18
     container_name: wallet-postgres
     environment:
       POSTGRES_DB: wallet
@@ -48,38 +48,70 @@ services:
     networks:
       - wallet-net
 
-  redis:
-    image: redis:8.10.1-alpine
-    container_name: redis
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0
+    container_name: dragonfly
     restart: unless-stopped
+    user: "0:0"
     ports:
       - "6379:6379"
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        mkdir -p /var/run/redis
+        chmod 777 /var/run/redis
+        rm -f /var/run/redis/redis.sock
+        exec entrypoint.sh "$$@"
+      - "--"
 
-    command: >
-      sh -c "mkdir -p /var/run/redis && chmod 777 /var/run/redis && exec redis-server
-      --save ''
-      --appendonly no
-      --protected-mode no
-      --unixsocket /var/run/redis/redis.sock
-      --unixsocketperm 777
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
-      --maxmemory-samples 5"
+    command:
+      - "--logtostderr"
+      - "--proactor_threads=2"
+      - "--unixsocket=/var/run/redis/redis.sock"
+      - "--unixsocketperm=777"
+      - "--maxmemory=512mb"
+      - "--cache_mode=true"
 
     volumes:
-      - redis-data:/data
+      - dragonfly-data:/data
       - redis-socket:/var/run/redis
 
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/redis/redis.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+      start_period: 1s
+
+    networks:
+      wallet-net:
+        aliases:
+          - redis
+          - dragonfly
+
+  dragonfly-client:
+    image: redis:alpine
+    container_name: dragonfly-client
+    restart: always
+    depends_on:
+      dragonfly:
+        condition: service_healthy
+    entrypoint: /bin/sh
+    tty: true
+    volumes:
+      - redis-socket:/var/run/redis
     networks:
       - wallet-net
-
 
   openobserve:
     image: openobserve/openobserve:latest-amd64-simd
     container_name: openobserve
+    stop_grace_period: 30s
     environment:
       - ZO_ROOT_USER_EMAIL=leandro.ueg@gmail.com
       - ZO_ROOT_USER_PASSWORD=Admin123!@#
+      - ZO_TELEMETRY=false
     ports:
       - "5080:5080"
     volumes:
@@ -89,49 +121,122 @@ services:
 
   otel-collector:
     image: otel/opentelemetry-collector:latest
-    container_name:  otel-collector
+    container_name: otel-collector
     command: [ "--config=/etc/otel-collector-config.yml" ]
+    depends_on:
+      - openobserve
     volumes:
       - ./docker/otel-collector-config.yml:/etc/otel-collector-config.yml
     ports:
+      - "4317:4317" # gRPC
       - "4318:4318" # HTTP
     networks:
-      - wallet-net
+      wallet-net:
+        aliases:
+          - otel-collector
 
   app:
-    build: .
+    build:
+      context: .
+      dockerfile: dockerfile
+      target: core
     container_name: wallet-app
+    restart: unless-stopped
+    user: "10001:10001"
     depends_on:
       postgres:
         condition: service_healthy
-      otel-collector:
+      nats:
         condition: service_started
-      redis:
+      dragonfly:
+        condition: service_healthy
+      otel-collector:
         condition: service_started
     volumes:
       - redis-socket:/var/run/redis
     environment:
+      SERVER_PORT: 8081
+      WALLET_RUNTIME_MODE: multi-process
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet
       SPRING_DATASOURCE_USERNAME: wallet
       SPRING_DATASOURCE_PASSWORD: wallet
-      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_HOST: dragonfly
       SPRING_DATA_REDIS_PORT: 6379
       REDIS_SOCKET_ENABLED: "true"
       REDIS_SOCKET_PATH: /var/run/redis/redis.sock
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
-      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet,service.version=0.0.1-SNAPSHOT
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-core,service.version=0.0.1-SNAPSHOT
       JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
     ports:
+      - "8081:8081"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks:
+      - wallet-net
+
+  spool-init:
+    image: oraclelinux:10-slim
+    container_name: wallet-spool-init
+    user: "0:0"
+    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 755 /spool && chmod -R a+rX,u+rwX /spool"]
+    volumes:
+      - edge-spool:/spool
+    networks:
+      - wallet-net
+
+  edge:
+    build:
+      context: .
+      dockerfile: dockerfile
+      target: edge
+    container_name: wallet-edge
+    restart: unless-stopped
+    user: "10001:10001"
+    depends_on:
+      nats:
+        condition: service_started
+      app:
+        condition: service_healthy
+      spool-init:
+        condition: service_completed_successfully
+    volumes:
+      - edge-spool:/spool
+    environment:
+      SERVER_PORT: 8080
+      WALLET_RUNTIME_MODE: multi-process
+      WALLET_EDGE_ENABLED: "true"
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+      EDGE_SPOOL_DIRECTORY: /spool
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-edge,service.version=0.0.1-SNAPSHOT
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC"
+    ports:
       - "8080:8080"
+      - "8443:8443/udp"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
     networks:
       - wallet-net
 
 volumes:
   postgres_data:
   openobserve-data:
-  redis-data:
+  dragonfly-data:
   redis-socket:
+  edge-spool:
 
 networks:
   backend:

@@ -1,0 +1,535 @@
+Sim. A **000.6 está bem alinhada com a 000.5**, mas eu faria alguns ajustes antes de deixá-la como `Reviewed & Ratified`. Principalmente porque agora que corrigimos a 000.5 para ter **evidência temporal**, a 000.6 precisa consumir essa evidência corretamente.
+
+## 1. O principal ajuste: `last_seen_at` não basta
+
+Na 000.5 passamos a separar:
+
+```text
+fraud_relationships
+        │
+        │ current aggregate
+        ▼
+fraud_relationship_events
+        │
+        │ temporal evidence
+        ▼
+000.6 Risk Propagation
+```
+
+Então eu mudaria a definição de:
+
+```text
+(t - t_last)
+```
+
+para deixar claro que `t_last` deve vir da **evidência temporal relevante**, e não necessariamente do `fraud_relationships.last_seen_at`.
+
+Algo como:
+
+> `t_last` MUST represent the latest relationship event observable at or before evaluation timestamp `t`, obtained from the temporal relationship evidence store.
+
+Isso evita que uma atividade posterior "contamine" uma avaliação histórica.
+
+---
+
+# 2. Eu mudaria um pouco o modelo matemático
+
+A fórmula atual:
+
+$$
+R_{propagated}(v,u,t)
+=
+R_{source}(v)
+\times w(r)
+\times e^{-\lambda(t-t_{last})}
+$$
+
+funciona para um hop.
+
+Para múltiplos hops, porém, temos:
+
+$$
+R(A)\times w_{AB}\times w_{BC}
+\times e^{-\lambda(\Delta t_1+\Delta t_2)}
+$$
+
+Isso é razoável, mas eu deixaria explícito que **cada hop gera uma contribuição independente**, e não que o risco de A é simplesmente "copiado" para C.
+
+Eu usaria conceitualmente:
+
+$$
+I(p,t)=
+R_{source}(v)
+\prod_{e\in p}w(e)
+\prod_{e\in p}D(e,t)
+$$
+
+onde:
+
+$$
+D(e,t)=e^{-\lambda\Delta t_e}
+$$
+
+para um caminho \(p\).
+
+Assim temos:
+
+```text
+A
+│
+│ w=0.90
+│ decay
+▼
+B
+│
+│ w=0.60
+│ decay
+▼
+C
+```
+
+e:
+
+```text
+Influence(A → C)
+=
+R(A)
+× 0.90
+× decay_AB
+× 0.60
+× decay_BC
+```
+
+Isso será muito útil quando chegarmos ao `000.8`.
+
+---
+
+# 3. Há uma questão importante sobre `propagated_risk`
+
+Hoje temos:
+
+```text
+direct_risk
+graph_risk
+behavioral_risk
+propagated_risk
+final_risk
+```
+
+A 000.6 deve ser **estritamente responsável por `propagated_risk`**.
+
+Eu adicionaria explicitamente:
+
+### `I-PROP-005 — Risk Dimension Isolation`
+
+> The propagation engine MUST read `direct_risk` and graph topology as inputs but MUST only write `propagated_risk`. It MUST NOT calculate or persist `final_risk`.
+
+Então:
+
+```text
+000.5
+   │
+   └── graph_risk
+          │
+          ▼
+000.6
+   │
+   └── propagated_risk
+          │
+          ▼
+000.7
+   │
+   └── behavioral_risk
+          │
+          ▼
+000.8
+   │
+   └── final_risk
+```
+
+Isso cria uma separação excelente.
+
+---
+
+# 4. Eu não usaria `R_propagated >= 0.85` como único gatilho de quarantine
+
+Aqui:
+
+> When `R_propagated(u) >= θ_quarantine`
+
+eu faria uma distinção importante.
+
+`propagated_risk = 0.85` significa:
+
+> "há uma forte influência de entidades vizinhas"
+
+Não necessariamente:
+
+> "essa entidade deve ser considerada perigosa o suficiente para quarantine".
+
+O quarantine deveria considerar a **evidência estrutural + propagada**.
+
+Por exemplo:
+
+```text
+direct_risk       = 0.10
+graph_risk        = 0.60
+propagated_risk   = 0.88
+```
+
+é diferente de:
+
+```text
+direct_risk       = 0.80
+graph_risk        = 0.10
+propagated_risk   = 0.88
+```
+
+E o `000.8` justamente será responsável por combinar sinais.
+
+Portanto eu mudaria para:
+
+### `REQ-PROP-005`
+
+> When propagated risk exceeds the configured propagation threshold, the engine SHALL emit a `RiskPropagationAlert` or equivalent intelligence signal. A quarantine recommendation SHALL only be emitted when the configured quarantine policy explicitly permits propagation-only quarantine.
+
+Isso evita antecipar a responsabilidade do `000.8`.
+
+---
+
+# 5. Eu criaria dois eventos, não um
+
+Hoje:
+
+```text
+EntityQuarantineRecommendedEvent
+```
+
+Eu acho muito forte para o 000.6.
+
+Melhor:
+
+```text
+RiskPropagatedEvent
+```
+
+ou:
+
+```text
+EntityRiskPropagationDetectedEvent
+```
+
+contendo:
+
+```java
+record RiskPropagationDetectedEvent(
+    UUID entityId,
+    double propagatedRisk,
+    UUID sourceEntityId,
+    int hopCount,
+    RelationshipType strongestRelationship,
+    Instant evaluatedAt,
+    String propagationModelVersion
+) {}
+```
+
+E então posteriormente:
+
+```text
+000.8
+       │
+       ▼
+Risk Fusion
+       │
+       ▼
+EntityQuarantineRecommendedEvent
+```
+
+Isso deixa o pipeline muito mais elegante.
+
+---
+
+# 6. A versão que eu usaria para o pipeline
+
+```text
+                 fraud_entities
+                       │
+                       │ direct_risk
+                       ▼
+              ┌──────────────────┐
+              │ Propagation      │
+              │ Engine 000.6     │
+              └────────┬─────────┘
+                       │
+          ┌────────────┼────────────┐
+          │            │            │
+          ▼            ▼            ▼
+       topology      temporal     weights
+          │            │            │
+          └────────────┼────────────┘
+                       ▼
+                propagated_risk
+                       │
+                       ▼
+              PostgreSQL persist
+                       │
+                       ├──────────────► NATS
+                       │
+                       ▼
+                  Dragonfly
+                       │
+                       ▼
+               Fraud Gate O(1)
+```
+
+E paralelamente:
+
+```text
+000.5 graph_risk
+       │
+       ▼
+000.6 propagated_risk
+       │
+       ▼
+000.7 behavioral_risk
+       │
+       ▼
+000.8 fusion
+       │
+       ▼
+    final_risk
+```
+
+---
+
+# 7. Outro ponto: propagação precisa evitar double counting
+
+Esse é provavelmente o maior problema matemático que ainda falta na spec.
+
+Imagine:
+
+```text
+       B
+      / \
+     /   \
+    A     C
+     \   /
+      \ /
+       D
+```
+
+A pode alcançar D por vários caminhos:
+
+```text
+A → B → D
+A → C → D
+A → B → C → D
+```
+
+Você **não pode simplesmente somar** tudo:
+
+```text
+0.5 + 0.4 + 0.3 = 1.2
+```
+
+Seu `I-PROP-003` já aponta para probabilistic union, então eu acrescentaria:
+
+### `REQ-PROP-006 — Multi-Path Risk Aggregation`
+
+Para múltiplas contribuições independentes:
+
+$$
+R_{propagated}(u)
+=
+1-\prod_i(1-I_i)
+$$
+
+com:
+
+```text
+I_i = path influence
+```
+
+e:
+
+```text
+Rpropagated = min(1.0, ...)
+```
+
+Isso é importante para fraud rings densos.
+
+---
+
+# 8. Precisamos também limitar explosão do traversal
+
+Você definiu:
+
+```text
+k ∈ [1,3]
+```
+
+Ótimo.
+
+Mas ainda precisamos limitar:
+
+```text
+max nodes
+max paths
+max edges
+```
+
+porque:
+
+```text
+k = 3
+```
+
+pode ser gigantesco se um device estiver associado a milhares de usuários.
+
+Eu adicionaria:
+
+### `I-PROP-006 — Bounded Propagation`
+
+> A propagation execution MUST enforce configurable limits on maximum hops, visited entities, traversed relationships and candidate paths.
+
+Por exemplo:
+
+```yaml
+fraud:
+  propagation:
+    max-hops: 3
+    max-entities: 1000
+    max-paths: 5000
+```
+
+Isso protege tanto PostgreSQL quanto o worker.
+
+---
+
+# 9. E eu colocaria versionamento do modelo
+
+Como você está construindo uma plataforma de inteligência antifraude, isso será extremamente útil:
+
+```text
+propagation_model_version = "v1"
+```
+
+Porque amanhã você muda:
+
+```text
+SHARED_DEVICE = 0.90
+```
+
+para:
+
+```text
+SHARED_DEVICE = 0.82
+```
+
+e precisa saber **qual modelo produziu determinado score histórico**.
+
+Eu adicionaria à persistência:
+
+```sql
+propagation_model_version VARCHAR(32)
+```
+
+e talvez:
+
+```sql
+propagation_evaluated_at TIMESTAMPTZ
+```
+
+---
+
+# 10. Uma mudança pequena mas importante no `λ`
+
+Você escreveu:
+
+```text
+λ = 0.099
+```
+
+para:
+
+```text
+t½ = 7 days
+```
+
+Isso está correto **se a unidade temporal for dias**:
+
+$$
+\lambda = \frac{\ln 2}{7}
+\approx 0.09902/day
+$$
+
+Mas eu deixaria isso explícito:
+
+```text
+λ = ln(2) / halfLife
+```
+
+e não armazenaria simplesmente:
+
+```text
+0.099
+```
+
+como configuração primária.
+
+Configuração:
+
+```yaml
+propagation:
+  temporal-decay:
+    half-life: 7d
+```
+
+Engine calcula:
+
+```text
+λ = ln(2) / 7
+```
+
+Muito menos propenso a erro.
+
+---
+
+# Minha avaliação
+
+A **000.6 está conceitualmente muito boa** e agora faz sentido como segundo estágio da arquitetura.
+
+Eu faria a sequência definitiva assim:
+
+| Spec      | Responsabilidade                                      | Output            |
+| --------- | ----------------------------------------------------- | ----------------- |
+| **000.5** | Graph projection + temporal evidence + graph patterns | `graph_risk`      |
+| **000.6** | Risk propagation + temporal decay                     | `propagated_risk` |
+| **000.7** | Behavioral features + pgvector                        | `behavioral_risk` |
+| **000.8** | Fusion + micro-ML                                     | `final_risk`      |
+
+E a regra arquitetural central:
+
+> **Nenhum desses quatro está autorizado a alterar o comportamento O(1) do Fraud Gate diretamente.**
+
+Eles produzem **intelligence artifacts** assíncronos:
+
+```text
+PostgreSQL = durable intelligence
+Dragonfly  = hot derived intelligence
+NATS       = asynchronous propagation
+Fraud Gate = deterministic O(1) consumer
+```
+
+Isso, para mim, é uma arquitetura significativamente melhor do que simplesmente "adicionar GraphRAG/Neo4j ao antifraud".
+
+### Eu faria estas 6 alterações na 000.6 antes de implementar
+
+1. `t_last` baseado em **temporal evidence** da 000.5.
+2. Formalizar propagação por **path influence**.
+3. Adicionar **multi-path probabilistic union**.
+4. Separar `propagated_risk` de `quarantine recommendation`.
+5. Adicionar limites de traversal (`max entities / paths / hops`).
+6. Versionar o propagation model.
+
+Com essas mudanças, eu consideraria a **SPEC-000.6 pronta para implementação**.

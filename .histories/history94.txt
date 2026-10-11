@@ -1,0 +1,205 @@
+Sim. Considerando as `SPEC-003.2` e `PLAN-003.2` que já fechamos, as tasks estão **muito próximas de Ready for Execution**, mas eu faria **alguns ajustes antes de entregar ao Antigravity**. Há principalmente 3 pontos que ainda podem gerar implementação incorreta.
+
+### 1. 🔴 `TASK-3.2.7`: não devemos assumir `AccountUseCase.find()`
+
+Este é o ponto mais importante.
+
+A task diz:
+
+> Resolve `userId` via `AccountUseCase.find(walletId).userId()` estritamente para satisfazer existing `SaveCashflowProfileCommand` contract
+
+Isso é aceitável **somente se esse for realmente o contrato existente em `goals::api`**.
+
+Como o próprio PLAN deixou isso como ponto a verificar, eu não deixaria a task afirmar isso como fato arquitetural antes de verificar o código.
+
+Melhor:
+
+```text
+- [ ] TASK-3.2.7 [MUST]: Implement unit tests in CashflowForecastingServiceTest verifying:
+  - Query active subscriptions via SubscriptionDao.findByWalletId(tenantId, walletId, ACTIVE).
+  - Non-locking balance read via BalanceUseCase.getBalance(walletId).
+  - Resolve the user identity required by the existing goals::api
+    SaveCashflowProfileCommand contract using the existing public API.
+  - Query existing profile via the existing goals::api contract and preserve
+    minimumSafetyBuffer and monthlyIncome.
+  - Save profile via the existing goals::api contract idempotently.
+```
+
+E acrescentaria no `TASK-3.2.7`:
+
+```text
+No new identity-resolution API, repository, or direct Goals persistence may be introduced.
+```
+
+Isso evita o Antigravity inventar uma API só para satisfazer a task.
+
+---
+
+### 2. 🔴 `TASK-3.2.5`: "never added together" está conceitualmente estranho
+
+A task diz:
+
+> `L_H` and committed are never added together
+
+Isso é correto como **regra de shortfall**, mas não como propriedade do engine.
+
+O que queremos é:
+
+```text
+Shortfall_H = max(0, L_H - currentBalance)
+```
+
+e não:
+
+```text
+max(0, (L_H + monthlyCommitted) - currentBalance)
+```
+
+Portanto eu mudaria para:
+
+```text
+- [ ] TASK-3.2.5 [MUST]: Implement unit tests in CashflowForecastingEngineTest
+  for monthly committed normalization:
+
+  - INSTALLMENT is excluded from perpetual monthlyCommittedExpenses.
+  - INSTALLMENT remains included in discrete forward liability L_H while
+    the installment is active.
+  - Monthly committed expenses and forward liabilities are exposed as
+    separate projection dimensions.
+  - Shortfall_H is calculated exclusively from L_H and current balance;
+    monthlyCommittedExpenses MUST NOT be added to L_H.
+```
+
+Isso fica muito mais preciso e alinhado com o PLAN.
+
+---
+
+### 3. 🟡 `TASK-3.2.11`: "real account balance" pode induzir lock ou mutation
+
+A intenção é boa, mas eu reforçaria o contrato:
+
+```text
+- Shortfall detection against the real account balance using the existing
+  non-locking BalanceUseCase.
+```
+
+E acrescentaria:
+
+```text
+The integration test MUST verify that the forecasting path does not issue
+SELECT FOR UPDATE or mutate ledger/account state.
+```
+
+Isso fecha diretamente `I-CASH-006`.
+
+---
+
+## 4. 🟡 Falta um teste explícito para `t₀`
+
+Você já colocou:
+
+> fixed clock
+
+Mas eu colocaria uma assertiva concreta em `TASK-3.2.3`.
+
+Algo como:
+
+```text
+- Forecast evaluation uses the injected Clock instant as t₀.
+- Client-supplied timestamps MUST NOT affect occurrence expansion.
+- The same subscriptions evaluated with the same fixed t₀ MUST produce
+  deterministic identical projections.
+```
+
+Isso cobre melhor `I-CASH-005` e `I-CASH-008`.
+
+---
+
+## 5. 🟡 Eu acrescentaria o caso 14 dias
+
+A task fala:
+
+> across 7, 14, and 30 days
+
+Mas o exemplo concreto é somente:
+
+> Weekly R$ 50 in 30 days → 4 occurrences
+
+Como temos `L7`, `L14` e `L30`, vale colocar uma matriz explícita:
+
+| Cadence   | Horizon | Expected |
+| --------- | ------: | -------: |
+| WEEKLY    |      7d |        1 |
+| WEEKLY    |     14d |        2 |
+| WEEKLY    |     30d |        4 |
+| BI_WEEKLY |     14d |        1 |
+| BI_WEEKLY |     30d |        2 |
+| MONTHLY   |     30d |        1 |
+
+Isso evita que a implementação seja validada apenas pelo exemplo de 30 dias.
+
+**Importante:** manter a semântica inclusiva já definida no PLAN:
+
+```text
+t₀ <= occurrence <= t₀ + H
+```
+
+---
+
+## 6. 🔴 Uma pequena inconsistência no título da Phase 1
+
+Você escreveu:
+
+> `Phase 1: API Models & Ephemeral Schema Gate`
+
+Mas `I-CASH-008` diz arquitetura efêmera, e não necessariamente existe um "schema gate".
+
+A task 3.2.2 deveria verificar principalmente:
+
+```text
+No cashflow_forecasts table or migration is introduced.
+Forecast state is calculated on demand and is not persisted.
+```
+
+Eu chamaria:
+
+> **API Models & Ephemeral Architecture Gate**
+
+Isso evita o Antigravity interpretar "schema gate" como uma necessidade de criar algum schema específico.
+
+---
+
+# Veredito
+
+Eu classificaria assim:
+
+| Item                       | Estado                                  |
+| -------------------------- | --------------------------------------- |
+| Traceability               | 🟢                                      |
+| MUST/SHOULD ordering       | 🟢                                      |
+| Occurrence expansion       | 🟢                                      |
+| Canonical cadence          | 🟢                                      |
+| IRREGULAR → empty          | 🟢                                      |
+| `t₀` / Clock               | 🟡 pequeno reforço                      |
+| Monthly committed vs `L_H` | 🔴 precisa ajuste textual               |
+| Goals API boundary         | 🔴 precisa não assumir `AccountUseCase` |
+| Tenant isolation           | 🟢                                      |
+| Non-locking balance        | 🟡 reforçar IT                          |
+| Ephemeral architecture     | 🟡 nomenclatura                         |
+| Alert transition           | 🟢 corretamente SHOULD                  |
+| Final convergence          | 🟢                                      |
+
+### Minha recomendação
+
+**Não precisamos redesenhar as TASKS.** A estrutura está correta e segue muito bem o `SPEC → PLAN → TASKS`.
+
+Eu faria apenas esses ajustes de **contrato**, principalmente os dois 🔴:
+
+1. **não cristalizar `AccountUseCase.find()` sem verificar o `goals::api`;**
+2. **transformar "L_H e committed nunca são adicionados" em uma regra explícita de cálculo do shortfall.**
+
+Depois disso, eu consideraria:
+
+> **TASKS-003.2 — Ready for Execution ✅**
+
+E manteria exatamente a regra atual: **MUST primeiro; nenhum SHOULD executado antes de todos os MUST estarem verdes.**

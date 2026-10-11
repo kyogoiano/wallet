@@ -1,0 +1,192 @@
+As tasks estão bem mais próximas de uma implementação segura e rastreável do `ARCH-004`. A divisão por fases, a prioridade `[MUST]` e os testes de recuperação são boas decisões. **Mas eu ainda não consideraria o `TASKS-004` pronto para execução autônoma sem uma última revisão de convergência.**
+
+O principal risco já não é a ausência de recuperação por lease: é haver **lacunas entre o protocolo de execução, os contratos dos componentes e os testes que supostamente comprovam os invariantes**.
+
+## 1. Bloqueadores que eu corrigiria antes de implementar
+
+### 1.1 A recuperação precisa consultar o domínio de forma idempotente
+
+A `TASK-4.9` diz que o reconciliador verifica se a operação downstream foi concluída e, caso contrário, pode tentar executá-la novamente. Porém, a task não define o contrato que permite distinguir esses cenários com segurança.
+
+Para recuperar uma execução interrompida, o bridge precisa conseguir consultar o resultado por `executionOperationId` ou invocar um caso de uso que garanta idempotência para esse identificador.
+
+O contrato deve cobrir três situações:
+
+| Resultado downstream                   | Comportamento do reconciliador                                          |
+| -------------------------------------- | ----------------------------------------------------------------------- |
+| Operação concluída                     | Registrar a proposta como `EXECUTED`, sem repetir a mutação.            |
+| Operação comprovadamente não executada | Tentar novamente usando o mesmo `executionOperationId`.                 |
+| Resultado desconhecido ou indisponível | Preservar `EXECUTING` e permitir nova reconciliação após a recuperação. |
+
+**Atenção:** um timeout não prova que a operação falhou. O domínio pode ter concluído a transferência antes de a conexão cair.
+
+**Ajuste:** tornar explícito em `TASK-4.6`, `TASK-4.9` e `TASK-4.12` o contrato de consulta/reexecução idempotente do downstream. Se os casos de uso existentes não oferecem isso, a implementação não pode simplesmente presumir que oferecem.
+
+### 1.2 A aprovação e a rejeição precisam ter resultados concorrentes bem definidos
+
+A `TASK-4.8` prevê aprovação e rejeição, e a `TASK-4.12` testa 100 tentativas concorrentes de aprovação. Isso não cobre todas as disputas relevantes.
+
+Por exemplo:
+
+* Duas aprovações concorrentes;
+* Aprovação concorrente com rejeição;
+* Aprovação concorrente com expiração;
+* Recuperação concorrente com uma nova tentativa de execução.
+
+A condição `status = 'PROPOSED'` no claim atômico ajuda a impedir claims duplicados, mas as demais transições também precisam ser condicionais e atômicas.
+
+**Ajuste:** exigir que cada transição valide o estado anterior no banco e que os testes comprovem que apenas uma transição incompatível vence. Uma rejeição não pode cancelar uma proposta já em `EXECUTING`, por exemplo.
+
+### 1.3 O `executionOperationId` deve existir antes do primeiro claim
+
+A `TASK-4.7` determina que o identificador seja atribuído na criação da proposta, o que está correto. Entretanto, a `TASK-4.5` não declara explicitamente que o identificador é imutável no banco nem que toda tentativa de recuperação precisa reutilizá-lo.
+
+**Ajuste:** incluir as seguintes garantias no DAO, nos constraints e nos testes:
+
+* `execution_operation_id` é atribuído antes da execução;
+* Não muda durante aprovação, falha técnica ou recuperação;
+* É único conforme o escopo definido pela arquitetura;
+* A mesma operação financeira nunca recebe um novo identificador apenas porque houve timeout, reinicialização ou expiração do lease.
+
+Isso conecta diretamente a idempotência de execução à recuperação após falhas.
+
+### 1.4 O schema precisa refletir todos os campos exigidos pelo ARCH
+
+A `TASK-4.4` menciona a tabela, os constraints e os índices, mas não exige explicitamente todas as colunas necessárias ao protocolo de recuperação.
+
+O `ARCH-004` define, entre outros campos:
+
+* `parameters_hash`;
+* `execution_operation_id`;
+* `execution_claimed_at`;
+* `execution_lease_until`;
+* `approved_by` e `approved_at`;
+* `executed_at`.
+
+**Ajuste:** transformar esses campos em critérios explícitos de aceite de `TASK-4.4`. A `TASK-4.5` deve verificar que o schema realmente os contém, incluindo a unicidade de `execution_operation_id` e a restrição única de `(tenant_id, idempotency_key)`.
+
+Não basta o DAO compilar: o schema e o comportamento transacional precisam estar alinhados com a arquitetura.
+
+### 1.5 Falta especificar o comportamento de uma aprovação enquanto a proposta já está `EXECUTING`
+
+A `TASK-4.8` define o retorno em caso de `EXECUTED`, mas não especifica claramente o resultado de uma nova requisição de aprovação quando outra requisição já reivindicou a proposta.
+
+Isso pode acontecer em chamadas concorrentes ou após um timeout HTTP.
+
+Sugiro definir a seguinte política:
+
+| Estado encontrado                      | Resultado esperado                                                                                   |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `PROPOSED`, dentro do TTL              | Tentar adquirir o claim atômico.                                                                     |
+| `EXECUTING`, lease válido              | Não iniciar outra execução; retornar estado em andamento ou resultado equivalente definido pela API. |
+| `EXECUTING`, lease expirado            | Encaminhar para recuperação segura; não criar uma nova operação financeira.                          |
+| `EXECUTED`                             | Retornar o resultado persistido, sem executar novamente.                                             |
+| `REJECTED`, `EXPIRED` ou `INVALIDATED` | Retornar o resultado terminal correspondente, sem executar.                                          |
+
+Os códigos HTTP e o formato das respostas devem ser definidos no contrato da API, e não deixados para a implementação decidir implicitamente.
+
+### 1.6 O significado de `ProposalApprovedEvent` está ambíguo
+
+Na `TASK-4.8`, o evento de aprovação aparece junto dos eventos de criação e execução. Porém, o fluxo arquitetural separa autorização humana, claim e execução financeira.
+
+É importante que o evento não sugira que a operação financeira foi aprovada e concluída quando houve apenas autorização para executá-la.
+
+**Ajuste:** definir semanticamente os eventos:
+
+* `ProposalCreatedEvent`: proposta persistida;
+* `ProposalApprovedEvent`: autorização humana registrada;
+* `ProposalExecutedEvent`: execução financeira confirmada pelo domínio e estado `EXECUTED` persistido.
+
+Também deve ser definido como a emissão dos eventos se comporta diante de falhas entre a persistência e a publicação. Para eventos internos do Modulith, vale preservar a estratégia de entrega durável já estabelecida no projeto, sem introduzir NATS nesse fluxo interno.
+
+---
+
+## 2. Inconsistências de prioridade e escopo
+
+Há dois pontos em que as prioridades da matriz não combinam com as tasks.
+
+| Item              | Inconsistência                                                                                      | Correção                                                                                                                                 |
+| ----------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `REQ-COPILOT-013` | Classificado como `[SHOULD]`, mas a `TASK-4.2` inclui eventos como parte da implementação `[MUST]`. | Ou os eventos são obrigatórios para a primeira entrega e o requisito vira `[MUST]`, ou sua implementação é separada da task obrigatória. |
+| `REQ-COPILOT-014` | Classificado como `[COULD]`, mas aparece na `TASK-4.2`, dentro da fase `[MUST]`.                    | Remover os metadados opcionais do escopo obrigatório ou separá-los em uma task `[COULD]`.                                                |
+
+Essa distinção é importante porque o protocolo `I-SDD-004` proíbe executar `[SHOULD]` e `[COULD]` antes que todos os critérios `[MUST]` estejam verdes.
+
+Há ainda um ponto de escopo na `TASK-4.2`: os records e DTOs listados não devem ficar automaticamente todos em `copilot.api`. A API pública do módulo deve expor somente os tipos necessários aos consumidores autorizados. Entidades de persistência, detalhes do ciclo de execução e modelos internos devem permanecer em `internal`, quando não precisarem integrar o contrato público.
+
+---
+
+## 3. O que eu acrescentaria aos testes
+
+A matriz está boa, mas eu tornaria os critérios abaixo explícitos antes da execução.
+
+| Cenário                                                 | Teste esperado                                              | Por que importa                         |
+| ------------------------------------------------------- | ----------------------------------------------------------- | --------------------------------------- |
+| Mesmo `idempotencyKey`, mesmo payload                   | Retorna a proposta existente                                | Idempotência de criação                 |
+| Mesmo `idempotencyKey`, payload diferente               | HTTP 409                                                    | Evita reutilização ambígua da chave     |
+| Duas aprovações concorrentes                            | No máximo uma execução inicial                              | Claim atômico                           |
+| Aprovação versus rejeição                               | Apenas uma transição compatível com o estado anterior vence | Integridade do ciclo de vida            |
+| Operação concluída, falha antes de persistir `EXECUTED` | Recuperação consulta o resultado existente                  | Evita duplicidade financeira            |
+| Operação não executada e lease expirado                 | Nova tentativa usa o mesmo identificador                    | Recuperação idempotente                 |
+| Resultado downstream desconhecido                       | Mantém estado recuperável                                   | Timeout não equivale a falha de negócio |
+| Proposta de outro tenant                                | HTTP 404                                                    | Não revelar a existência do recurso     |
+| Tentativa de modificar o snapshot                       | Rejeitada ou detectada                                      | Imutabilidade dos parâmetros            |
+| Proposta expirada antes da aprovação                    | Não executa o domínio                                       | TTL autoritativo                        |
+
+### Um detalhe importante sobre `parameters_hash`
+
+A `TASK-4.3` pede um hash SHA-256 determinístico, mas ainda não define a canonicalização dos parâmetros.
+
+Se duas representações JSON equivalentes forem serializadas de maneiras diferentes, seus hashes podem divergir. A implementação precisa definir como trata, por exemplo, ordem das propriedades, números e valores nulos.
+
+O hash deve ser calculado sobre uma representação canônica e imutável dos parâmetros. Isso não o transforma, por si só, em uma assinatura criptográfica nem em prova de autenticidade.
+
+---
+
+## 4. O gate final precisa verificar mais do que a compilação
+
+A `TASK-4.14` prevê testes, verificação arquitetural e reconciliação entre código, DDL e especificações. Essa é a direção correta.
+
+Eu só deixaria explícitos três critérios adicionais:
+
+1. **Recuperação real:** os testes devem cobrir falha antes da chamada downstream e falha após a conclusão downstream, mas antes da persistência do resultado na proposta.
+2. **Contrato de idempotência downstream:** o teste deve demonstrar que a mesma `executionOperationId` não produz duas mutações financeiras, inclusive sob concorrência e recuperação.
+3. **Evidência de execução:** os testes de integração com Testcontainers devem ser efetivamente executados no gate; não basta que estejam compilados ou existam no projeto.
+
+A propagação de `executionOperationId` na telemetria é útil, mas não substitui a idempotência persistente no domínio financeiro.
+
+## 5. Ordem de execução que eu manteria
+
+A sequência geral faz sentido, com uma ressalva: as tasks de teste devem seguir o ciclo TDD **Red → Green → Refactor**, mesmo que algumas descrições estejam marcadas como `[GREEN]`.
+
+Minha sequência recomendada:
+
+1. **TASK-4.1–4.3:** limites do módulo, contratos mínimos e hash canônico.
+2. **TASK-4.4–4.5:** schema, constraints, DAO e testes de persistência.
+3. **TASK-4.6:** contrato do bridge, classificação de falhas e idempotência downstream.
+4. **TASK-4.7–4.8:** criação, autorização, claim, execução e transições.
+5. **TASK-4.9:** reconciliação de leases expirados.
+6. **TASK-4.10–4.11:** API REST e identidade autenticada.
+7. **TASK-4.12:** concorrência e recuperação com Testcontainers.
+8. **TASK-4.14:** convergência arquitetural e verificação final.
+9. Somente depois de todos os `[MUST]` estarem verdes, liberar a `TASK-4.13` e os demais itens opcionais conforme suas prioridades.
+
+Essa ordem mantém o protocolo de execução do domínio antes dos detalhes de housekeeping. A camada MCP continua fora do escopo do `TASKS-004`, conforme a divisão entre `SPEC-004` e `SPEC-004.1`.
+
+## Veredito
+
+**Eu classificaria o `TASKS-004` como próximo de pronto, mas ainda não totalmente convergente com o `ARCH-004`.**
+
+Os ajustes mais importantes são:
+
+1. Formalizar o contrato de consulta e reexecução idempotente do downstream.
+2. Definir resultados para aprovação repetida e transições concorrentes.
+3. Tornar todos os campos de persistência obrigatórios explícitos na task de schema.
+4. Resolver a divergência de prioridades dos eventos e metadados opcionais.
+5. Especificar os testes de falhas e a canonicalização de `parameters_hash`.
+
+O princípio que deve orientar a implementação é:
+
+**A autorização humana é persistida uma vez; a execução pode ser recuperada quantas vezes forem necessárias, mas a operação financeira mantém sempre a mesma identidade e não pode produzir uma segunda mutação.**
+
+Com esses pontos corrigidos, o conjunto de tasks fica em uma posição muito melhor para a fase `ANALYZE`, em que a rastreabilidade entre SPEC → ARCH → PLAN → TASKS deve ser comprovada antes de iniciar a implementação.

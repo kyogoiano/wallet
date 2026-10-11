@@ -1,0 +1,579 @@
+Sim — e, na verdade, **Spring Modulith encaixa muito bem como a implementação da Phase 0**.
+
+Eu ajustaria a visão anterior: em vez de inventarmos um framework próprio de plugins com `WalletCapability` fazendo discovery manual, podemos usar o **Spring Modulith como mecanismo de modularidade in-process**, mantendo nossa `Capability API` apenas como contrato de negócio.
+
+A ideia seria:
+
+```text
+Wallet Application
+│
+├── wallet-core
+│
+├── capability-api
+│
+├── smart-savings          ← Modulith Application Module
+├── financial-goals        ← Modulith Application Module
+├── spending-intelligence  ← Modulith Application Module
+│
+└── ai-copilot / mcp-edge  ← Modulith Application Module
+```
+
+Acho que essa mudança simplifica bastante a arquitetura. Vou checar a documentação atual do Spring Modulith para alinhar a proposta com os mecanismos e versões suportados atualmente.
+
+
+Sim — e depois de olhar a documentação atual, eu diria que **Spring Modulith é provavelmente a melhor escolha para materializar o conceito de “plugins” na nossa Wallet nesta fase**.
+
+O próprio [Spring Modulith](https://spring.io/projects/spring-modulith/?utm_source=chatgpt.com) é orientado a módulos de aplicação guiados pelo domínio, com verificação automática da estrutura modular, testes isolados por módulo e geração de documentação. A versão atual apresentada pelo projeto é 2.1.0. ([Home][1])
+
+A mudança conceitual que eu faria no nosso roadmap é esta:
+
+> **Capability = conceito de negócio**
+> **Spring Modulith Application Module = implementação atual do plugin**
+> **MCP Tool = adaptação externa de uma capability**
+
+## Arquitetura proposta
+
+```text
+┌─────────────────────────────────────────────────────────────┐
+│                     Wallet Application                     │
+│                                                             │
+│  ┌───────────────────────────────────────────────────────┐  │
+│  │                    wallet-core                        │  │
+│  │                                                       │  │
+│  │ Ledger │ Transfers │ Balance │ Fraud │ Idempotency    │  │
+│  └───────────────────────────┬───────────────────────────┘  │
+│                              │ Published API / Events       │
+│          ┌───────────────────┼────────────────────┐          │
+│          ▼                   ▼                    ▼          │
+│  ┌──────────────┐    ┌──────────────┐    ┌───────────────┐  │
+│  │smart-savings │    │financial-goals│   │spending-intel │  │
+│  │   MODULE     │    │    MODULE     │   │    MODULE     │  │
+│  └──────────────┘    └──────────────┘    └───────────────┘  │
+│                                                             │
+│                    ┌─────────────────┐                      │
+│                    │    mcp-edge     │                      │
+│                    │     MODULE      │                      │
+│                    └─────────────────┘                      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+Cada um desses seria um **Spring Modulith Application Module**.
+
+O Modulith detecta módulos a partir da estrutura de packages e permite verificar programaticamente se as dependências entre eles respeitam os boundaries definidos. Também oferece testes focados em módulos via `@ApplicationModuleTest`. ([Home][1])
+
+---
+
+# 1. Eu simplificaria bastante a SPEC-001
+
+Inicialmente eu **não criaria**:
+
+```text
+:capability-api
+    ├── WalletCapability
+    ├── WalletEventListener
+    └── WalletCommandDispatcher
+```
+
+pelo menos não como uma abstração obrigatória para tudo.
+
+O risco seria construirmos um **framework sobre o Spring Modulith para abstrair exatamente o que o Spring Modulith já organiza**.
+
+Eu começaria assim:
+
+```text
+br.com.wallet
+│
+├── WalletApplication.java
+│
+├── core
+│   ├── ledger
+│   ├── wallet
+│   ├── transfer
+│   ├── balance
+│   ├── fraud
+│   └── events
+│
+├── savings
+│   ├── SavingsConfiguration.java
+│   ├── SavingsService.java
+│   ├── SavingsRule.java
+│   └── internal/
+│
+├── goals
+│   ├── GoalService.java
+│   ├── Goal.java
+│   └── internal/
+│
+├── intelligence
+│   ├── SubscriptionAnalyzer.java
+│   ├── SpendingAnalyzer.java
+│   └── internal/
+│
+└── copilot
+    ├── WalletTools.java
+    ├── ProposalService.java
+    └── internal/
+```
+
+O ponto importante é:
+
+```text
+savings
+goals
+intelligence
+copilot
+```
+
+são **módulos de aplicação**, não necessariamente Gradle modules separados.
+
+Isso é importante porque Spring Modulith trabalha muito bem inicialmente no nível do **package/module boundary**, enquanto o projeto continua sendo um deployable monolith. ([Home][1])
+
+---
+
+# 2. O Core deve expor uma API explícita
+
+Eu faria do `core` o módulo mais protegido da aplicação.
+
+Por exemplo:
+
+```text
+br.com.wallet.core
+│
+├── api
+│   ├── TransferFunds.java
+│   ├── DepositFunds.java
+│   ├── GetBalance.java
+│   └── WalletEvents.java
+│
+└── internal
+    ├── LedgerRepository
+    ├── WalletRepository
+    ├── TransferFundsService
+    └── LedgerService
+```
+
+Os outros módulos podem depender de:
+
+```text
+core.api
+```
+
+Mas não:
+
+```text
+core.internal
+```
+
+Então:
+
+```text
+smart-savings
+       │
+       ▼
+core.api.TransferFunds
+```
+
+Nunca:
+
+```text
+smart-savings
+       │
+       ▼
+core.internal.LedgerRepository
+```
+
+Isso transforma nosso invariante:
+
+> `I-CAPABILITY-001 — No Direct Ledger Mutation`
+
+em algo que pode ser **verificado estruturalmente**, e não apenas documentado.
+
+---
+
+# 3. Isso é onde Spring Modulith fica especialmente interessante
+
+Podemos ter um teste arquitetural central:
+
+```java
+@Test
+void verifyModuleStructure() {
+    ApplicationModules.of(WalletApplication.class)
+            .verify();
+}
+```
+
+O modelo oficial do Spring Modulith suporta exatamente essa ideia de construir o modelo dos módulos da aplicação e verificar a estrutura. ([Home][1])
+
+Ou seja, se amanhã alguém fizer:
+
+```java
+import br.com.wallet.core.internal.LedgerRepository;
+```
+
+dentro de:
+
+```text
+br.com.wallet.savings
+```
+
+queremos que isso seja detectado no CI.
+
+Eu adicionaria esse teste como **Gate obrigatório da Convergence**.
+
+```text
+./gradlew test
+      │
+      ├── Unit Tests
+      ├── Integration Tests
+      ├── Modulith Architecture Verification  ← novo
+      └── Traceability Verification
+```
+
+---
+
+# 4. Cada “plugin” teria um módulo explícito
+
+Eu usaria `package-info.java` ou a configuração equivalente para declarar as dependências permitidas.
+
+Conceitualmente:
+
+```text
+wallet
+│
+├── core
+│
+├── savings
+│      allowed → core::api
+│
+├── goals
+│      allowed → core::api, savings
+│
+├── intelligence
+│      allowed → core::api
+│
+└── copilot
+       allowed → core::api, savings, goals, intelligence
+```
+
+Mas eu evitaria dependências em cascata desnecessárias.
+
+A topologia ideal seria mais próxima de:
+
+```text
+                    ┌───────────┐
+                    │   core    │
+                    └─────┬─────┘
+                          │
+          ┌───────────────┼────────────────┐
+          ▼               ▼                ▼
+      savings          goals        intelligence
+          │               │                │
+          └───────────────┼────────────────┘
+                          ▼
+                       copilot
+```
+
+E o MCP nunca deve atravessar módulos para alcançar repositories ou entidades internas.
+
+---
+
+# 5. Eventos: Modulith internamente, NATS externamente
+
+Aqui eu faria uma separação muito importante.
+
+Hoje já temos:
+
+```text
+Transactional Outbox
+       ↓
+NATS JetStream
+```
+
+Eu **não substituiria isso por Spring Application Events**.
+
+Eu usaria os dois em níveis diferentes.
+
+### Eventos internos
+
+```text
+Wallet Core
+    │
+    │ Domain Event
+    ▼
+Spring Modulith Event
+    │
+    ├── Savings
+    ├── Goals
+    └── Intelligence
+```
+
+### Eventos externos / duráveis
+
+```text
+Wallet Transaction
+        │
+        ▼
+Transactional Outbox
+        │
+        ▼
+NATS JetStream
+        │
+        ├── Other Services
+        ├── Analytics
+        └── External Consumers
+```
+
+O Spring Modulith possui infraestrutura própria para event publication e listeners de módulos, incluindo suporte a externalização de eventos. ([Home][2])
+
+Mas, como já temos uma arquitetura de Outbox + NATS, eu trataria o Modulith como **mecanismo de comunicação e consistência intra-aplicação**, e NATS como o **event backbone inter-processo**.
+
+```text
+                 IN-PROCESS
+         ┌──────────────────────────┐
+         │     Spring Modulith      │
+         │                          │
+         │ Core → Savings           │
+         │ Core → Goals             │
+         │ Core → Intelligence      │
+         └──────────────────────────┘
+
+                 OUT-OF-PROCESS
+         ┌──────────────────────────┐
+         │ Transactional Outbox     │
+         │          ↓               │
+         │     NATS JetStream       │
+         └──────────────────────────┘
+```
+
+Essa separação, para mim, é muito limpa.
+
+---
+
+# 6. Smart Savings fica extremamente natural
+
+Na `SPEC-002`:
+
+```text
+core
+ │
+ │ MoneyReceived
+ ▼
+savings module
+ │
+ ▼
+EvaluateSavingsRules
+ │
+ ├── no action
+ │
+ └── SavingsActionRequired
+          │
+          ▼
+       core.api
+          │
+          ▼
+    TransferFundsCommand
+          │
+          ▼
+        Fraud Gate
+          │
+          ▼
+         Ledger
+```
+
+O módulo `savings` nunca toca diretamente em:
+
+```text
+wallet_accounts
+ledger_entries
+```
+
+Ele só diz:
+
+> “Core, quero executar esta operação financeira.”
+
+E o Core continua decidindo se ela é válida.
+
+---
+
+# 7. O Goal Engine pode usar `Moments`
+
+Aqui existe uma oportunidade particularmente interessante.
+
+O Spring Modulith possui o módulo `spring-modulith-moments`, que publica eventos relacionados à passagem do tempo, como `HourHasPassed`, `DayHasPassed`, `WeekHasPassed` e `MonthHasPassed`. Ele também suporta uma `TimeMachine` para testes. ([Home][3])
+
+Para nossa Phase 2:
+
+```text
+MonthHasPassed
+        │
+        ▼
+Goal Module
+        │
+        ▼
+Recalculate Strategy
+        │
+        ├── Goal On Track
+        │
+        └── Adjustment Proposal
+```
+
+E em testes:
+
+```text
+TimeMachine
+     │
+     ▼
++ 1 month
+     │
+     ▼
+Goal recalculation
+```
+
+Isso é quase perfeito para:
+
+* metas mensais;
+* contribuições periódicas;
+* deadlines;
+* alertas de atraso;
+* reavaliação de cashflow.
+
+Eu colocaria essa possibilidade no `PLAN-003`, não necessariamente na `SPEC-003`.
+
+---
+
+# 8. Observabilidade também ganha uma camada interessante
+
+Como já temos OpenTelemetry + `operation_id`, precisamos garantir que não vamos perder contexto quando uma ação cruza módulos.
+
+O Spring Modulith também possui suporte específico para observabilidade no nível dos módulos. ([Home][4])
+
+Nossa árvore de tracing poderia ficar assim:
+
+```text
+operation_id = 123
+
+POST /transfer
+    │
+    ├── Fraud Evaluation
+    │
+    ├── Ledger Transaction
+    │
+    ├── Outbox Publication
+    │
+    └── Savings Module
+            │
+            └── Auto Savings Transfer
+                    │
+                    ├── Fraud Evaluation
+                    └── Ledger Transaction
+```
+
+Isso pode ficar muito interessante no OpenObserve.
+
+---
+
+# 9. Eu alteraria a Phase 0 para isto
+
+## SPEC-001 — Wallet Modular Capability Platform
+
+**Intent revisado:**
+
+> Establish Spring Modulith application modules as the primary in-process extension mechanism for independently evolving Wallet capabilities, while preserving strict financial boundaries and ensuring that all monetary state transitions remain exclusively controlled by Wallet Core.
+
+### Deliverables
+
+```text
+1. Spring Modulith module model
+
+2. Core published API
+
+3. Module dependency rules
+
+4. Module architecture verification
+
+5. Module integration testing
+
+6. Internal event communication model
+
+7. NATS / Modulith event boundary definition
+
+8. operation_id propagation across module boundaries
+```
+
+Eu removeria, por enquanto:
+
+```text
+WalletCapability
+WalletEventListener
+WalletCommandDispatcher
+```
+
+a menos que, durante o `CLARIFY`, descubramos uma necessidade real de uma SPI comum.
+
+Porque talvez isso seja apenas:
+
+```text
+@ApplicationModuleListener
+```
+
+*
+
+```text
+Core API
+```
+
+*
+
+```text
+typed domain events
+```
+
+O Spring Modulith atual inclui suporte explícito a listeners de eventos no contexto dos módulos. ([Home][2])
+
+---
+
+# Minha recomendação final
+
+Eu faria esta alteração no roadmap:
+
+```text
+ANTES
+
+Capability SPI
+        ↓
+Custom Plugin Abstraction
+        ↓
+Smart Savings
+
+
+DEPOIS
+
+Spring Modulith
+        ↓
+Application Modules
+        ↓
+Core Published API
+        ↓
+Module Events
+        ↓
+Smart Savings
+```
+
+E deixaria o conceito de **SPI** para uma evolução futura, caso realmente precisemos suportar:
+
+```text
+third-party capabilities
+dynamic modules
+remote capabilities
+external providers
+runtime loading
+```
+
+Nesse momento, Spring Modulith nos dá o que precisamos: **modularidade forte, boundaries verificáveis, testes por módulo, eventos internos e documentação arquitetural**, sem introduzir a complexidade prematura de um plugin runtime. ([Home][1])
+
+Eu considero essa uma melhoria real do roadmap: a `SPEC-001` deixa de ser “vamos criar um plugin framework” e passa a ser **“vamos estabelecer uma arquitetura modular verificável sobre a Wallet existente”**. Isso combina muito bem com o nível de maturidade que o seu Wallet Service já alcançou.
+
+[1]: https://spring.io/projects/spring-modulith/?utm_source=chatgpt.com "Spring Modulith"
+[2]: https://docs.spring.io/spring-modulith/docs/current/api/org/springframework/modulith/events/?utm_source=chatgpt.com "Index of /spring-modulith/docs/current/api/org/springframework/modulith/events"
+[3]: https://docs.spring.io/spring-modulith/reference/moments.html?utm_source=chatgpt.com "Moments — a Passage of Time Events API :: Spring Modulith"
+[4]: https://docs.spring.io/spring-modulith/docs/current/api/org/springframework/modulith/observability/?utm_source=chatgpt.com "Index of /spring-modulith/docs/current/api/org/springframework/modulith/observability"

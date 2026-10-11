@@ -1,0 +1,624 @@
+Yes. With the changes we discussed, **this SPEC-000.9.1 is substantially better and is now much closer to a closed architectural contract**.
+
+I reviewed the uploaded revision, particularly the new requirements around durable status recovery, monotonic status, resource isolation, graceful shutdown, and node-local spool ownership.
+
+## My verdict
+
+**Architecture: 9.5/10**
+**Traceability: 9/10**
+**Implementation readiness: 9/10**
+
+I would **not redesign the spec** at this point. There are, however, **4 things I would fix before treating History 46 as the final ratified version**.
+
+---
+
+# 1. The biggest issue: `REQ-PRC-020` has a questionable failure fallback
+
+You now have:
+
+> Edge MUST resolve durable operation state ... via asynchronous NATS Request-Reply ... ensuring SSE clients bootstrap current durable state.
+
+That's a good architectural solution because Edge remains DB-less.
+
+The problem is in the test:
+
+> NATS query timeout → Attaches live listener
+
+and:
+
+> Unresolvable status → Returns empty Optional.
+
+I would **not make "query timeout → attach live listener" the canonical behavior**.
+
+Imagine:
+
+```text
+Client reconnects
+       │
+       ▼
+Edge
+       │
+       ├── query durable state
+       │
+       X timeout
+       │
+       ▼
+attach live listener
+```
+
+The client could now wait forever for an event that already happened.
+
+Example:
+
+```text
+Core:
+  COMPLETED
+       ↓
+NATS status event
+       ↓
+Edge missed event
+       ↓
+client reconnects
+       ↓
+query times out
+       ↓
+live subscription
+       ↓
+... no more events ...
+```
+
+The SSE stream would incorrectly appear stuck.
+
+### Better behavior
+
+I would define:
+
+```text
+query success
+    ↓
+bootstrap state
+    ↓
+subscribe/live transition
+
+query timeout
+    ↓
+retry boundedly
+    ↓
+if still unavailable → explicit degraded status / retry response
+```
+
+Not silently fall back to live-only.
+
+For example:
+
+```text
+REQ-PRC-020:
+
+Edge MUST resolve durable operation state through NATS Request-Reply
+before establishing the SSE live stream.
+
+If the durable query cannot be resolved within the configured timeout,
+the Edge MUST NOT claim the operation state is current solely from the
+live event stream.
+```
+
+That is much safer.
+
+---
+
+# 2. There is a subtle contradiction around status durability
+
+You currently say:
+
+```text
+Core
+  → operations.status.<operationId>
+  → Edge
+```
+
+and:
+
+```text
+Edge
+  → operations.query.<operationId>
+  → Core
+```
+
+This is good.
+
+But **where does Core get the durable operation state from?**
+
+The spec calls it:
+
+> durable operation state
+
+but doesn't explicitly identify the source of truth.
+
+That's important.
+
+The architecture should be something like:
+
+```text
+                    CORE
+                      │
+              ┌───────┴────────┐
+              │                │
+        Financial Ledger   Operation State
+              │                │
+              └───────┬────────┘
+                      │
+               Durable state
+                      │
+              operations.query
+                      │
+                      ▼
+                    EDGE
+```
+
+The query responder should **not reconstruct status from NATS history**.
+
+NATS is the transport/fanout mechanism.
+
+The durable operation state needs to live in an authoritative persistent store.
+
+### Therefore I'd add one sentence to `REQ-PRC-020`
+
+Something like:
+
+> The Request-Reply responder MUST resolve state from the authoritative durable operation-state store and MUST NOT depend on in-memory status state or previously delivered NATS events.
+
+That closes an important architectural hole.
+
+---
+
+# 3. `REQ-PRC-007` and `REQ-PRC-008` currently have two status channels
+
+You have:
+
+```text
+operations.status.<operationId>
+```
+
+**and**
+
+```text
+events.operations.status
+```
+
+in `REQ-PRC-007`.
+
+Then Edge subscribes to both.
+
+I would question whether you really need both.
+
+You potentially have:
+
+```text
+Core
+ ├── operations.status.<operationId>
+ └── events.operations.status
+```
+
+Why?
+
+If the purpose of the second subject is broadcast/fanout, NATS subject hierarchy already gives you:
+
+```text
+operations.status.<operationId>
+```
+
+and:
+
+```text
+operations.status.>
+```
+
+depending on how the stream/subscription is designed.
+
+I'd strongly prefer **one canonical status event contract**.
+
+For example:
+
+```text
+operations.status.<operationId>
+```
+
+Then:
+
+```text
+Edge:
+operations.status.*
+```
+
+for live operation-specific SSE.
+
+If you need a general status event stream:
+
+```text
+events.operations.status
+```
+
+can exist, but its purpose should be explicitly different.
+
+Otherwise you're creating two potentially divergent representations of the same state.
+
+### My preference
+
+```text
+Core
+  │
+  ▼
+operations.status.<operationId>
+  │
+  ├── Edge-1
+  ├── Edge-2
+  └── Edge-N
+```
+
+and:
+
+```text
+operations.query.<operationId>
+```
+
+for recovery.
+
+That's clean.
+
+---
+
+# 4. `I-JOURNAL-001` is now too deployment-specific for this SPEC
+
+This part is technically good:
+
+> Option A Node-Local NVMe / HostPath or Option B Dedicated RWO CSI Block Volume per pod via StatefulSet.
+
+But I think we've crossed the boundary we were trying to preserve.
+
+The spec says:
+
+> Platform-specific orchestrations ... are deferred to SPEC-000.9.2.
+
+Then `I-JOURNAL-001` starts prescribing:
+
+```text
+HostPath
+CSI
+ReadWriteOnce
+StatefulSet
+```
+
+That's Kubernetes vocabulary.
+
+I'd keep the architectural invariant here:
+
+```text
+I-JOURNAL-001
+
+Each Edge instance MUST exclusively own its local journal.
+A journal volume MUST NOT be concurrently shared between Edge instances.
+```
+
+Then put:
+
+```text
+HostPath
+RWO CSI
+StatefulSet
+NVMe
+```
+
+in **SPEC-000.9.2**.
+
+This makes `I-RUNTIME-002` much cleaner too:
+
+```text
+Application
+     │
+     ▼
+OCI
+     │
+ ┌───┼─────────────┐
+ │   │             │
+Docker Kubernetes Cloud Foundry
+```
+
+without the application architecture knowing the deployment technology.
+
+---
+
+# 5. One mathematical invariant should be softened
+
+This:
+
+> `I-SCALE-001`: correctness is independent of instance affinity/shared in-memory state.
+
+is directionally right, but I'd phrase it carefully.
+
+There **can** be local state that affects performance or temporary behavior:
+
+```text
+Edge:
+  token bucket
+  connection state
+  SSE subscribers
+  local journal
+
+Core:
+  caches
+  worker pools
+  local execution state
+```
+
+What must not depend on instance affinity is **financial correctness**.
+
+So:
+
+```text
+FinancialCorrectness(Cluster)
+    ⟂ InstanceAffinity
+```
+
+is good.
+
+But don't imply:
+
+```text
+SystemBehavior
+    ⟂ InstanceAffinity
+```
+
+because that's not true.
+
+---
+
+# 6. `I-STATE-001` name could be clearer
+
+You currently call it:
+
+> Stateless Edge vs Stateful Core
+
+but then Edge actually maintains:
+
+```text
+local segmented journal
+NATS connection state
+SSE state
+rate-limit state
+```
+
+So "Stateless Edge" is somewhat misleading.
+
+I'd rename it:
+
+### `I-STATE-001 — Zero Relational State in Edge`
+
+or:
+
+### `I-STATE-001 — Edge Relational-DB Independence`
+
+Then:
+
+```text
+DBPoolSize(Edge) = 0
+ActiveSQLConnections(Edge) = 0
+```
+
+is exactly what you're actually guaranteeing.
+
+---
+
+# 7. The graceful shutdown section is now very good
+
+This is one of the best improvements.
+
+You explicitly added:
+
+```text
+REQ-PRC-014
+```
+
+and separately:
+
+```text
+REQ-PRC-022
+```
+
+for the critical ACK invariant.
+
+That's excellent.
+
+The distinction is important:
+
+```text
+SIGTERM
+   │
+   ├── Edge → stop ingress + flush
+   │
+   └── Core → stop polling
+                ↓
+          finish transaction
+                ↓
+          durable commit
+                ↓
+              ACK
+```
+
+This is much stronger than simply saying "Spring graceful shutdown".
+
+---
+
+# 8. The status monotonicity invariant is also a very good addition
+
+This:
+
+```text
+COMPLETED / FAILED
+        ↓
+terminal
+        ↓
+no mutation
+```
+
+is exactly what you need once JetStream at-least-once delivery enters the architecture.
+
+I'd only clarify one thing:
+
+**Does `FAILED` include retryable infrastructure failure?**
+
+It should probably not.
+
+You want something like:
+
+```text
+PROCESSING
+   │
+   ├── transient infrastructure failure
+   │        ↓
+   │      retry
+   │
+   ├── business rejection
+   │        ↓
+   │      FAILED
+   │
+   └── success
+            ↓
+        COMPLETED
+```
+
+Otherwise an infrastructure timeout could accidentally make an operation terminal.
+
+That semantic distinction belongs somewhere in the contract.
+
+---
+
+# 9. One thing missing from the current SPEC: `operationId` payload fingerprint
+
+Your earlier 000.9 architecture established the important rule:
+
+```text
+same operationId
++
+same canonical payload
+=
+idempotent
+
+same operationId
++
+different payload
+=
+409
+```
+
+The current 000.9.1 spec mentions `operation_id` deduplication and `Nats-Msg-Id`, but doesn't restate the payload-conflict invariant.
+
+I **wouldn't duplicate all of 000.9's idempotency spec**, but I would reference it explicitly.
+
+For example:
+
+> `I-IDEMPOTENCY-001` remains authoritative for operation identity and canonical payload fingerprinting across Edge/Core process boundaries.
+
+That avoids spec duplication.
+
+---
+
+# 10. I like the portability decision
+
+This is now correctly separated:
+
+```text
+I-RUNTIME-002
+```
+
+> OCI-compatible, no dependency on Kubernetes/cloud/orchestrator APIs.
+
+And the spec explicitly pushes:
+
+```text
+RKE2 / Rancher / vCluster / GKE
+```
+
+to 000.9.2.
+
+**Keep this exactly as a boundary.**
+
+That's going to pay off later when we design the deployment profile.
+
+---
+
+# What I would change before final ratification
+
+I would make only these changes:
+
+| Area                                                | Decision                                                                 |
+| --------------------------------------------------- | ------------------------------------------------------------------------ |
+| Durable status query                                | **Clarify authoritative source + timeout behavior**                      |
+| `operations.status.*` vs `events.operations.status` | **Choose one canonical status channel or explicitly differentiate them** |
+| Journal deployment                                  | **Remove HostPath/RWO/StatefulSet from 000.9.1; move to 000.9.2**        |
+| `I-STATE-001`                                       | Rename to DB/relational-state independence                               |
+| `I-SCALE-001`                                       | Explicitly scope independence to financial correctness                   |
+| Status failures                                     | Clarify retryable vs terminal failure                                    |
+| Idempotency                                         | Reference authoritative 000.9 contract                                   |
+
+I would **not add any new major architectural component**.
+
+---
+
+## The resulting architecture is now very clean
+
+After these small corrections, I'd consider the architecture:
+
+```text
+                         WALLET PLATFORM
+                               │
+             ┌─────────────────┴─────────────────┐
+             │                                   │
+       EDGE RUNTIME                         CORE RUNTIME
+             │                                   │
+      EdgeApplication                      CoreApplication
+             │                                   │
+        HTTP / QUIC                         Headless
+             │                                   │
+        SSE / Journal                          │
+             │                                   │
+             └────────────── NATS ──────────────┘
+                            │
+                  ┌─────────┴─────────┐
+                  │                   │
+             PostgreSQL          Dragonfly
+                  │
+             Durable operation
+                 state
+```
+
+with:
+
+```text
+Edge ─────→ commands.wallet.*
+             │
+             ▼
+           Core
+             │
+             ├────→ operations.status.<opId>
+             │
+             └────→ durable operation state
+                         ▲
+                         │
+Edge ── Request/Reply ───┘
+```
+
+That gives you **three separate guarantees**:
+
+1. **Command durability** → JetStream/local journal.
+2. **Financial truth** → Core/PostgreSQL transaction.
+3. **Current operation status** → durable state + NATS live notification.
+
+That's a much stronger architecture than simply "Edge talks to Core through NATS."
+
+### Bottom line
+
+**Yes — this revision successfully incorporates the important changes from our previous review.** I would now do a **small History 47 cleanup**, not another architectural revision.
+
+The only issue I'd call genuinely important is the **durable-status recovery semantics**. The current `REQ-PRC-020` is very close, but the `NATS timeout → attach live listener` behavior should be corrected so that an SSE client can never silently miss an already-completed operation.
+
+After that, I think **SPEC-000.9.1 is ready to become the stable contract from which we regenerate/reconcile PLAN-000.9.1 and TASKS-000.9.1**.

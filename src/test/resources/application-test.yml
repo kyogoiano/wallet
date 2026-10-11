@@ -1,9 +1,82 @@
 management:
+  tracing:
+    enabled: false
+  opentelemetry:
+    metrics:
+      export:
+        otlp:
+          enabled: false
+    tracing:
+      export:
+        otlp:
+          enabled: false
+    logging:
+      export:
+        otlp:
+          enabled: false
   otlp:
     metrics:
       export:
         enabled: false
+    tracing:
+      export:
+        enabled: false
+    logging:
+      export:
+        enabled: false
+
+logging:
+  opentelemetry:
+    enabled: false
+
+spring:
+  modulith:
+    events:
+      jdbc-schema-initialization:
+        enabled: false
+      completion-mode: UPDATE
+      republish-outstanding-events-on-restart: false
+  ai:
+    mcp:
+      server:
+        enabled: true
+        name: wallet-copilot
+        version: "1.0.0"
+        protocol: STREAMABLE
+        streamable-http:
+          mcp-endpoint: /mcp
 
 redis:
   socket:
     enabled: false
+
+wallet:
+  runtime:
+    mode: multi-process
+  edge:
+    enabled: false
+  outbox:
+    relay:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+  dlq:
+    replay:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+
+edge:
+  spool:
+    directory: ${java.io.tmpdir}/wallet-spool-${random.uuid}
+
+fraud:
+  fusion:
+    worker:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+    recovery:
+      initial-delay: 3600000
+      fixed-delay: 3600000
+  propagation:
+    worker:
+      poll-interval-ms: 3600000
+      reap-interval-ms: 3600000

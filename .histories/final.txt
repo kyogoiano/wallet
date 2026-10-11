@@ -1,0 +1,198 @@
+## Revisão do TASKS-004.1 — MCP Gateway & Human Interaction
+
+O breakdown está organizado e a maioria das tarefas tem escopo, arquivos-alvo e uma tríade de testes. Porém, **eu não aprovaria ainda o status `Ready for Implementation`**. Há algumas inconsistências de prioridade, lacunas na cobertura de segurança e uma dependência técnica importante: o plano precisa garantir que o fluxo de elicitação realmente funcione com a versão do Spring AI e o modo de transporte escolhidos.
+
+O problema mais evidente é que as tarefas de elicitação foram classificadas como `[SHOULD]`, mas a tarefa final `[MUST]` exige testes de segurança que dependem desses fluxos. Além disso, os testes previstos não cobrem integralmente as garantias de autorização humana, idempotência concorrente e integração com o protocolo MCP real.
+
+Minha recomendação é fazer uma revisão curta de convergência antes de começar a implementação.
+
+## 1. Bloqueios que eu corrigiria nas TASKS
+
+### [MUST] 1.1. A ordem das tarefas não respeita a própria política MoSCoW
+
+O documento declara:
+
+> `I-SDD-004: [MUST] tasks first`
+
+Mas o grafo termina com:
+
+```text
+TASK-004.1.6 [SHOULD]
+        ↓
+TASK-004.1.7 [SHOULD]
+        ↓
+TASK-004.1.8 [SHOULD]
+        ↓
+TASK-004.1.9 [MUST]
+```
+
+Ou seja, a última tarefa obrigatória depende de três tarefas opcionais.
+
+Isso não é necessariamente um erro de dependência técnica, mas é uma contradição no planejamento. Há duas soluções válidas:
+
+- **Opção A — recomendada:** elevar para `[MUST]` os gates de segurança necessários ao fluxo de elicitação e dividir a tarefa 9 em gates de arquitetura e segurança independentes.
+- **Opção B:** separar a convergência obrigatória dos recursos opcionais, deixando o suporte a MRTR e recuperação interativa avançada para uma fase posterior.
+
+Como a especificação trata de autorização de operações financeiras, não deixaria a verificação de segurança humana como opcional.
+
+### [MUST] 1.2. A tarefa 1 pode estar criando contratos públicos sem verificar os existentes
+
+A tarefa determina a criação de:
+
+- `CashflowQueryUseCase`
+- `SubscriptionQueryUseCase`
+
+e define suas implementações.
+
+Entretanto, o plano anterior já menciona contratos de leitura e serviços existentes. A descrição das TASKS não demonstra que os contratos e assinaturas propostos foram comparados com o código real.
+
+**Ajuste:** antes de criar interfaces, inspecionar os contratos existentes e verificar os consumidores. Só criar ou alterar APIs quando a necessidade estiver comprovada.
+
+Também vale corrigir a inconsistência de nomes: a tarefa menciona `SubscriptionQueryService`, enquanto o histórico do plano cita `SubscriptionService` em uma das justificativas. A implementação correta precisa ser determinada pelo código, não escolhida por suposição.
+
+### [MUST] 1.3. A negociação de capacidades precisa corresponder à versão do protocolo
+
+A tarefa 5 diz:
+
+> Inspect client capabilities during handshake (`initialize`) for `form_elicitation` and `url_elicitation`.
+
+Isso precisa ser confirmado contra a versão exata do protocolo MCP e do Spring AI adotada pelo projeto.
+
+Na especificação MCP consultada, a declaração de capacidades de elicitação aparece nos metadados da requisição, com suporte a modos Form e URL. O comportamento e o formato não devem ser presumidos a partir de nomes internos como `form_elicitation`. [GitHub](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx?utm_source=chatgpt.com)
+
+A documentação do Spring AI também distingue o transporte Streamable HTTP do modo Stateless: o modo Stateless não suporta requisições iniciadas pelo servidor ao cliente, incluindo elicitação. [Home](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-stateless-server-boot-starter-docs.html?utm_source=chatgpt.com)
+
+**Ajuste:** a tarefa deve exigir uma prova de compatibilidade com a versão escolhida antes de fixar o mecanismo de negociação. Isso inclui o formato real dos metadados de capacidade, o modo de transporte e um teste de integração.
+
+Não basta testar um `McpClientCapabilities` criado manualmente em memória.
+
+### [MUST] 1.4. O cancelamento de uma elicitação não deve rejeitar automaticamente a proposta
+
+Na tarefa 6, a tríade de testes afirma:
+
+> Form decline/cancel transitions proposal to `REJECTED`.
+
+Essa regra mistura dois eventos diferentes.
+
+O protocolo MCP distingue:
+
+- `accept`: interação aceita e resposta submetida;
+- `decline`: usuário recusou explicitamente;
+- `cancel`: interação cancelada ou dispensada, sem uma decisão explícita. [GitHub](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx?utm_source=chatgpt.com)
+
+Portanto, eu mudaria o comportamento:
+
+| Resposta MCP | Comportamento esperado |
+|---|---|
+| `accept` | Validar o fluxo e a identidade humana; não aprovar automaticamente. |
+| `decline` | Pode rejeitar a proposta se essa semântica estiver explicitamente definida no contrato de negócio. |
+| `cancel` | Encerrar ou suspender a interação; não rejeitar automaticamente a proposta. |
+| Timeout/desconexão | Preservar o estado financeiro autoritativo até expiração ou outra transição válida. |
+
+A distinção é importante porque uma janela fechada, uma desconexão ou uma interrupção do agente não equivalem necessariamente a uma decisão financeira do titular.
+
+### [MUST] 1.5. A tarefa 4 precisa exigir idempotência concorrente, não apenas sequencial
+
+A tarefa 4 cobre a repetição da mesma chave com payload igual ou divergente. Isso é necessário, mas ainda não demonstra o comportamento sob concorrência.
+
+Eu acrescentaria testes para:
+
+1. Duas chamadas simultâneas com o mesmo tenant, chave e payload.
+2. Duas chamadas simultâneas com o mesmo tenant e chave, mas payloads divergentes.
+3. Timeout após a persistência da proposta, seguido de retry com a chave original.
+4. Garantia de que somente uma proposta é criada.
+
+O contrato deve continuar alinhado à restrição `(tenant_id, idempotency_key)` da SPEC-004. A garantia final precisa vir da persistência e do contrato de domínio, não apenas de um `if` na ferramenta MCP.
+
+### [MUST] 1.6. A tarefa 9 precisa de critérios de aceite mais precisos
+
+O nome `End-to-End Security & Architecture Convergence` é adequado, mas o escopo mistura diferentes tipos de verificação:
+
+- segurança HTTP;
+- protocolo MCP;
+- autorização humana;
+- segurança do token de URL;
+- arquitetura Modulith;
+- fluxo financeiro completo.
+
+O teste `Full flow from proposal creation to verified approval passes` não especifica qual fluxo deve ser exercitado, nem demonstra que a elicitação está funcionando pelo protocolo real.
+
+Eu dividiria o gate em três partes:
+
+**Gate A — Arquitetura e transporte**
+- Teste real de inicialização e chamada de ferramenta MCP.
+- Autenticação HTTP e rejeição de chamadas não autorizadas.
+- Verificação do isolamento dos módulos.
+- Verificação das capacidades e do transporte escolhidos.
+
+**Gate B — Autorização**
+- Agente não pode autorizar sozinho.
+- Usuário não autorizado não pode aprovar.
+- Respostas atrasadas, duplicadas ou inválidas não produzem uma segunda autorização.
+- Aprovação respeita tenant, titular, TTL e estado da proposta.
+
+**Gate C — Fluxos opcionais de interação**
+- Form Elicitation.
+- URL Elicitation.
+- Perda de estado e retomada.
+- Fallback Web/CLI.
+
+Os gates A e B são obrigatórios. O gate C deve ser obrigatório para cada modalidade que for declarada como suportada no release.
+
+---
+
+## 2. Uma lacuna de segurança na tarefa 2
+
+A tarefa 2 diz que `McpSecurityFilter` valida o principal de transporte e popula o `SecurityContext`.
+
+Isso, por si só, não resolve a separação entre agente e autorizador humano.
+
+A documentação do Spring AI alerta que os endpoints HTTP do servidor MCP não recebem autenticação e autorização automaticamente: a aplicação precisa implementar sua própria fronteira de segurança. [Home](https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html?utm_source=chatgpt.com)
+
+Eu acrescentaria à tarefa 2 estes critérios:
+
+- O filtro valida as credenciais segundo o mecanismo de autenticação efetivamente configurado.
+- O principal de transporte não é tratado automaticamente como titular da conta.
+- A identidade do tenant vem de um contexto autenticado e confiável; parâmetros de ferramenta não podem sobrescrevê-la.
+- A autorização humana é verificada por um mecanismo independente e confiável.
+- As ferramentas não podem contornar a autorização de domínio chamando diretamente métodos de aprovação ou execução.
+
+Há também uma distinção importante: o `McpSecurityFilter` protege a entrada HTTP, mas não substitui a autorização de cada operação. As ferramentas de leitura e proposta continuam responsáveis por respeitar os contratos públicos e as restrições de tenant.
+
+---
+
+## 3. Mudanças recomendadas no breakdown
+
+Eu manteria os IDs existentes, para preservar a rastreabilidade, e ajustaria o escopo e a sequência desta forma:
+
+| Task | Prioridade recomendada | Ajuste |
+|---|---|---|
+| `TASK-004.1.1` | MUST | Inspecionar contratos existentes e reconciliar as APIs antes de criar ou modificar interfaces. |
+| `TASK-004.1.2` | MUST | Confirmar transporte, autenticação HTTP e separação entre principal de transporte e titular. |
+| `TASK-004.1.3` | MUST | Implementar ferramentas de leitura com isolamento de tenant e testes dos contratos reais. |
+| `TASK-004.1.4` | MUST | Implementar propostas com validação monetária, idempotência persistente e concorrente. |
+| `TASK-004.1.5` | MUST | Validar capacidades e compatibilidade real do protocolo MCP/Spring AI. |
+| `TASK-004.1.6` | MUST, se Form Elicitation for suportado no release | Implementar a interação sem confundir `accept` com autorização financeira. |
+| `TASK-004.1.7` | MUST, se URL Elicitation for suportado no release | Implementar autenticação independente, vínculo de identidade e proteção contra replay. |
+| `TASK-004.1.8` | SHOULD | Manter tracker efêmero e fallback seguro; não tornar a retomada avançada obrigatória sem necessidade comprovada. |
+| `TASK-004.1.9` | MUST | Dividir os gates obrigatórios de integração, segurança e arquitetura dos testes de modalidades opcionais. |
+
+A classificação das tarefas 6 e 7 depende do escopo do release. Se a aplicação pretende disponibilizar essas modalidades na primeira versão, os respectivos gates de segurança não podem ser adiados. Se o release inicial oferece somente propostas pendentes e aprovação externa autenticada, é possível manter as modalidades interativas para uma fase posterior.
+
+## 4. Critério para autorizar a implementação
+
+Antes de aceitar `Ready for Implementation`, eu exigiria que o documento revisado respondesse claramente a estas perguntas:
+
+1. **Qual combinação exata de Spring Boot, Spring AI e versão do protocolo MCP será utilizada?**
+2. **Como o servidor comprova que a pessoa que aprova é o titular autorizado, e não apenas o agente que enviou a resposta?**
+3. **Como as ferramentas garantem idempotência sob chamadas concorrentes?**
+4. **O que acontece quando o usuário cancela, quando o cliente desconecta e quando a proposta expira durante a interação?**
+5. **Quais testes de integração realmente exercitam o protocolo, em vez de apenas testar classes internas?**
+
+As fontes consultadas confirmam a necessidade de distinguir Streamable HTTP de Stateless e de tratar a elicitação como um protocolo próprio. Elas não comprovam, por si só, a compatibilidade da combinação exata de versões prevista no seu repositório; isso precisa ser validado no projeto.
+
+### Veredito
+
+**Eu devolveria o TASKS-004.1 ao Orchestrator para uma última revisão, sem iniciar a implementação ainda.** Não é necessário redesenhar a arquitetura: basta corrigir as prioridades, fechar os contratos de segurança e idempotência e tornar os critérios de aceite verificáveis.
+
+O princípio que deve permanecer inegociável é: **o MCP pode transportar a interação, mas não pode transformar a resposta de um agente em autorização financeira.**

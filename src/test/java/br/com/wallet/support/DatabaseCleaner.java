@@ -1,10 +1,39 @@
 package br.com.wallet.support;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
+
 @Component
 public class DatabaseCleaner {
+
+    private static final Logger log = LoggerFactory.getLogger(DatabaseCleaner.class);
+
+    private static final List<String> TABLES_IN_DELETE_ORDER = List.of(
+            "copilot_proposals",
+            "fraud_analyst_reviews",
+            "fraud_investigation_checkpoints",
+            "fraud_fusion_jobs",
+            "fraud_relationship_events",
+            "fraud_relationships",
+            "fraud_entities",
+            "dlq_operations",
+            "subscriptions",
+            "intelligence_processed_events",
+            "goals",
+            "cashflow_profiles",
+            "savings_execution_history",
+            "savings_rules",
+            "savings_plans",
+            "ledger",
+            "accounts",
+            "outbox",
+            "event_publication",
+            "wallet_operations"
+    );
 
     private final JdbcTemplate jdbc;
 
@@ -13,6 +42,12 @@ public class DatabaseCleaner {
     }
 
     public void clean() {
-        jdbc.execute("TRUNCATE TABLE ledger, accounts, outbox, wallet_operations RESTART IDENTITY CASCADE");
+        for (String table : TABLES_IN_DELETE_ORDER) {
+            try {
+                jdbc.execute("DELETE FROM " + table);
+            } catch (Exception e) {
+                log.warn("Failed to delete from {}: {}", table, e.getMessage());
+            }
+        }
     }
 }

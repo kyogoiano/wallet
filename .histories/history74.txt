@@ -1,0 +1,1216 @@
+This Rev. 2 is **substantially better** than the previous plan. The separation between the security contracts and infrastructure adapters, the immutable envelope, sealed replay algebra, pre-transaction cryptographic gate, and dual Gradle/Modulith boundary are all coherent.
+
+However, I would **not mark it TASK-ready yet**. I see **5 MUST-level corrections**, plus several SHOULD refinements. The most important ones are around **DEK lifecycle, nonce admission, KMS binding, and the “contracts only” boundary**.
+
+## 1. Overall gate
+
+| Area                       | Assessment                                         |
+| -------------------------- | -------------------------------------------------- |
+| Envelope model             | 🟢 Strong                                          |
+| AES-256-GCM design         | 🟢 Strong, with IV lifecycle clarification needed  |
+| AAD                        | 🟡 Good structure, KMS binding missing             |
+| Replay                     | 🔴 Availability flaw after nonce admission         |
+| DEK cache                  | 🔴 Semantics currently unsafe/underspecified       |
+| KMS boundary               | 🟡 Architecture/code contradicts itself            |
+| Journal protection         | 🟢 Strong                                          |
+| Transaction isolation      | 🟢 Strong                                          |
+| Telemetry                  | 🟢 Strong direction                                |
+| Modulith/Gradle boundaries | 🟢 Strong                                          |
+| Failure algebra            | 🟡 Needs finer classification                      |
+| Testing                    | 🟢 Good foundation, several security tests missing |
+| Performance                | 🟡 Targets good, methodology needs tightening      |
+
+**Verdict: `REVISE → TASK-READY` rather than `APPROVED`.**
+
+---
+
+# 2. MUST #1 — Fix nonce admission semantics
+
+This is the biggest issue I found.
+
+Your sequence is:
+
+```text
+HMAC
+  ↓
+NonceTracker.admit()
+  ↓
+Accepted
+  ↓
+KMS / DEK
+  ↓
+AES-GCM
+  ↓
+Journal
+  ↓
+NATS
+```
+
+Suppose:
+
+```text
+Nonce = N123
+HMAC = valid
+NonceTracker = Accepted
+KMS = timeout
+```
+
+The client retries the **same legitimate request**.
+
+Now:
+
+```text
+Nonce N123 already exists
+        ↓
+Rejected / replay
+        ↓
+401
+```
+
+You've converted a transient internal failure into a permanent client-visible replay rejection.
+
+The same happens if:
+
+* encryption fails;
+* journal append fails;
+* journal fsync fails;
+* NATS publication fails after journal persistence;
+* Edge crashes between nonce admission and durable acceptance.
+
+That is particularly problematic because your existing architecture deliberately distinguishes **security replay protection** from **financial idempotency**.
+
+### I would change the model
+
+Don't model nonce admission as merely:
+
+```java
+Accepted
+Rejected
+Unavailable
+```
+
+Instead, make the lifecycle explicit.
+
+For example:
+
+```text
+NonceReservation
+ ├── Accepted
+ ├── Rejected
+ └── Unavailable
+```
+
+with an explicit relationship to durable acceptance.
+
+Conceptually:
+
+```text
+HMAC
+  ↓
+reserve nonce
+  ↓
+encrypt
+  ↓
+durable journal append
+  ↓
+commit nonce admission
+```
+
+Or, if you deliberately want the nonce to be consumed immediately, then the specification must explicitly state:
+
+> Once nonce admission succeeds, all subsequent Edge failures are retriable only through `Idempotency-Key`/operation state and MUST NOT require reuse of the same nonce.
+
+But that requires an additional mechanism because the current Edge has no relational source of truth.
+
+### Required test
+
+Add:
+
+`NonceAdmissionFailureRecoveryTest`
+
+Cases:
+
+1. nonce accepted → KMS failure → retry same request
+2. nonce accepted → journal failure → retry
+3. nonce accepted → Edge crash before durable journal
+4. nonce accepted → successful journal → duplicate retry
+5. concurrent same nonce
+
+This is a **MUST fix**.
+
+---
+
+# 3. MUST #2 — DEK cache semantics need redesign
+
+The phrase:
+
+> “Evicts after 100,000 encryptions.”
+
+is problematic.
+
+A cache doesn't naturally have an eviction policy based on the number of encryptions unless you explicitly implement an encryption-use counter.
+
+More importantly, the current plan doesn't clearly define **what the cache key is**.
+
+You currently have:
+
+```text
+CachedKeyManagementClient
+    ↓
+plaintext DEK
+```
+
+but we need something like:
+
+```text
+CacheKey = (tenantId, keyId, wrappedDek identity)
+```
+
+or, if the design intends to reuse one generated DEK:
+
+```text
+CacheKey = (tenantId, keyId)
+CachedValue = plaintext DEK + wrapped DEK + creation metadata
+```
+
+Those are materially different security models.
+
+### Why this matters
+
+AWS KMS's data-key model supports exactly the general pattern you're using: a plaintext data key is returned for immediate encryption and an encrypted copy can accompany the ciphertext. AWS explicitly recommends erasing the plaintext key after use. ([AWS Documentation][1])
+
+Your cache deliberately extends plaintext DEK lifetime, so that extension needs to be an explicit architectural decision.
+
+I'd define:
+
+```text
+DEK Cache Entry
+----------------
+tenantId
+keyId
+wrappedDek
+SensitiveKeyMaterial plaintextDek
+createdAt
+expiresAt
+encryptionCount
+```
+
+and explicitly specify:
+
+```text
+maxAge = 10 min
+maxUses = N
+maxEntries = M
+```
+
+rather than:
+
+> “evicts after 100,000 encryptions”
+
+Also specify:
+
+* whether `maxUses` is per DEK;
+* whether cache entries are tenant-isolated;
+* whether concurrent callers can exceed `maxUses`;
+* whether eviction waits for in-flight encryption;
+* whether plaintext DEK is zeroized immediately after eviction;
+* whether rotation invalidates the cache;
+* whether a KMS-generated wrapped DEK is reused across envelopes.
+
+### Important point
+
+**100,000 encryptions per DEK is not automatically wrong**, but it needs to be justified against the GCM invocation budget and key lifecycle.
+
+NIST explicitly imposes an invocation/IV uniqueness constraint for GCM and discusses global invocation limits under a given key. ([NIST Publications][2])
+
+So I'd make the limit a cryptographic policy, not merely a cache-performance number.
+
+---
+
+# 4. MUST #3 — Bind the wrapped DEK to the tenant
+
+This is the security improvement I would definitely add.
+
+Your application-level AAD is:
+
+```text
+version
+tenantId
+operationId
+keyId
+algorithm
+```
+
+That's good.
+
+But your **KMS-wrapped DEK** is a separate cryptographic object.
+
+The architecture should bind:
+
+```text
+wrapped DEK
+    ↕
+tenant
+    ↕
+KMS key
+```
+
+Otherwise the wrapped DEK is cryptographically valid independently of the envelope's AAD.
+
+For AWS KMS specifically, an **Encryption Context** is authenticated additional data and must match during decrypt; AWS recommends it for this use. ([AWS Documentation][1])
+
+I would therefore introduce something conceptually like:
+
+```text
+KMS Encryption Context
+
+WALLET-ENV-V1
+tenant_id = <tenant>
+key_domain = WALLET-ENV-V1
+```
+
+Possibly:
+
+```text
+key_id = <key-id>
+```
+
+if the provider semantics support it appropriately.
+
+I would **not put `operationId` into the KMS encryption context if the wrapped DEK is reused across multiple envelopes**, because then every envelope would require a different wrapped DEK.
+
+Instead:
+
+```text
+KMS binding:
+    tenantId
+    key domain/version
+
+GCM AAD:
+    tenantId
+    operationId
+    envelope version
+    keyId
+    algorithm
+```
+
+This gives you two independent bindings.
+
+### Result
+
+```text
+             KMS protection
+                 │
+       tenant ───┤
+                 ↓
+             wrapped DEK
+                 │
+                 ↓
+       plaintext DEK
+                 │
+                 ↓
+       AES-256-GCM
+                 │
+       ┌─────────┴─────────┐
+       ↓                   ↓
+   plaintext             AAD
+                         tenant
+                         operation
+                         version
+                         keyId
+                         algorithm
+```
+
+That's considerably stronger.
+
+---
+
+# 5. MUST #4 — “Security contracts only” contradicts the package tree
+
+You say:
+
+> technology adapters reside in `br.com.wallet.infrastructure`
+
+but then put these under:
+
+```text
+br.com.wallet.security.keymanagement
+
+InMemoryKeyManagementClient
+LocalApplianceKeyManagementClient
+CachedKeyManagementClient
+```
+
+That violates your own boundary.
+
+In particular:
+
+### `LocalApplianceKeyManagementClient`
+
+Definitely infrastructure.
+
+I'd move:
+
+```text
+br.com.wallet.security.keymanagement
+    KeyManagementClient
+    GeneratedDataKey
+    SensitiveKeyMaterial
+```
+
+and:
+
+```text
+br.com.wallet.infrastructure.security.keymanagement
+    AwsKmsKeyManagementClient
+    VaultKeyManagementClient
+    LocalApplianceKeyManagementClient
+    CachedKeyManagementClient
+```
+
+For:
+
+```text
+InMemoryKeyManagementClient
+```
+
+I'd go even further:
+
+```text
+src/test/java/.../security/testsupport/InMemoryKeyManagementClient
+```
+
+It should **not exist in production artifacts** unless there is an explicit reason.
+
+The plan currently calls the security Modulith:
+
+> Contracts Only
+
+while putting implementations inside it.
+
+That should be corrected before TASKS.
+
+---
+
+# 6. MUST #5 — Strengthen the CryptoEnvelope validation
+
+This is already quite good:
+
+```java
+if (iv.length() != 12)
+```
+
+But the envelope should validate more than that.
+
+At minimum:
+
+```text
+version supported
+algorithm supported
+IV = 12 bytes
+wrappedDek != empty
+ciphertext >= authentication-tag length
+tenantId valid
+operationId valid
+keyId valid
+```
+
+Also explicitly define:
+
+```text
+GCM tag = 128 bits
+AES key = 256 bits
+IV = 96 bits
+```
+
+The 96-bit IV is consistent with standard GCM practice, and NIST's GCM guidance treats IV uniqueness as a critical security requirement. ([NIST Publications][3])
+
+I'd also make the IV generation contract explicit:
+
+```java
+GcmIv generate();
+```
+
+backed by:
+
+```java
+SecureRandom
+```
+
+rather than leaving “CSPRNG” as an implementation assumption.
+
+---
+
+# 7. AAD implementation: good, but one change
+
+The move from delimiter-based strings to length-prefixed encoding is **exactly the right direction**.
+
+This:
+
+```text
+tenant|operation|key
+```
+
+was vulnerable to canonicalization ambiguity.
+
+This:
+
+```text
+[length][value]
+[length][value]
+...
+```
+
+is much better.
+
+However, I would change:
+
+```java
+buffer.putShort((short) bytes.length);
+```
+
+to an explicitly bounded encoding.
+
+For example:
+
+```text
+uint32 length
+```
+
+plus:
+
+```text
+MAX_FIELD_LENGTH
+```
+
+Otherwise:
+
+```java
+(short) bytes.length
+```
+
+has an implicit signed 16-bit limit and can produce undesirable behavior for oversized values.
+
+Even better, don't allocate:
+
+```java
+ByteBuffer.allocate(256)
+```
+
+with a guessed size.
+
+Define the canonical format first, calculate the exact size, then serialize.
+
+### Add
+
+```text
+CanonicalAadGoldenVectorTest
+```
+
+with known hexadecimal inputs/outputs.
+
+For crypto protocols, a golden vector is much more valuable than simply asserting:
+
+```java
+aad1.equals(aad2)
+```
+
+---
+
+# 8. One subtle issue: `CryptoEnvelope` doesn't need IV in AAD
+
+I **would not** add IV to your AAD merely because it is an envelope field.
+
+GCM's IV is already an authenticated input to the GCM operation; NIST describes authentication as covering the plaintext, AAD, IV and tag. ([NIST Publications][2])
+
+So your current separation is reasonable:
+
+```text
+GCM IV
+    → GCM authenticated input
+
+AAD
+    → semantic envelope binding
+```
+
+That's cleaner than redundantly including the IV in the AAD.
+
+---
+
+# 9. The KMS SPI should become strongly typed too
+
+You correctly introduced:
+
+```java
+TenantId
+OperationId
+KeyId
+EnvelopeVersion
+```
+
+but then regress to:
+
+```java
+GeneratedDataKey generateDataKey(String tenantId, String keyId);
+
+byte[] decryptDataKey(
+    String tenantId,
+    String keyId,
+    CryptoBytes wrappedDek
+);
+```
+
+I'd make the SPI consistent:
+
+```java
+GeneratedDataKey generateDataKey(
+    TenantId tenantId,
+    KeyId keyId,
+    KeyUsage usage
+);
+
+SensitiveKeyMaterial decryptDataKey(
+    TenantId tenantId,
+    KeyId keyId,
+    CryptoBytes wrappedDek,
+    KeyContext context
+);
+```
+
+Especially because this is the security boundary.
+
+Avoid:
+
+```text
+strong typing at envelope boundary
+        ↓
+Stringly typed KMS boundary
+```
+
+---
+
+# 10. `GeneratedDataKey` has a lifecycle problem
+
+This:
+
+```java
+public record GeneratedDataKey(
+    SensitiveKeyMaterial plaintextDek,
+    CryptoBytes wrappedDek
+) {}
+```
+
+is okay structurally, but it doesn't enforce lifecycle.
+
+I'd strongly consider:
+
+```java
+public final class GeneratedDataKey implements AutoCloseable {
+    private final SensitiveKeyMaterial plaintextDek;
+    private final CryptoBytes wrappedDek;
+
+    ...
+}
+```
+
+so the intended usage becomes:
+
+```java
+try (GeneratedDataKey key = kms.generateDataKey(...)) {
+    encrypt(key.plaintextDek());
+}
+```
+
+This makes the secure lifecycle visible in the API.
+
+And your own `SensitiveKeyMaterial` approach is good:
+
+```java
+try {
+    ...
+} finally {
+    close();
+}
+```
+
+But be precise in the spec: Java array zeroization is a **best-effort memory hygiene mechanism**, not a guarantee that every JVM copy has disappeared.
+
+---
+
+# 11. The journal design is excellent — add one test
+
+This part is particularly clean:
+
+> length-prefixed serialized `CryptoEnvelope` bytes
+
+instead of:
+
+```text
+journal header
+    + tenant
+    + operation
+    + account
+    + amount
+    + ciphertext
+```
+
+That avoids duplicated security-sensitive metadata.
+
+But your test:
+
+> verify zero occurrences of account IDs or amounts
+
+is not enough as a general property.
+
+A binary ciphertext can accidentally contain arbitrary byte sequences.
+
+I'd make the invariant:
+
+```text
+Journal persistence layer receives only CryptoEnvelope bytes.
+```
+
+and then supplement that with:
+
+```text
+ZeroPlaintextSpoolJournalTest
+```
+
+using deterministic known plaintext and asserting:
+
+```text
+plaintext bytes absent
+serialized FinancialCommand absent
+account ID absent
+amount representation absent
+```
+
+The architectural test should prove the **data type boundary**, not rely exclusively on byte scanning.
+
+---
+
+# 12. Core transaction boundary is very good
+
+This part I would retain almost exactly:
+
+```text
+NATS
+ ↓
+deserialize envelope
+ ↓
+decrypt
+ ↓
+deserialize domain command
+ ↓
+BEGIN TRANSACTION
+ ↓
+SELECT FOR UPDATE
+ ↓
+ledger
+ ↓
+outbox
+```
+
+The key invariant is:
+
+```text
+DB transaction
+∩
+KMS I/O
+=
+∅
+```
+
+That is excellent.
+
+I'd strengthen the test from:
+
+> zero DB connection pool acquisition
+
+to an explicit architectural/runtime assertion:
+
+```text
+KMS latency = 500ms
+DB transaction count = 0
+DB connection acquisition = 0
+row locks = 0
+```
+
+before the cryptographic gate completes.
+
+---
+
+# 13. Failure taxonomy needs one more category
+
+Currently:
+
+```text
+CryptographicIntegrityException
+KeyManagementException
+ReplayAttackException
+SecurityFailureCategory
+```
+
+I'd distinguish at least:
+
+```text
+MalformedEnvelope
+UnsupportedEnvelopeVersion
+CryptographicIntegrityFailure
+KeyManagementUnavailable
+KeyMaterialUnavailable
+ReplayDetected
+SecurityConfigurationFailure
+```
+
+Because these have different operational semantics.
+
+For example:
+
+| Failure                        | Retry? |                  DLQ? |            HTTP equivalent |
+| ------------------------------ | -----: | --------------------: | -------------------------: |
+| Malformed envelope             |     No | Usually no/quarantine |                        400 |
+| Replay                         |     No |                    No | 401/409 depending protocol |
+| GCM tag failure                |     No |                   Yes |                N/A at Core |
+| KMS timeout                    |    Yes |          No initially |                        503 |
+| Unsupported version            |     No |      Yes/config alert |                        400 |
+| Security configuration failure |     No |                 Alert |                        503 |
+
+Don't let:
+
+```java
+KeyManagementException
+```
+
+become a bucket for everything.
+
+---
+
+# 14. Telemetry: good, but don't rely on `toString()`
+
+This is good:
+
+> Non-emission at source + sanitizer defense-in-depth.
+
+I'd retain that principle.
+
+But I'd avoid making:
+
+```java
+@Override
+public String toString()
+```
+
+the primary security control.
+
+Instead:
+
+```text
+Security-sensitive objects
+    ↓
+structured safe representation
+```
+
+For example:
+
+```java
+CryptoEnvelopeSummary {
+    version
+    tenantId
+    operationId
+    keyId
+    ciphertextLength
+}
+```
+
+and explicitly prohibit serializers/loggers from introspecting:
+
+```text
+CryptoBytes.value
+SensitiveKeyMaterial
+plaintext
+```
+
+The strongest invariant is:
+
+> sensitive material has no generic serialization path.
+
+---
+
+# 15. Performance targets should be renamed
+
+I wouldn't put:
+
+```text
+I-ENV-005
+P99 <= 50µs
+```
+
+in the same category as:
+
+```text
+I-ENV-003
+decrypt before transaction
+```
+
+They're fundamentally different.
+
+I'd use:
+
+```text
+I-ENV-005 — Crypto pipeline benchmark envelope
+```
+
+and define:
+
+```text
+Target:
+AES-GCM P99 <= 10µs
+
+Target:
+Edge crypto pipeline P99 <= 50µs
+```
+
+with:
+
+```text
+P50
+P95
+P99
+throughput
+allocation rate
+GC
+CPU
+payload size
+JDK version
+hardware
+provider
+```
+
+Otherwise someone can later interpret 50 µs as a hard correctness/security invariant.
+
+---
+
+# 16. Missing test: IV uniqueness
+
+This should absolutely be added.
+
+```text
+GcmIvUniquenessTest
+```
+
+At minimum:
+
+```text
+1,000,000 generated IVs
+→ zero collisions
+```
+
+But more importantly, test the **generation architecture**:
+
+```text
+two Edge instances
+same KMS key
+parallel generation
+→ no deterministic/shared IV state
+```
+
+NIST explicitly treats IV uniqueness under a given GCM key as a critical requirement. ([NIST Publications][3])
+
+For your architecture, I would actually make the invariant:
+
+```text
+I-ENV-006
+
+For every encryption invocation:
+(keyId/dataKey, IV) MUST NOT repeat.
+```
+
+And then define the operational bound for the random construction.
+
+---
+
+# 17. Missing test: cross-tenant envelope substitution
+
+This is perhaps the most valuable security test after replay.
+
+Create:
+
+```text
+Tenant A
+operation X
+encrypted envelope
+
+→ change tenantId to Tenant B
+→ decrypt
+→ MUST fail
+```
+
+And also:
+
+```text
+Tenant A envelope
+→ use Tenant B KMS context
+→ MUST fail
+```
+
+And:
+
+```text
+Tenant A envelope
+→ operationId changed
+→ MUST fail GCM authentication
+```
+
+Call it:
+
+```text
+CrossTenantEnvelopeSubstitutionTest
+```
+
+This verifies the two-layer binding:
+
+```text
+KMS encryption context
++
+GCM AAD
+```
+
+---
+
+# 18. Missing test: ciphertext swapping
+
+Another important case:
+
+```text
+Envelope A:
+tenant=A
+operation=A
+ciphertext=A
+
+Envelope B:
+tenant=A
+operation=B
+ciphertext=B
+```
+
+Attempt:
+
+```text
+Envelope A metadata
++
+Envelope B ciphertext
+```
+
+must fail.
+
+Likewise:
+
+```text
+Envelope A
++
+Envelope B wrappedDek
+```
+
+must fail.
+
+This verifies that the envelope isn't merely structurally valid but **cryptographically indivisible**.
+
+I'd call it:
+
+```text
+CryptoEnvelopeSubstitutionTest
+```
+
+---
+
+# 19. The skill is now justified
+
+Given this plan, I agree with the architectural decision to have:
+
+```text
+financial-cryptographic-security
+```
+
+separate from:
+
+```text
+perimeter-security
+```
+
+The boundary is now quite clear:
+
+```text
+perimeter-security
+    HMAC
+    authentication
+    tenant admission
+    credential lifecycle
+    rate limiting
+
+financial-cryptographic-security
+    AEAD
+    envelope
+    DEK/KEK
+    IV
+    AAD
+    replay
+    plaintext lifetime
+    crypto failures
+    telemetry leakage
+```
+
+And `spec-driven-development` orchestrates both.
+
+I would add one explicit rule to that skill:
+
+> **MUST NOT implement cryptographic primitives or key-management providers directly inside domain/ledger modules.**
+
+And another:
+
+> **MUST verify both semantic cryptographic boundaries and dependency boundaries before TASK completion.**
+
+---
+
+# 20. Recommended revised architecture
+
+The target should become roughly:
+
+```text
+                    ┌─────────────────────────┐
+                    │ perimeter-security      │
+                    │ HMAC / identity / tenant│
+                    └────────────┬────────────┘
+                                 │
+                                 ▼
+                    ┌─────────────────────────┐
+                    │ financial-cryptographic │
+                    │ security contracts      │
+                    │                         │
+                    │ Envelope                │
+                    │ AAD                     │
+                    │ CryptoBytes             │
+                    │ Replay algebra          │
+                    │ KMS SPI                 │
+                    │ SensitiveKeyMaterial    │
+                    └────────────┬────────────┘
+                                 │
+                 ┌───────────────┴────────────────┐
+                 ▼                                ▼
+        ┌─────────────────┐              ┌─────────────────┐
+        │ Edge            │              │ Core            │
+        │                 │              │                 │
+        │ HMAC            │              │ decrypt         │
+        │ nonce           │              │ validate        │
+        │ encrypt         │              │ deserialize     │
+        │ journal         │              │                 │
+        └───────┬─────────┘              └────────┬────────┘
+                │                                 │
+                ▼                                 ▼
+        ┌────────────────────────────────────────────────┐
+        │             Infrastructure                     │
+        │                                                │
+        │ DragonflyNonceTracker                          │
+        │ AwsKmsClient / VaultKmsClient                  │
+        │ LocalApplianceKmsClient                        │
+        │ CachedKeyManagementClient                      │
+        └────────────────────────────────────────────────┘
+```
+
+with the critical cryptographic chain:
+
+```text
+HMAC
+  ↓
+Replay reservation
+  ↓
+DEK acquisition
+  ↓
+KMS tenant binding
+  ↓
+96-bit unique GCM IV
+  ↓
+Canonical AAD
+  ↓
+AES-256-GCM
+  ↓
+CryptoEnvelope
+  ↓
+durable encrypted journal
+```
+
+and:
+
+```text
+CryptoEnvelope
+  ↓
+KMS tenant-bound unwrap
+  ↓
+GCM verification
+  ↓
+plaintext command
+  ↓
+BEGIN TRANSACTION
+```
+
+---
+
+# 21. Revised MUST list for TASKS
+
+Before generating TASKS-000.10, I'd add these explicitly:
+
+```text
+[MUST] TASK-10.1 — Define nonce reservation/commit/recovery semantics
+[MUST] TASK-10.2 — Define DEK cache key, max-age, max-use and lifecycle semantics
+[MUST] TASK-10.3 — Bind wrapped DEK to tenant through KMS encryption context
+[MUST] TASK-10.4 — Move KMS implementations/cache out of security contracts module
+[MUST] TASK-10.5 — Complete CryptoEnvelope structural validation
+[MUST] TASK-10.6 — Define GCM IV generation and per-key invocation policy
+[MUST] TASK-10.7 — Define typed KeyManagementClient contract
+[MUST] TASK-10.8 — Define cryptographic failure taxonomy
+[MUST] TASK-10.9 — Add cross-tenant substitution tests
+[MUST] TASK-10.10 — Add envelope/ciphertext/wrapped-DEK substitution tests
+[MUST] TASK-10.11 — Add IV uniqueness tests
+[MUST] TASK-10.12 — Add nonce recovery tests
+[MUST] TASK-10.13 — Add canonical AAD golden vectors
+```
+
+Then the existing tests become the second layer.
+
+---
+
+## Final assessment
+
+**This is a strong Rev. 2 and much closer to the architecture we want.** The most important conceptual improvement is that you have now separated:
+
+```text
+authentication
+≠
+replay protection
+≠
+payload confidentiality
+≠
+cryptographic integrity
+≠
+financial transaction authorization
+```
+
+That's exactly the right decomposition.
+
+The remaining concern isn't that the cryptographic primitives are wrong; it's that **the lifecycle around them isn't completely specified yet**—especially nonce consumption and plaintext DEK reuse.
+
+I would therefore change the header from:
+
+> 🟢 Approved (Rev. 2)
+
+to:
+
+> 🟡 **Architecture Review Passed — Rev. 2.1 Required Before TASK Generation**
+
+Once those five MUST areas are incorporated, I would be comfortable moving directly into **TASKS-000.10** with the security skill governing the implementation.
+
+The external cryptographic references also support the two most important design principles here: GCM IV uniqueness must be controlled across invocations under a key, and KMS encryption context can bind a wrapped data key to non-secret context such as tenant identity. ([NIST Publications][2])
+
+[1]: https://docs.aws.amazon.com/kms/latest/APIReference/API_GenerateDataKey.html?utm_source=chatgpt.com "GenerateDataKey - AWS Key Management Service"
+[2]: https://nvlpubs.nist.gov/nistpubs/Legacy/SP/nistspecialpublication800-38d.pdf?utm_source=chatgpt.com "NIST SP 800-38D, Recommendationfor Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC"
+[3]: https://nvlpubs.nist.gov/nistpubs/legacy/sp/nistspecialpublication800-38d.pdf?utm_source=chatgpt.com "NIST SP 800-38D, Recommendationfor Block Cipher Modes of Operation: Galois/Counter Mode (GCM) and GMAC"

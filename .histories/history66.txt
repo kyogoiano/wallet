@@ -1,0 +1,757 @@
+Yes — this revision is **significantly closer**. History 65 has incorporated almost all of the issues from the previous review: generic binding, `Answer` vs `Unavailable`, fixed non-inferiority margin, five gates, concurrency as implementation detail, machine-verifiable evidence, question catalog, and SLA separation.
+
+I would now call it **architecturally sound, but not quite ratification-ready**. There are a few remaining issues, mostly around Java type semantics and benchmark precision.
+
+## 1. The biggest remaining issue: the SPI loses the generic relationship
+
+You now have the excellent invariant:
+
+```text
+DecisionQuestion<T>
+        ↓
+DecisionOutcome<T>
+```
+
+and explicitly require it.
+
+But the SPI is:
+
+```java
+EvaluationResult evaluate(
+    DecisionState state,
+    Collection<DecisionQuestion<? extends DecisionValue>> questions);
+```
+
+
+
+This is the one part I would change before ratification.
+
+The collection can contain:
+
+```text
+Question<BooleanDecision>
+Question<ScoreDecision>
+Question<ChoiceDecision>
+```
+
+which is fine, but the evaluator's return type `EvaluationResult` doesn't establish the mapping:
+
+```text
+Q1 → BooleanDecision
+Q2 → ScoreDecision
+Q3 → ChoiceDecision
+```
+
+at the API boundary.
+
+### Better
+
+Make the result explicitly keyed by question:
+
+```java
+interface EvaluationResult {
+
+    DecisionOutcome<?> outcome(QuestionId questionId);
+}
+```
+
+or, preferably, define:
+
+```java
+record EvaluatedQuestion<T extends DecisionValue>(
+    DecisionQuestion<T> question,
+    DecisionOutcome<T> outcome
+) {}
+```
+
+and:
+
+```java
+record EvaluationResult(
+    List<EvaluatedQuestion<?>> results
+) {}
+```
+
+Then the invariant exists structurally:
+
+```text
+EvaluatedQuestion<T>
+ ├── DecisionQuestion<T>
+ └── DecisionOutcome<T>
+```
+
+That is much stronger than relying on implementation discipline.
+
+---
+
+# 2. `DecisionUnavailable` is still slightly awkward as a generic outcome
+
+You have:
+
+```text
+DecisionOutcome<T>
+    =
+    DecisionAnswer<T>
+    ∪
+    DecisionUnavailable
+```
+
+
+
+This is conceptually correct, but I would make the Java model explicit:
+
+```java
+sealed interface DecisionOutcome<T extends DecisionValue>
+        permits DecisionAnswer, DecisionUnavailable
+```
+
+with:
+
+```java
+record DecisionAnswer<T extends DecisionValue>(
+    T answer,
+    Set<EvidenceReference> evidence,
+    DecisionProvenance provenance
+) implements DecisionOutcome<T> {}
+```
+
+and:
+
+```java
+record DecisionUnavailable<T extends DecisionValue>(
+    QuestionId questionId,
+    UnavailableReason reason,
+    DecisionProvenance provenance
+) implements DecisionOutcome<T> {}
+```
+
+Yes, `DecisionUnavailable<T>` looks strange because it contains no `T`.
+
+But that is intentional: it means:
+
+> "I know what type of answer was requested, but no answer was produced."
+
+That is actually useful for the composer.
+
+For example:
+
+```text
+Q3 : ScoreDecision
+      ↓
+UNAVAILABLE<ScoreDecision>
+```
+
+rather than an untyped global `UNAVAILABLE`.
+
+---
+
+# 3. `Confidence = ABSENT` is now correct
+
+This revision fixed one of my biggest previous objections.
+
+The spec explicitly says:
+
+> absence of answer is an outcome, not a decision value; confidence is absent.
+
+And:
+
+```text
+InferenceUnavailable
+    ⇒ DecisionUnavailable
+    ⇒ Confidence = ABSENT
+```
+
+
+
+That's the correct semantic model.
+
+However, there is still a small inconsistency:
+
+```java
+ChoiceDecision(String, double confidence)
+```
+
+while `ScoreDecision` has:
+
+```java
+ScoreDecision(double, ScoreCalibration)
+```
+
+
+
+Why does `ChoiceDecision` have confidence as a primitive `double`, while the rest of the algebra is trying to explicitly model calibrated/absent confidence?
+
+I'd avoid embedding raw confidence differently in each value type.
+
+I'd consider:
+
+```text
+DecisionAnswer<T>
+    ├── value: T
+    ├── confidence: Confidence
+    └── provenance
+```
+
+where:
+
+```text
+Confidence
+├── Calibrated(probability)
+├── Uncalibrated(value)
+└── Absent
+```
+
+But if calibration only applies to scores in your domain, keep `ScoreCalibration` and don't force confidence onto `ChoiceDecision`.
+
+The important thing is **consistency**.
+
+---
+
+# 4. `I-TYPED-004` has a mathematical problem
+
+You improved this substantially by introducing `ε`. Good.
+
+But:
+
+```text
+Metric(Cand,T) ≥ Metric(Base,T) - ε
+```
+
+
+
+assumes that **higher is always better**.
+
+But you explicitly say:
+
+> Brier / Calibration error
+
+and Brier/error metrics are **lower-is-better**.
+
+So the invariant is mathematically inconsistent with the metrics listed below it.
+
+### Fix
+
+Don't put a universal inequality in the invariant.
+
+Say:
+
+```text
+I-TYPED-004:
+Each benchmark metric MUST declare its optimization direction
+(maximize or minimize) and a pre-declared non-inferiority margin ε.
+```
+
+Then:
+
+```text
+maximize:
+Candidate ≥ Baseline - ε
+
+minimize:
+Candidate ≤ Baseline + ε
+```
+
+That's clean and future-proof.
+
+---
+
+# 5. "100% type safety" isn't really a benchmark gate
+
+Gate 1 currently says:
+
+> 100% type safety and outcome schema compliance.
+
+The problem is that **Java compile-time type safety isn't something the benchmark runtime measures**.
+
+Your test:
+
+```text
+Question<BooleanDecision>
+      ↓
+ScoreDecision
+```
+
+already provides the right verification.
+
+So I'd rename Gate 1:
+
+### Gate 1 — Contract Validity
+
+And define:
+
+```text
+100%:
+- question/result type binding
+- required fields
+- valid outcome states
+- valid evidence references
+- no malformed result
+```
+
+Then compile-time generic safety belongs to the **architecture/test gate**, not benchmark scoring.
+
+---
+
+# 6. `DecisionQuestion<T>` now needs a precise definition of the type witness
+
+You added:
+
+> Type witness `Class<T>`, QuestionId, RubricVersion, Set<EvidenceRequirement>`.
+
+Good.
+
+But I would make one decision explicit:
+
+```java
+Class<T> valueType()
+```
+
+is the runtime witness.
+
+That means:
+
+```java
+DecisionQuestion<BooleanDecision>
+```
+
+carries:
+
+```text
+BooleanDecision.class
+```
+
+and:
+
+```java
+DecisionQuestion<ScoreDecision>
+```
+
+carries:
+
+```text
+ScoreDecision.class
+```
+
+This is important because Java erases generic parameters at runtime.
+
+I'd add one sentence to the spec:
+
+> The runtime type witness MUST agree with the compile-time generic parameter; evaluator implementations MUST reject mismatched result types.
+
+Then your test becomes meaningful at runtime as well as compile time.
+
+---
+
+# 7. The question catalog is now one of the strongest parts
+
+This was a very good addition:
+
+```text
+FraudDecisionQuestions
+ ├── BEHAVIOR_ANOMALY
+ ├── COORDINATED_TOPOLOGY
+ └── DEVICE_NETWORK_RISK
+```
+
+with type witnesses and rubric versions.
+
+I would make one further change:
+
+### Question identity should include rubric identity/version
+
+Because:
+
+```text
+BEHAVIOR_ANOMALY v1
+```
+
+and:
+
+```text
+BEHAVIOR_ANOMALY v2
+```
+
+may represent materially different decision criteria.
+
+You already record `rubricVersion` in provenance.
+
+I would make it explicit that **changing the rubric requires a new benchmark version**, otherwise old evaluations aren't directly comparable.
+
+---
+
+# 8. `EvidenceReference` is good, but `VELOCITY_WINDOW:{range}` needs normalization
+
+This:
+
+```text
+DEVICE_SIGNAL:{id}
+GRAPH_EDGE:{id}
+VELOCITY_WINDOW:{range}
+```
+
+is a good direction.
+
+But for cryptographic provenance, we should avoid a free-form range string.
+
+Something like:
+
+```java
+record EvidenceReference(
+    EvidenceType type,
+    String evidenceId,
+    String contentHash
+) {}
+```
+
+would be stronger.
+
+For example:
+
+```text
+VELOCITY_WINDOW
+id = vw-83271
+hash = sha256(...)
+```
+
+Then the evidence can be independently verified.
+
+Otherwise "machine-verifiable" still depends on the interpretation of the string.
+
+---
+
+# 9. `DecisionProvenance` is now excellent, but one field is missing
+
+You now have:
+
+```text
+snapshotId
+snapshotHash
+evidenceReferences
+evaluatorId
+evaluatorVersion
+modelId
+modelVersion
+evaluationTimestamp
+rubricVersion
+```
+
+
+
+I'd add:
+
+```text
+questionId
+```
+
+unless it is guaranteed to live outside the provenance object.
+
+Why?
+
+Because provenance should be independently meaningful:
+
+```text
+DecisionResult
+ └── Provenance
+       ├── questionId
+       ├── rubricVersion
+       ├── evidence
+       ├── evaluator
+       └── model
+```
+
+This becomes very useful when results are persisted for investigations.
+
+---
+
+# 10. The five gates are now much better
+
+This is a solid improvement:
+
+```text
+G1 Contract
+G2 Grounding
+G3 Predictive correctness
+G4 Calibration
+G5 Operational performance
+```
+
+
+
+And restoring:
+
+```text
+P50/P95/P99
+heap/RSS
+CPU
+```
+
+was definitely correct.
+
+I would make one small addition to Gate 5:
+
+```text
+throughput
+```
+
+because latency alone can hide saturation.
+
+For example:
+
+```text
+P99 = 100ms
+```
+
+at 1 request/sec is very different from:
+
+```text
+P99 = 100ms
+```
+
+at 1,000 evaluations/sec.
+
+So:
+
+```text
+Gate 5:
+P50/P95/P99
+throughput
+CPU
+heap/RSS
+```
+
+---
+
+# 11. Determinism disappeared from the formal benchmark
+
+This is the one regression I'd definitely fix.
+
+The previous version explicitly cared about determinism.
+
+Now the five gates don't include it.
+
+For semantic evaluators, this matters enormously.
+
+You should add under Gate 5 or as a separate Gate 6:
+
+```text
+Determinism / Reproducibility
+```
+
+But I don't necessarily mean:
+
+> identical output every time.
+
+For an LLM/SLM that may be unrealistic.
+
+Instead define:
+
+```text
+same evidence
+same question
+same model version
+same configuration
+same seed/policy
+```
+
+and measure:
+
+```text
+semantic variance
+```
+
+or:
+
+```text
+exact reproducibility where deterministic mode is supported
+```
+
+This is especially important because the original motivation of this spec is improved auditability/reproducibility.
+
+---
+
+# 12. `TypeSafeInspiredEvaluator` is now correctly isolated
+
+This is exactly what I wanted to see:
+
+```text
+REQ-TYPED-014 [COULD]
+test scope
+shadow evaluation
+no production dependencies
+```
+
+
+
+Excellent.
+
+I would **not** promote it to SHOULD.
+
+It should remain an experiment.
+
+---
+
+# 13. One wording issue in the Intent
+
+This sentence:
+
+> Generative LLMs ... produce non-deterministic outputs, hallucinations, parsing failures, and latency spikes when forced to emit JSON.
+
+is directionally understandable, but too categorical for a technical specification.
+
+I'd say:
+
+> Generative model integrations may exhibit output variability, unsupported claims, schema violations, and latency variability when structured decision contracts are enforced through free-form generation.
+
+That is technically more defensible and makes the architectural argument without overclaiming.
+
+---
+
+# 14. `DecisionComposer` deserves one invariant
+
+This is an important missing piece.
+
+We have:
+
+```text
+DecisionEvaluator
+       ↓
+DecisionOutcome[]
+       ↓
+DecisionComposer
+       ↓
+SemanticEvaluation
+```
+
+But the composer is where **semantic mistakes could creep back in**.
+
+For example:
+
+```text
+Q1 = TRUE
+Q2 = UNAVAILABLE
+Q3 = 0.82
+```
+
+What happens?
+
+Can the composer produce:
+
+```text
+Risk = HIGH
+```
+
+?
+
+It needs a defined policy.
+
+I'd add:
+
+### `I-TYPED-006 — No Implicit Unavailable Coercion`
+
+```text
+DecisionComposer MUST NOT implicitly convert
+DecisionUnavailable into Boolean, Score, Choice,
+zero, false, or any other DecisionValue.
+
+Composition rules MUST explicitly define behavior
+for every unavailable input.
+```
+
+This is very important.
+
+Otherwise we've solved the "fake confidence" problem at the evaluator boundary and accidentally reintroduced it inside the composer.
+
+---
+
+# 15. The test triads should test that exact problem
+
+Your current three triads are good.
+
+I'd add:
+
+### Triad 4 — Composer Unavailable Semantics
+
+```text
+Positive:
+Q1=true, Q2=true, Q3=0.82
+→ deterministic SemanticEvaluation
+
+Invalid:
+Q2=Unavailable
+→ composer refuses composition when Q2 is mandatory
+
+Boundary:
+Unavailable Q2 MUST NOT become false, zero, or
+a synthetic confidence value.
+```
+
+This is probably the most valuable missing test in the entire spec.
+
+---
+
+# 16. One small numbering cleanup
+
+You currently have:
+
+```text
+REQ-001
+REQ-002
+REQ-005
+REQ-008
+
+REQ-003
+REQ-004
+REQ-006
+
+REQ-007
+REQ-013
+
+REQ-009
+REQ-012
+REQ-014
+```
+
+That's not technically wrong, and I understand that the IDs were retained from previous iterations.
+
+But because we're still at **Proposed**, I'd either:
+
+* reorder the requirements numerically throughout the document, or
+* explicitly say IDs are immutable historical identifiers and therefore ordering is intentionally non-sequential.
+
+I prefer the second if your SDD process treats requirement IDs as stable references.
+
+---
+
+# Final assessment
+
+This version has crossed an important threshold.
+
+### I would now say:
+
+**Architecture: GO**
+
+**Specification: one final correction pass**
+
+The remaining changes are:
+
+### MUST fix before ratification
+
+1. **Make `EvaluationResult` preserve `Question<T> → Outcome<T>` association.**
+2. **Fix the mathematical direction of `I-TYPED-004` for minimize metrics.**
+3. **Define `DecisionUnavailable<T>` semantics explicitly.**
+4. **Add `I-TYPED-006` preventing implicit `Unavailable → false/0/etc.` coercion.**
+5. **Restore determinism/reproducibility to the benchmark protocol.**
+6. **Clarify runtime type-witness validation.**
+
+### SHOULD fix
+
+7. Normalize `EvidenceReference` with an evidence hash.
+8. Include `questionId` in provenance or explicitly establish it as part of the parent result.
+9. Add throughput to Gate 5.
+10. Make rubric changes invalidate/require a new benchmark version.
+11. Slightly soften the introductory claims about LLM/JSON behavior.
+12. Add the composer unavailable-semantics triad.
+
+After those, **I would be comfortable ratifying 000.8.1**.
+
+The particularly good outcome here is that the spec is no longer really about "AI". It has become a **native typed semantic decision framework**, where AI/SLM is merely one possible evaluator implementation. That is a much stronger architectural asset for V4.

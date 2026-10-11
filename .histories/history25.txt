@@ -1,0 +1,582 @@
+Perfeito. Revendo a **SPEC-000.7 ratificada**, eu faria uma evolução importante antes de partir para o PLAN/TASKS.
+
+A spec está conceitualmente muito boa, mas hoje ela mistura **três níveis diferentes de inteligência**:
+
+1. **Deterministic Behavioral Feature Engineering** → 16-D + pgvector
+2. **Archetype / similarity scoring** → cálculo quantitativo
+3. **LLM investigation synthesis** → linguagem natural para analistas
+
+Essa separação é excelente, mas eu mudaria principalmente o terceiro componente: **não prenderia a arquitetura a Llama 3.1 8B**.
+
+A base atual está claramente definida: vetor comportamental determinístico de 16 dimensões, `pgvector`, HNSW com inner product, matching contra centróides e geração assíncrona de dossiês locais.
+
+---
+
+# Minha recomendação: evoluir a SPEC-000.7 para um modelo de inferência agnóstico
+
+Hoje o mantra diz:
+
+> local quantized Llama 3.1
+
+Eu mudaria para:
+
+> **"Use deterministic behavioral embeddings and pgvector for quantitative fraud intelligence, with a pluggable local Small Language Model for constrained investigation synthesis."**
+
+Porque o LLM **não é o cérebro antifraude**.
+
+O cérebro quantitativo continua sendo:
+
+```text
+Rules
+   +
+Graph Intelligence
+   +
+Risk Propagation
+   +
+Behavioral Features
+   +
+Archetype Similarity
+        ↓
+ deterministic evidence
+        ↓
+       LLM
+        ↓
+human-readable investigation
+```
+
+O LLM apenas transforma evidências estruturadas em uma explicação útil.
+
+---
+
+# 1. Eu não usaria automaticamente Llama 3.1 8B
+
+Para esse workload, o modelo precisa ser bom em:
+
+* structured JSON output
+* instruction following
+* summarization
+* reasoning sobre evidências fornecidas
+* baixa latência
+* baixo consumo de RAM/VRAM
+* execução local
+
+Ele **não precisa**:
+
+* conhecimento geral enorme
+* geração criativa
+* RAG textual massivo
+* reasoning profundo sobre matemática
+
+A matemática já foi calculada pelo sistema.
+
+Por exemplo, o LLM recebe:
+
+```json
+{
+  "entity": "MASK_USER_TARGET",
+  "directRisk": 0.72,
+  "graphRisk": 0.81,
+  "propagatedRisk": 0.64,
+  "behavioralRisk": 0.77,
+
+  "archetypes": [
+    {
+      "type": "MONEY_MULE_RAPID_DRAIN",
+      "similarity": 0.91
+    }
+  ],
+
+  "evidence": [
+    {
+      "type": "SHARED_DEVICE",
+      "entities": 4,
+      "confidence": 0.90
+    },
+    {
+      "type": "RAPID_PASS_THROUGH",
+      "transactions": 12,
+      "window": "2h"
+    }
+  ]
+}
+```
+
+O modelo não precisa descobrir fraude.
+
+Ele precisa responder:
+
+> "The entity exhibits a strong money-mule pattern, supported by rapid fund movement, shared-device infrastructure, and high behavioral similarity to known mule archetypes."
+
+Isso é um workload perfeito para um **SLM**.
+
+---
+
+# 2. Arquitetura que eu recomendo: Model Adapter
+
+Eu adicionaria:
+
+```text
+br.com.wallet.fraud.intelligence.investigation
+│
+├── api
+│   ├── InvestigationSynthesizer
+│   └── FraudInvestigationDossier
+│
+├── application
+│   └── DefaultInvestigationService
+│
+├── domain
+│   ├── InvestigationEvidence
+│   ├── InvestigationContext
+│   └── DossierRequest
+│
+└── infrastructure
+    └── inference
+        ├── LocalInferenceClient
+        │
+        ├── OllamaInferenceClient
+        ├── VllmInferenceClient
+        └── LlamaCppInferenceClient
+```
+
+E principalmente:
+
+```java
+public interface LocalInferenceClient {
+
+    <T> T generateStructured(
+        StructuredInferenceRequest request,
+        Class<T> responseType
+    );
+}
+```
+
+Assim a SPEC não depende de:
+
+```text
+Llama 3.1
+```
+
+Ela depende de:
+
+```text
+LocalInferenceClient
+```
+
+O modelo passa a ser uma configuração de infraestrutura.
+
+---
+
+# 3. Minha hierarquia de modelos para esse projeto
+
+Eu faria benchmark com uma matriz.
+
+## Tier A — Default / melhor custo-benefício
+
+### Qwen 3.x 4B–8B Instruct
+
+Eu colocaria a família Qwen como **principal candidata para benchmark**.
+
+Especialmente porque nosso workload é:
+
+* JSON
+* structured extraction
+* summarization
+* evidence synthesis
+* multilingual potential
+* tool/instruction following
+
+Arquitetura:
+
+```text
+Default Local Model
+        ↓
+4B–8B class model
+        ↓
+4-bit quantization
+        ↓
+Ollama / llama.cpp
+```
+
+Para uma Wallet Service demonstrativa ou arquitetura de referência, isso provavelmente oferece um equilíbrio melhor que carregar obrigatoriamente um 8B antigo.
+
+---
+
+## Tier B — máxima eficiência
+
+### Phi-class small models
+
+Muito interessante quando queremos:
+
+```text
+CPU inference
++
+low memory
++
+fast structured response
+```
+
+O workload do dossier é relativamente fechado.
+
+Você controla:
+
+* o contexto
+* o schema
+* o prompt
+* o tamanho da resposta
+
+Então um modelo menor pode ser suficiente.
+
+---
+
+## Tier C — maior qualidade
+
+### Llama-class 8B
+
+Continuaria sendo uma opção.
+
+Mas não seria mais:
+
+```text
+MANDATORY MODEL
+```
+
+Seria:
+
+```text
+SUPPORTED MODEL PROFILE: QUALITY
+```
+
+---
+
+# 4. Eu adicionaria Model Profiles
+
+Isso ficaria muito elegante na spec.
+
+```yaml
+fraud:
+  investigation:
+    inference:
+      profile: balanced
+
+      profiles:
+
+        efficient:
+          max-context-tokens: 4096
+          max-output-tokens: 768
+          temperature: 0.0
+
+        balanced:
+          max-context-tokens: 8192
+          max-output-tokens: 1024
+          temperature: 0.0
+
+        quality:
+          max-context-tokens: 16384
+          max-output-tokens: 2048
+          temperature: 0.0
+```
+
+E:
+
+```text
+efficient → small model
+balanced  → 4B–8B
+quality   → larger local model
+```
+
+A aplicação não sabe qual modelo está rodando.
+
+---
+
+# 5. Mudança ainda mais importante: o LLM não deveria receber "GraphRAG" como texto bruto
+
+Eu faria uma pequena correção conceitual.
+
+Hoje temos:
+
+> Local GraphRAG Investigation Pipeline
+
+Mas tecnicamente, nesse projeto, eu chamaria de:
+
+## Evidence-Grounded Investigation Synthesis
+
+Porque o nosso sistema não está fazendo exatamente:
+
+```text
+Natural Language Query
+        ↓
+Embedding Retrieval
+        ↓
+Vector DB
+        ↓
+LLM
+```
+
+Ele está fazendo:
+
+```text
+Fraud Alert
+    ↓
+Deterministic Graph Query
+    ↓
+Temporal Evidence Query
+    ↓
+Behavioral Archetype Query
+    ↓
+Risk Aggregation
+    ↓
+Structured Evidence Bundle
+    ↓
+LLM Synthesis
+```
+
+Isso é melhor do que um GraphRAG tradicional para fraude.
+
+Eu chamaria o contexto:
+
+```java
+public record FraudInvestigationContext(
+    EntitySnapshot entity,
+    RiskSnapshot risks,
+    List<GraphEvidence> graphEvidence,
+    List<TemporalEvidence> temporalEvidence,
+    List<BehavioralMatch> archetypeMatches,
+    List<ChronologicalEvent> timeline
+) {}
+```
+
+Então:
+
+```text
+Deterministic Intelligence
+        ↓
+FraudInvestigationContext
+        ↓
+PII Sanitizer
+        ↓
+Local SLM
+        ↓
+FraudInvestigationDossier
+```
+
+Isso reduz:
+
+* hallucination
+* token usage
+* retrieval ambiguity
+* infraestrutura
+* custo operacional
+
+---
+
+# 6. A maior evolução que eu faria: separar "Evidence" de "Narrative"
+
+Hoje o LLM retorna o dossiê.
+
+Eu não deixaria o LLM ser a única fonte do dossiê.
+
+Faria:
+
+```java
+public record FraudInvestigationDossier(
+
+    InvestigationEvidence evidence,
+
+    InvestigationNarrative narrative,
+
+    RiskClassification classification
+) {}
+```
+
+Onde:
+
+## Evidence — determinístico
+
+```json
+{
+  "directRisk": 0.72,
+  "graphRisk": 0.81,
+  "propagatedRisk": 0.64,
+  "behavioralRisk": 0.77,
+  "topArchetype": "MONEY_MULE_RAPID_DRAIN",
+  "similarity": 0.91,
+  "sharedDevices": 3,
+  "cycleDetected": true
+}
+```
+
+Nunca gerado pelo LLM.
+
+---
+
+## Narrative — gerado pelo LLM
+
+```json
+{
+  "executiveSummary": "...",
+  "investigationNarrative": "...",
+  "recommendedActions": [
+    "MANUAL_REVIEW"
+  ]
+}
+```
+
+Isso é fundamental.
+
+### O LLM pode explicar evidências.
+
+Mas não pode inventar evidências.
+
+---
+
+# 7. Eu adicionaria um invariant novo
+
+## `I-VEC-006 — Evidence Grounding`
+
+> Every factual assertion presented in the generated investigation narrative MUST be traceable to one or more deterministic evidence items contained in `FraudInvestigationContext`.
+
+Arquiteturalmente:
+
+```text
+Narrative Claim
+       ↓
+Evidence IDs
+```
+
+Por exemplo:
+
+```json
+{
+  "claim": "The entity appears to participate in a mule network.",
+  "evidenceReferences": [
+    "GRAPH-001",
+    "TEMPORAL-014",
+    "ARCHETYPE-003"
+  ]
+}
+```
+
+Isso transforma o LLM de uma caixa-preta em uma camada de explicação auditável.
+
+Para fraude financeira, isso é muito mais importante que simplesmente usar um modelo maior.
+
+---
+
+# 8. Também mudaria a classificação de risco
+
+Hoje:
+
+```text
+LOW
+MEDIUM
+HIGH
+CRITICAL
+```
+
+parece vir do LLM.
+
+Eu não deixaria.
+
+A classificação deve ser determinística:
+
+```java
+public enum RiskClassification {
+
+    LOW,
+    MEDIUM,
+    HIGH,
+    CRITICAL
+}
+```
+
+Derivada por regras.
+
+Exemplo:
+
+```text
+final_risk >= 0.90 → CRITICAL
+final_risk >= 0.75 → HIGH
+final_risk >= 0.50 → MEDIUM
+else                → LOW
+```
+
+O LLM recebe:
+
+```json
+"classification": "HIGH"
+```
+
+E explica **por que**.
+
+Nunca decide.
+
+---
+
+# Minha proposta de evolução da SPEC-000.7
+
+Eu renomearia:
+
+# 📋 SPEC-000.7 — Fraud Behavioral Embeddings, Archetype Matching & Evidence-Grounded Local Investigation Intelligence
+
+E alteraria o núcleo para:
+
+```text
+┌──────────────────────────────────────────────┐
+│          Deterministic Intelligence          │
+│                                              │
+│  SPEC-000.5 → Graph Evidence                 │
+│  SPEC-000.6 → Temporal Propagation           │
+│  SPEC-000.7 → Behavioral Archetypes          │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+          FraudInvestigationContext
+                       │
+                       ▼
+              PII Sanitization
+                       │
+                       ▼
+         LocalInferenceClient (SPI)
+                       │
+          ┌────────────┼─────────────┐
+          ▼            ▼             ▼
+       Ollama        vLLM        llama.cpp
+          │            │             │
+          └────────────┼─────────────┘
+                       ▼
+              Structured Narrative
+                       │
+                       ▼
+          Evidence-Grounded Dossier
+```
+
+---
+
+## Minha recomendação final
+
+**Eu manteria pgvector + 16-D exatamente como está.** Essa parte está muito coerente e extremamente barata operacionalmente.
+
+Mas evoluiria a parte de LLM para:
+
+### ❌ Antes
+
+```text
+Local Llama 3.1 8B
+```
+
+### ✅ Depois
+
+```text
+Pluggable Local Small Language Model
+        +
+Evidence-Grounded JSON Generation
+        +
+Deterministic Risk Classification
+        +
+Model Benchmark Profiles
+```
+
+E, na implementação, faria um benchmark inicial entre **um modelo pequeno/eficiente, um modelo balanced de ~4B–8B e o Llama-class 8B**, usando **os nossos próprios 20–30 dossiês sintéticos de fraude como benchmark**.
+
+Isso é muito mais alinhado com a filosofia que você vem construindo nas specs **000.5 → 000.6 → 000.7**: **inteligência determinística primeiro; AI como camada auxiliar, desacoplada e substituível**.

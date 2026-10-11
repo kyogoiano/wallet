@@ -1,0 +1,688 @@
+Sim. E olhando as duas specs juntas, eu faria uma distinção importante: **a SPEC-003 está correta em manter o motor de assinaturas determinístico, mas ela está subaproveitando a arquitetura da 000.8.1**.
+
+Eu **não colocaria ONNX/Ollama/SLM dentro do caminho primário de detecção**. Usaria a 000.8.1 como uma **camada aditiva de avaliação semântica/ambiguity resolution**, alimentada pelo resultado determinístico.
+
+A macro SPEC-003 já estabelece exatamente o papel de `intelligence`: observador assíncrono, sem mutação do ledger, produzindo estado analítico para Goals e, futuramente, Copilot.  A SPEC-003.1, por sua vez, já define um motor matemático suficientemente forte para clustering, periodicidade, confiança e price spikes.
+
+## Minha proposta: 3 camadas
+
+```text
+                  Financial Events
+                        │
+                        ▼
+              ┌─────────────────────┐
+              │ Deterministic       │
+              │ Subscription Engine │
+              │                     │
+              │ cadence             │
+              │ variance            │
+              │ confidence          │
+              │ lifecycle           │
+              │ price spike         │
+              └──────────┬──────────┘
+                         │
+                         ▼
+                  Subscription
+                    Candidate
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+              ▼                     ▼
+        Deterministic          Decision Algebra
+        acceptance             000.8.1
+              │                     │
+              │              ┌──────┴────────┐
+              │              │               │
+              │             ONNX          Ollama/SLM
+              │              │               │
+              └──────────────┴───────────────┘
+                             │
+                             ▼
+                    DecisionComposer
+                             │
+                             ▼
+                    Enriched Intelligence
+                         Domain State
+```
+
+A diferença fundamental é:
+
+> **ONNX/Ollama não decidem se uma sequência é matematicamente recorrente. Eles podem ajudar a interpretar o que a sequência significa.**
+
+---
+
+# 1. O que eu manteria 100% determinístico
+
+A SPEC-003.1 tem excelentes candidatos para permanecer fora de qualquer modelo.
+
+### Cadência
+
+```text
+Δt
+→ average interval
+→ WEEKLY / BI_WEEKLY / MONTHLY / ANNUAL
+```
+
+Isso já está formalmente definido em `I-SUB-001`.
+
+Não existe motivo para perguntar a um LLM:
+
+> “Essa cobrança parece mensal?”
+
+Temos matemática.
+
+---
+
+### Confidence
+
+Também:
+
+```text
+N
+CV
+→ Confidence
+→ ACTIVE
+```
+
+já é uma função determinística.
+
+Não usaria IA para substituir isso.
+
+---
+
+### Price spike
+
+Também é claramente determinístico:
+
+```text
+Anew >= μ × 1.05
+```
+
+
+
+ONNX não deveria substituir essa regra.
+
+---
+
+# 2. Onde a 000.8.1 realmente agrega valor
+
+A parte interessante começa quando temos algo como:
+
+```text
+counterpartyId = c123
+merchantName = "ACME DIGITAL"
+cadence = MONTHLY
+averageAmount = 39.90
+CV = 0.012
+cycles = 7
+```
+
+O engine consegue dizer:
+
+> **há um padrão recorrente altamente confiável.**
+
+Mas talvez não consiga responder bem:
+
+> **O que é isso?**
+
+Por exemplo:
+
+```text
+ACME DIGITAL
+ACME*DIGITAL
+ACME DIGITAL BR
+ACME DIGITAL SA
+```
+
+pode ser:
+
+* uma assinatura;
+* um SaaS;
+* uma cobrança de serviço;
+* uma parcela;
+* uma mensalidade;
+* uma anuidade;
+* uma cobrança recorrente de utilidade.
+
+Aqui a **Decision Algebra** faz muito mais sentido.
+
+---
+
+# 3. Uma possível `DecisionQuestion`
+
+A própria 000.8.1 foi desenhada para isso.
+
+Poderíamos ter algo conceitual como:
+
+```java
+DecisionQuestion<ChoiceDecision> classifyRecurringPayment
+```
+
+ou, melhor ainda, um tipo específico:
+
+```java
+DecisionQuestion<SubscriptionClassification>
+```
+
+com:
+
+```text
+SUBSCRIPTION
+INSTALLMENT
+UTILITY
+INSURANCE
+MEMBERSHIP
+DONATION
+UNKNOWN
+```
+
+O evaluator recebe um `DecisionState` imutável contendo:
+
+```text
+wallet
+counterparty
+normalized merchant
+amount history
+cadence
+variance
+transaction count
+origin
+timestamps
+```
+
+E retorna:
+
+```text
+DecisionAnswer<SubscriptionClassification>
+```
+
+ou:
+
+```text
+DecisionUnavailable<SubscriptionClassification>
+```
+
+exatamente seguindo a semântica da 000.8.1.
+
+Isso é muito melhor do que criar:
+
+```java
+SubscriptionAiService
+```
+
+com um `String` entrando e um `String` saindo.
+
+---
+
+# 4. ONNX é provavelmente o primeiro candidato
+
+Como vocês **já têm ONNX Runtime instalado**, eu faria dele a primeira extensão experimental.
+
+Não necessariamente para um grande modelo.
+
+Poderíamos ter um pequeno modelo especializado para:
+
+```text
+merchant normalization
+merchant classification
+subscription likelihood
+category classification
+```
+
+Por exemplo:
+
+```text
+features
+────────────────────────────
+cadenceDays
+amountCV
+cycleCount
+amountTrend
+merchantTokenFeatures
+counterpartyFeatures
+dayOfMonthVariance
+amountDelta
+gapVariance
+...
+             │
+             ▼
+        ONNX Model
+             │
+             ▼
+subscriptionLikelihood = 0.94
+```
+
+Então:
+
+```text
+Deterministic Engine
+        +
+ONNX score
+        ↓
+Decision Algebra
+```
+
+A vantagem é enorme:
+
+**ONNX continua sendo local, determinístico do ponto de vista operacional, rápido e sem dependência de inference server.**
+
+E isso casa muito bem com a arquitetura da 000.8.1, onde a inferência ONNX pode ser parte do evaluator sem entrar no hot path financeiro.
+
+---
+
+# 5. Ollama eu colocaria em outro nível
+
+Ollama é muito mais interessante para perguntas semânticas.
+
+Por exemplo:
+
+```text
+"ACME DIGITAL 39.90"
+```
+
+junto com histórico.
+
+Pergunta:
+
+> Qual é a interpretação mais provável dessa recorrência?
+
+Possíveis respostas:
+
+```text
+SUBSCRIPTION
+confidence: 0.91
+```
+
+ou:
+
+```text
+INSTALLMENT
+confidence: 0.74
+```
+
+ou:
+
+```text
+UNKNOWN
+```
+
+Mas eu **não permitiria que Ollama diretamente alterasse o estado**.
+
+O fluxo seria:
+
+```text
+Ollama
+   │
+   ▼
+DecisionAnswer
+   │
+   ▼
+DecisionComposer
+   │
+   ├── deterministic evidence
+   ├── ONNX evidence
+   └── SLM evidence
+             │
+             ▼
+       final decision
+```
+
+Isso é praticamente o caso de uso perfeito para a 000.8.1.
+
+---
+
+# 6. E aqui entra a parte mais importante: o Decision Composer
+
+A SPEC-000.8.1 não deveria virar simplesmente:
+
+```text
+subscription → call Ollama
+```
+
+Ela deveria funcionar como **abstração de avaliação**.
+
+Algo como:
+
+```text
+             SubscriptionCandidate
+                     │
+                     ▼
+              DecisionState
+                     │
+          ┌──────────┼──────────┐
+          ▼          ▼          ▼
+       Rules        ONNX      Ollama
+          │          │          │
+          ▼          ▼          ▼
+       Answer      Answer      Answer
+          │          │          │
+          └──────────┼──────────┘
+                     ▼
+             DecisionComposer
+                     │
+                     ▼
+          SubscriptionDecision
+```
+
+E isso preserva exatamente o princípio da 000.8.1:
+
+**“steal the architecture, not the library.”**
+
+Ou seja, não precisamos de Spring AI para isso.
+
+---
+
+# 7. Mas eu não colocaria isso como `[MUST]` na SPEC-003.1
+
+Esse é um ponto importante.
+
+A SPEC-003.1 atualmente é uma especificação de:
+
+> **Recurring Pattern & Subscription Detection**
+
+e os requisitos MUST são todos determinísticos.
+
+Eu manteria isso.
+
+Não faria:
+
+```text
+REQ-SUB-xxx [MUST]
+Ollama classifies subscription
+```
+
+porque isso transformaria uma feature financeira determinística em uma feature dependente de IA.
+
+Eu faria:
+
+### SPEC-003.1
+
+```text
+MUST
+Deterministic subscription detection
+```
+
+### SPEC-003.x futuro
+
+```text
+Semantic Subscription Intelligence
+```
+
+ou até uma extensão da 003.1:
+
+```text
+SHOULD
+Semantic enrichment through Decision Algebra
+```
+
+---
+
+# 8. Eu criaria uma nova camada conceitual
+
+Algo como:
+
+### Deterministic Pattern Engine
+
+Responsável por:
+
+```text
+"Existe uma recorrência?"
+```
+
+### Semantic Evaluator
+
+Responsável por:
+
+```text
+"O que provavelmente é essa recorrência?"
+```
+
+### Decision Composer
+
+Responsável por:
+
+```text
+"Podemos confiar nessa interpretação?"
+```
+
+Isso produz:
+
+```text
+SubscriptionCandidate
+        │
+        ├── deterministic confidence = 0.94
+        │
+        ├── ONNX classification = SUBSCRIPTION / 0.91
+        │
+        └── SLM classification = SUBSCRIPTION / 0.88
+                 │
+                 ▼
+           DecisionComposer
+                 │
+                 ▼
+       final typed decision
+```
+
+---
+
+# 9. Isso também resolve uma inconsistência da SPEC atual
+
+A macro SPEC-003 diz que a capacidade:
+
+> “Prepares structured, read-only analytical domain state for Phase 4 AI Copilot tools.”
+
+Isso é bom.
+
+Mas existe uma oportunidade de criar uma separação:
+
+```text
+SPEC-003
+   │
+   ├── deterministic intelligence
+   │
+   └── semantic intelligence
+            │
+            ▼
+       Decision Algebra
+            │
+            ▼
+       Phase 4 Copilot
+```
+
+Então o Copilot **não precisa consultar diretamente o banco de subscriptions e começar a fazer inferência arbitrária**.
+
+Ele recebe decisões/estado analítico estruturado.
+
+---
+
+# 10. E eu manteria o Ollama fora do caminho de persistência
+
+Muito importante.
+
+Não faria:
+
+```text
+event
+ ↓
+Ollama
+ ↓
+subscription table
+```
+
+Faria:
+
+```text
+event
+ ↓
+deterministic engine
+ ↓
+persist candidate
+ ↓
+nearline semantic enrichment
+ ↓
+Decision Algebra
+ ↓
+persist enrichment/decision
+```
+
+Assim, se:
+
+```text
+Ollama DOWN
+```
+
+temos:
+
+```text
+subscription detection = funcionando
+semantic enrichment = unavailable
+```
+
+Isso encaixa perfeitamente no `DecisionUnavailable<T>` da 000.8.1.
+
+---
+
+# 11. O resultado poderia ser extremamente elegante
+
+Imagine:
+
+```java
+DecisionQuestion<SubscriptionClassification>
+    .forRecurringPayment(candidate)
+```
+
+Evaluator:
+
+```text
+ONNX → DecisionAnswer<SubscriptionClassification>
+Ollama → DecisionAnswer<SubscriptionClassification>
+Rules → DecisionAnswer<SubscriptionClassification>
+```
+
+E o composer:
+
+```text
+DecisionOutcome<SubscriptionClassification>
+```
+
+pode ser:
+
+```text
+SUBSCRIPTION
+```
+
+ou:
+
+```text
+INSTALLMENT
+```
+
+ou:
+
+```text
+UNKNOWN
+```
+
+ou:
+
+```text
+DecisionUnavailable
+```
+
+Sem `String`, sem `Map<String,Object>`, sem JSON arbitrário entrando no domínio.
+
+Isso é exatamente onde a arquitetura da 000.8.1 fica muito mais interessante que simplesmente “adicionar IA”.
+
+---
+
+# 12. E existe um detalhe importante sobre o hot path
+
+Não existe conflito com nossa arquitetura financeira.
+
+A SPEC-003 já define a inteligência como **assíncrona**.
+
+Portanto:
+
+```text
+Financial transaction
+      │
+      ├── ledger commit
+      │
+      └── event
+             │
+             ▼
+       Intelligence
+             │
+             ▼
+       deterministic
+             │
+             ├── ONNX
+             │
+             └── Ollama
+```
+
+Tudo fica **fora da autorização financeira**.
+
+Isso preserva completamente a regra da 000.8.1:
+
+```text
+Financial hot path
+       ∩
+{LLM, SLM, Ollama}
+       =
+∅
+```
+
+E ONNX pode continuar sendo usado onde já definimos que é apropriado: avaliação local/rápida, inclusive no contexto de inteligência.
+
+---
+
+# Minha conclusão
+
+Eu **não mudaria a essência da SPEC-003.1**.
+
+Na verdade, eu diria que ela está corretamente desenhada como **baseline determinístico**.
+
+Mas eu mudaria a arquitetura global para:
+
+```text
+                 SPEC-003 Intelligence
+                         │
+            ┌────────────┴────────────┐
+            │                         │
+     Pattern Intelligence       Semantic Intelligence
+            │                         │
+     deterministic engine       SPEC-000.8.1
+            │                         │
+     cadence / variance        DecisionQuestion<T>
+     confidence               DecisionOutcome<T>
+     lifecycle                 DecisionComposer
+            │                    /          \
+            │                  ONNX        Ollama
+            │
+            └────────────┬───────────────┘
+                         ▼
+                Intelligence State
+                         │
+                  Goals / Copilot
+```
+
+### E a prioridade que eu adotaria:
+
+**1. Rules/deterministic engine — MUST**
+Já está na 003.1.
+
+**2. Native Typed Decision Algebra — arquitetura compartilhada — SHOULD/extension**
+É a nossa camada de composição e governança.
+
+**3. ONNX evaluator — primeiro aditivo concreto**
+Porque já temos runtime e é adequado para classificação/score local.
+
+**4. Ollama evaluator — nearline/experimental**
+Excelente para merchant/semantic interpretation, mas nunca autoridade financeira.
+
+**5. JEV-style evaluator — manter como referência arquitetural, não dependência.**
+
+E principalmente: **não deixar o modelo “decidir” `ACTIVE`**. O estado financeiro/analítico primário continua obedecendo `I-SUB-001..004`; a IA pode **enriquecer, classificar ou questionar**, e a `DecisionComposer` pode produzir uma decisão tipada adicional. A própria 003.1 já define os gates matemáticos de `ACTIVE` e price spike.
+
+Isso nos dá uma arquitetura em que **se desligarmos Ollama amanhã, a inteligência financeira continua funcionando integralmente** — e isso, para mim, é exatamente o desenho que queremos.

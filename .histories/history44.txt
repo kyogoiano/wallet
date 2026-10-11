@@ -1,0 +1,870 @@
+Yes. At this point I think **000.9.1 should not only define Edge/Core separation**, but also define a **runtime/deployment abstraction** so the same application can run:
+
+* as two processes on one machine;
+* as multiple Docker containers;
+* as Kubernetes pods;
+* on-premises;
+* GCP;
+* Cloud Foundry;
+* Rancher/RKE2;
+* potentially another cloud later.
+
+The important architectural decision is: **don't make Kubernetes a requirement of the application. Make Kubernetes one deployment target.**
+
+I researched the current GCP, Cloud Foundry and RKE2 options because the economics and operational model have changed somewhat.
+
+---
+
+# 1. First: NATS changes the equation significantly
+
+Your architecture already has an important advantage:
+
+```text
+                    durable boundary
+                           │
+                           ▼
+EDGE ───────────────► NATS JetStream ───────────────► CORE
+```
+
+That means Core doesn't necessarily need to be alive at the exact moment Edge accepts a command.
+
+For example:
+
+```text
+Edge × 4
+   │
+   ▼
+NATS JetStream
+   │
+   ├── Core-1
+   ├── Core-2
+   ├── Core-3
+   └── Core-4
+```
+
+If `Core-2` dies:
+
+```text
+Core-1 ─┐
+Core-3 ─┼── consume
+Core-4 ─┘
+
+Core-2 💥
+```
+
+the other consumers continue.
+
+This is one reason I **would not introduce Kafka** just because we're moving toward multiple pods. NATS JetStream already gives us a durable messaging boundary appropriate to the architecture.
+
+But there is an important distinction:
+
+> **JetStream persistence is not a replacement for application persistence or the Edge journal.**
+
+JetStream protects accepted messages according to the stream's storage/replication configuration. Your local journal protects the acceptance path when the broker itself cannot be reached.
+
+So the hierarchy becomes:
+
+```text
+                    DURABILITY
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+      Edge           NATS         PostgreSQL
+     Journal       JetStream        Ledger
+        │              │              │
+   acceptance       delivery       financial
+    recovery         buffer          truth
+```
+
+That's a very good architecture.
+
+---
+
+# 2. Now the question becomes: where do these containers live?
+
+I'd consider five realistic deployment families:
+
+| Platform         | On-prem | Cloud | Multi-pod | Operational effort | Portability |     Cost efficiency |
+| ---------------- | ------: | ----: | --------: | -----------------: | ----------: | ------------------: |
+| Docker/Compose   |   ⭐⭐⭐⭐⭐ |    ⭐⭐ |         ⭐ |              ⭐⭐⭐⭐⭐ |       ⭐⭐⭐⭐⭐ |               ⭐⭐⭐⭐⭐ |
+| Kubernetes       |   ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ |     ⭐⭐⭐⭐⭐ |                 ⭐⭐ |       ⭐⭐⭐⭐⭐ |                ⭐⭐⭐⭐ |
+| **Rancher/RKE2** |   ⭐⭐⭐⭐⭐ |  ⭐⭐⭐⭐ |     ⭐⭐⭐⭐⭐ |                ⭐⭐⭐ |       ⭐⭐⭐⭐⭐ |               ⭐⭐⭐⭐⭐ |
+| **GKE Standard** |       ❌ | ⭐⭐⭐⭐⭐ |     ⭐⭐⭐⭐⭐ |               ⭐⭐⭐⭐ |        ⭐⭐⭐⭐ |                ⭐⭐⭐⭐ |
+| GKE Autopilot    |       ❌ | ⭐⭐⭐⭐⭐ |     ⭐⭐⭐⭐⭐ |              ⭐⭐⭐⭐⭐ |         ⭐⭐⭐ |                ⭐⭐⭐⭐ |
+| Cloud Run        |       ❌ | ⭐⭐⭐⭐⭐ |      ⭐⭐⭐⭐ |              ⭐⭐⭐⭐⭐ |         ⭐⭐⭐ | ⭐⭐⭐⭐⭐ for stateless |
+| Cloud Foundry    |    ⭐⭐⭐⭐ |  ⭐⭐⭐⭐ |      ⭐⭐⭐⭐ |               ⭐⭐⭐⭐ |         ⭐⭐⭐ |                 ⭐⭐⭐ |
+| OpenShift        |   ⭐⭐⭐⭐⭐ |  ⭐⭐⭐⭐ |     ⭐⭐⭐⭐⭐ |                 ⭐⭐ |        ⭐⭐⭐⭐ |                  ⭐⭐ |
+| Nomad            |   ⭐⭐⭐⭐⭐ |  ⭐⭐⭐⭐ |      ⭐⭐⭐⭐ |               ⭐⭐⭐⭐ |        ⭐⭐⭐⭐ |                ⭐⭐⭐⭐ |
+
+For **this particular application**, my ranking would be different from a generic Java application.
+
+### My shortlist
+
+**1. RKE2/Rancher**
+
+**2. GKE Standard**
+
+**3. Docker/Compose for small installations**
+
+**4. Cloud Foundry if the customer already has CF**
+
+**5. GKE Autopilot for selected stateless components**
+
+---
+
+# 3. Why I'm leaning toward RKE2/Rancher for the "reusable on-prem container" story
+
+This is actually a very good match for what you're describing.
+
+You could distribute:
+
+```text
+wallet-platform/
+│
+├── edge
+├── core
+├── nats
+├── dragonfly
+├── postgres
+└── observability
+```
+
+as container images plus Helm charts.
+
+Then:
+
+### Small customer
+
+```text
+3-node RKE2
+│
+├── Edge × 2
+├── Core × 2
+├── NATS × 3
+├── Dragonfly
+└── PostgreSQL
+```
+
+### Larger customer
+
+```text
+Kubernetes cluster
+│
+├── Edge × 10
+├── Core × 8
+├── Fraud workers × 6
+├── NATS × 3
+├── Dragonfly × N
+└── PostgreSQL HA
+```
+
+The application itself doesn't know whether this is:
+
+```text
+Rancher
+GKE
+OpenShift
+EKS
+AKS
+```
+
+It simply receives:
+
+```text
+CommandEnvelope
+```
+
+and publishes:
+
+```text
+NATS
+```
+
+RKE2 is particularly attractive for an appliance/on-prem model because it is a Kubernetes distribution designed to be relatively straightforward to install and operate. Current RKE2 provides Kubernetes, containerd, etcd, CoreDNS, Helm, networking and other components as part of the distribution. ([RKE2 Documentation][1])
+
+It also supports HA with three server/control-plane nodes and additional worker nodes. ([RKE2 Documentation][2])
+
+That gives you a very nice commercial architecture:
+
+> **"Wallet Appliance: deploy our Helm chart onto your Kubernetes/RKE2 cluster."**
+
+rather than:
+
+> "You must buy our proprietary infrastructure."
+
+---
+
+# 4. And Rancher gives you an interesting management layer
+
+The important distinction is:
+
+```text
+RKE2
+=
+Kubernetes distribution/runtime
+```
+
+while:
+
+```text
+Rancher
+=
+management/control plane for Kubernetes environments
+```
+
+So you could have:
+
+```text
+                 Rancher
+                    │
+        ┌───────────┼───────────┐
+        │           │           │
+      RKE2        RKE2        GKE
+       on-prem      DR        cloud
+        │           │           │
+       Wallet      Wallet      Wallet
+```
+
+That's attractive if your long-term idea is a **portable financial appliance**.
+
+RKE2 also supports Helm natively, which fits very nicely with packaging Edge/Core/NATS/Dragonfly/etc. as deployable charts. ([RKE2 Documentation][3])
+
+---
+
+# 5. GCP: I would choose GKE Standard rather than Cloud Run for the complete platform
+
+Google gives you an interesting spectrum:
+
+```text
+Cloud Run
+     │
+     │ less infrastructure
+     ▼
+GKE Autopilot
+     │
+     ▼
+GKE Standard
+     │
+     │ more control
+     ▼
+Compute Engine
+```
+
+For **Edge**, Cloud Run is interesting.
+
+For the **entire wallet platform**, I'm much more inclined toward GKE.
+
+Why?
+
+Because we have:
+
+* long-running NATS consumers;
+* NATS itself;
+* JetStream persistence;
+* potentially Dragonfly;
+* PostgreSQL;
+* durable Edge journal;
+* background workers;
+* SSE;
+* potentially HTTP/3;
+* different scaling policies;
+* stateful components.
+
+That's much more naturally represented by Kubernetes.
+
+GKE Standard lets you control node pools and workloads, while Autopilot shifts more of the infrastructure management to Google. GKE currently charges a $0.10/hour cluster management fee, with compute billed separately; Autopilot's general-purpose workloads are billed according to requested pod CPU/memory resources. ([Google Cloud][4])
+
+---
+
+# 6. But GKE Autopilot is interesting for Edge
+
+There is a possibility I particularly like:
+
+```text
+                     GCP
+                      │
+              ┌───────┴────────┐
+              │                │
+          Cloud Run          GKE
+              │                │
+             API             Core
+              │              NATS
+             ...          PostgreSQL
+```
+
+Or:
+
+```text
+GKE Autopilot
+│
+├── Edge
+├── Core
+├── workers
+└── ...
+```
+
+Autopilot charges based on requested pod resources for general-purpose workloads, rather than making you manage node capacity directly. ([Google Cloud][4])
+
+That's appealing if:
+
+```text
+Edge traffic = highly variable
+```
+
+because you don't necessarily want to keep large VM capacity around.
+
+But I would **not make Autopilot the baseline architecture**.
+
+The reason is simple:
+
+> Our application has unusual persistence and networking requirements.
+
+The local segmented journal is particularly important.
+
+---
+
+# 7. Cloud Foundry is actually better than it initially looks
+
+Cloud Foundry can absolutely run the Edge/Core model.
+
+You can have:
+
+```text
+wallet-edge
+wallet-core
+```
+
+as separate applications, with independent instance counts.
+
+Cloud Foundry manifests support instance count, memory, disk and other per-app settings. ([Cloud Foundry Docs][5])
+
+And current Cloud Foundry supports rolling and canary deployments, allowing new instances to become healthy before old ones are removed. ([Cloud Foundry Docs][6])
+
+So:
+
+```text
+wallet-edge
+instances: 8
+memory: 1GB
+
+wallet-core
+instances: 4
+memory: 4GB
+```
+
+is perfectly natural.
+
+It also has automatic container lifecycle management; failed instances are rescheduled. ([Cloud Foundry Docs][7])
+
+---
+
+# 8. But there is one big problem for our 000.9 architecture
+
+Your **local durable journal**.
+
+Cloud Foundry explicitly recommends that applications don't use their local filesystem for persistent data because it is short-lived and isn't shared between instances. ([Cloud Foundry Docs][8])
+
+That doesn't mean Cloud Foundry can't run the application.
+
+It means we'd need:
+
+```text
+Edge
+ │
+ ├── memory
+ │
+ └── durable external spool
+```
+
+instead of:
+
+```text
+Edge
+ │
+ └── local segmented journal
+```
+
+And that changes one of the core assumptions of 000.9.
+
+Therefore I would classify Cloud Foundry as:
+
+> **Good deployment target, but requires a different Journal implementation/profile.**
+
+That's actually another reason the Journal SPI we introduced in 000.9 is valuable.
+
+---
+
+# 9. This suggests a really important abstraction
+
+Instead of:
+
+```java
+SegmentedFileJournal
+```
+
+being "the Edge journal", we already have:
+
+```java
+interface EdgeDurableJournal {
+    ...
+}
+```
+
+and implementations:
+
+```text
+LocalSegmentedFileJournal
+RemoteDurableJournal
+PersistentVolumeJournal
+ObjectStorageJournal
+```
+
+Potentially:
+
+```text
+On-prem/RKE2
+       │
+       ▼
+Local/PV Journal
+
+GKE
+       │
+       ▼
+Persistent Disk Journal
+
+Cloud Foundry
+       │
+       ▼
+External durable spool
+
+Development
+       │
+       ▼
+Local filesystem
+```
+
+This is **exactly the kind of abstraction that 000.9.1 should formalize**.
+
+---
+
+# 10. We should also distinguish "application pods" from "stateful infrastructure"
+
+I would **not** put everything into the same scaling model.
+
+### Stateless-ish application layer
+
+```text
+                ┌─────────┐
+                │  Edge   │
+                └─────────┘
+                   × N
+
+                ┌─────────┐
+                │  Core   │
+                └─────────┘
+                   × N
+
+                ┌─────────┐
+                │ Fraud   │
+                └─────────┘
+                   × N
+```
+
+These are easy to scale.
+
+But:
+
+### Stateful infrastructure
+
+```text
+NATS JetStream
+PostgreSQL
+Dragonfly
+```
+
+has completely different lifecycle and storage requirements.
+
+I'd treat these as:
+
+```text
+              WALLET PLATFORM
+                     │
+        ┌────────────┴────────────┐
+        │                         │
+ APPLICATIONS                 STATEFUL
+        │                         │
+ Edge / Core / Workers       PostgreSQL
+        │                    NATS JetStream
+        │                    Dragonfly
+        │
+    horizontally
+      scalable
+```
+
+That distinction will prevent Kubernetes from becoming a giant pile of stateful workloads.
+
+---
+
+# 11. NATS itself should probably have its own HA topology
+
+For example:
+
+```text
+              NATS Cluster
+          ┌──────┬──────┐
+          │      │      │
+        NATS-1 NATS-2 NATS-3
+          │      │      │
+          └── JetStream ──┘
+```
+
+Then:
+
+```text
+Edge-1 ─┐
+Edge-2 ─┼──── NATS ──── Core-1
+Edge-3 ─┤                Core-2
+Edge-4 ─┘                Core-3
+```
+
+The critical thing is that we don't want:
+
+```text
+Edge → Core
+```
+
+to become a direct network dependency again.
+
+Instead:
+
+```text
+Edge
+ ↓
+NATS
+ ↓
+Core
+```
+
+remains the architectural seam.
+
+---
+
+# 12. This gives us a very powerful scaling model
+
+Suppose traffic suddenly increases 10×.
+
+We don't necessarily scale everything 10×.
+
+Maybe:
+
+```text
+Before
+
+Edge   × 2
+Core   × 2
+Fraud  × 1
+```
+
+becomes:
+
+```text
+After
+
+Edge   × 12
+Core   × 6
+Fraud  × 3
+```
+
+because the bottlenecks are different.
+
+And NATS absorbs the temporal mismatch:
+
+```text
+        12 Edge pods
+             │
+             ▼
+       ┌───────────┐
+       │   NATS    │
+       │  backlog  │
+       └─────┬─────┘
+             │
+       6 Core pods
+```
+
+That's precisely what we want from a high-throughput financial system.
+
+---
+
+# 13. There is also an important Kubernetes concept we should exploit
+
+Don't just have:
+
+```yaml
+replicas: 3
+```
+
+We should define **resource contracts**.
+
+For example:
+
+```yaml
+wallet-edge:
+  requests:
+    cpu: 500m
+    memory: 512Mi
+  limits:
+    cpu: 2
+    memory: 1Gi
+
+wallet-core:
+  requests:
+    cpu: 2
+    memory: 2Gi
+  limits:
+    cpu: 4
+    memory: 4Gi
+```
+
+Then autoscaling can use:
+
+```text
+CPU
+memory
+HTTP concurrency
+NATS consumer lag
+journal pressure
+```
+
+The last two are particularly interesting.
+
+For Core, **NATS consumer lag** may be a much better scaling signal than CPU.
+
+For Edge:
+
+```text
+requests/sec
+in-flight
+journal pressure
+```
+
+may be better.
+
+So eventually:
+
+```text
+Edge HPA
+    ↓
+RPS / inflight
+
+Core HPA
+    ↓
+NATS lag / processing latency
+
+Fraud Worker HPA
+    ↓
+job queue depth
+```
+
+This is much more sophisticated than simply "CPU > 70%".
+
+---
+
+# 14. I would therefore define three deployment profiles
+
+This is probably the cleanest direction for the next spec.
+
+### Profile A — Appliance
+
+```text
+Docker/Podman
+or
+RKE2
+
+1–3 physical/VM nodes
+```
+
+Designed for:
+
+* banks;
+* fintechs;
+* private cloud;
+* on-prem;
+* disconnected/air-gapped environments.
+
+### Profile B — Kubernetes Cloud
+
+```text
+GKE
+EKS
+AKS
+OpenShift
+RKE2
+```
+
+Designed for:
+
+* elastic scaling;
+* HA;
+* multi-zone;
+* independent Edge/Core scaling.
+
+### Profile C — PaaS
+
+```text
+Cloud Foundry
+Cloud Run
+```
+
+Designed for environments where the customer doesn't want to manage Kubernetes.
+
+But Profile C must implement the appropriate persistence adapters.
+
+---
+
+# 15. And this makes the project much more portable
+
+The application contract becomes:
+
+```text
+                WALLET APPLICATION
+                       │
+             ┌─────────┴──────────┐
+             │                    │
+        APPLICATION              SPI
+          LOGIC                   │
+                                  ├── Journal
+                                  ├── Messaging
+                                  ├── Persistence
+                                  ├── Secrets
+                                  ├── Observability
+                                  └── Runtime
+```
+
+Then:
+
+```text
+             ┌────────────────────────┐
+             │    Deployment Layer     │
+             └────────────────────────┘
+
+ RKE2          GKE          Cloud Foundry
+   │             │                │
+   ▼             ▼                ▼
+containers     pods             apps
+```
+
+The application doesn't care.
+
+---
+
+# 16. My current recommendation
+
+For **Wallet V4**, I would converge toward this:
+
+```text
+                 ┌──────────────────────────┐
+                 │       External LB         │
+                 └────────────┬─────────────┘
+                              │
+                    ┌─────────┴─────────┐
+                    │                   │
+                 Edge-1              Edge-2
+                    │                   │
+                    └─────────┬─────────┘
+                              │
+                         NATS JetStream
+                              │
+              ┌───────────────┼───────────────┐
+              │               │               │
+           Core-1          Core-2          Core-3
+              │               │               │
+              └───────────────┼───────────────┘
+                              │
+                       PostgreSQL
+                       Dragonfly
+```
+
+And package this as:
+
+```text
+wallet-edge
+wallet-core
+wallet-contracts
+```
+
+plus Helm charts:
+
+```text
+wallet-platform/
+├── charts/
+│   ├── wallet-edge
+│   ├── wallet-core
+│   ├── nats
+│   ├── dragonfly
+│   └── wallet-platform
+│
+└── images/
+    ├── edge
+    └── core
+```
+
+### Preferred environments
+
+**On-prem:** RKE2 + Rancher
+
+**GCP:** GKE Standard initially
+
+**Very small installation:** Docker/Podman Compose
+
+**Existing Cloud Foundry customer:** Cloud Foundry profile
+
+**Cloud Run:** Edge/API-only possibility, not my baseline for the whole wallet platform.
+
+GKE is particularly attractive because Google currently provides both Standard and Autopilot modes, so we can choose operational control versus managed simplicity without changing the application container model. ([Google Cloud][4])
+
+---
+
+## The key architectural insight
+
+I think we have now arrived at something more important than simply **"split Edge and Core."**
+
+The target should be:
+
+> **One application architecture, multiple runtime topologies.**
+
+```text
+                       WALLET
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+             EDGE                  CORE
+              │                     │
+              └──────────┬──────────┘
+                         │
+                    NATS contract
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+         single JVM             separate JVMs
+              │                     │
+         development          containers/pods
+                                      │
+                         ┌────────────┼────────────┐
+                         │            │            │
+                       RKE2          GKE       Cloud Foundry
+```
+
+**That is what I would make SPEC-000.9.1 establish.**
+
+And I'd add one more architectural rule: **Kubernetes must never leak into the Java application layer.** No Kubernetes APIs, pod assumptions, service-discovery assumptions, or cloud-specific persistence in Edge/Core. Kubernetes/Rancher/GCP/CF belong entirely to the deployment layer.
+
+That gives us a genuinely **portable "financial appliance" architecture** rather than a GKE application that happens to have containers.
+
+[1]: https://docs.rke2.io/architecture?utm_source=chatgpt.com "Anatomy of a Next Generation Kubernetes Distribution | RKE2"
+[2]: https://docs.rke2.io/install/ha?utm_source=chatgpt.com "High Availability | RKE2"
+[3]: https://docs.rke2.io/add-ons/helm?utm_source=chatgpt.com "Helm | RKE2"
+[4]: https://cloud.google.com/kubernetes-engine/pricing?utm_source=chatgpt.com "Google Kubernetes Engine pricing | Google Cloud"
+[5]: https://docs.cloudfoundry.org/devguide/deploy-apps/manifest.html?utm_source=chatgpt.com "Deploying with app manifests | Cloud Foundry Docs"
+[6]: https://docs.cloudfoundry.org/devguide/deploy-apps/rolling-deploy.html?utm_source=chatgpt.com "Configuring app deployments | Cloud Foundry Docs"
+[7]: https://docs.cloudfoundry.org/devguide/deploy-apps/app-lifecycle.html?utm_source=chatgpt.com "The application container life cycle on the Diego architecture | Cloud Foundry Docs"
+[8]: https://docs.cloudfoundry.org/devguide/deploy-apps/prepare-to-deploy.html?utm_source=chatgpt.com "Designing and running your app in the cloud | Cloud Foundry Docs"

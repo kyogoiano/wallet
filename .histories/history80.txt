@@ -1,0 +1,643 @@
+Sim. Esta Rev.2 está **bem melhor** que a anterior, principalmente porque agora a 000.12 já declara explicitamente que DLQ/retry não é responsabilidade dela. Mas, olhando como SPEC que vai virar PLAN/TASKS, eu ainda faria alguns ajustes antes de ratificar.
+
+O ponto principal é que agora temos **duas responsabilidades bem delimitadas**:
+
+```text
+SPEC-000.11
+Edge ──NATS──> Core
+        │
+        └── retry / DLQ / replay / ACK
+
+
+SPEC-000.12
+Core
+ ├── command consumers
+ ├── ledger
+ ├── fraud
+ └── savings
+       │
+       └── Modulith events
+```
+
+A 000.12 já explicita corretamente que o Core é um único processo e que NATS representa a fronteira interprocesso.
+
+## 1. O maior problema restante: `dlq` ainda está no Bound Context
+
+No cabeçalho:
+
+> `Spring Modulith DAG (ledger, fraud, savings, dlq) & :edge`
+
+Mas a própria SPEC diz:
+
+> DLQ, failure classification e retry são governados pela 000.11.
+
+Então eu **tiraria `dlq` do bounded context/module da 000.12**, a menos que exista realmente um módulo Spring Modulith `dlq` que tenha responsabilidades além da reprocessing infrastructure.
+
+Eu deixaria:
+
+```text
+Bounded Context / Module:
+Spring Modulith DAG (ledger, fraud, savings) & :edge
+```
+
+E, se o projeto realmente possui infraestrutura `dlq`, trataria como:
+
+```text
+shared infrastructure / reprocessing infrastructure
+```
+
+e não como capability de negócio.
+
+Isso evita uma ambiguidade perigosa:
+
+```text
+000.11 → DLQ
+000.12 → módulo dlq
+```
+
+que pode fazer o Antigravity novamente colocar lógica de DLQ dentro da 000.12.
+
+---
+
+# 2. `I-STREAM-006` está correto, mas a referência está errada
+
+Hoje:
+
+> `SPEC-000.11 (I-TDLQ-009)`
+
+Precisamos tomar cuidado aqui.
+
+Na definição que estabelecemos para 000.11, **durable handoff antes do ACK** é uma propriedade arquitetural da reprocessing pipeline. Se o ID oficial na 000.11 não for exatamente `I-TDLQ-009`, essa referência vai quebrar a rastreabilidade.
+
+Eu faria uma referência mais robusta:
+
+```text
+I-STREAM-006:
+Ingress command consumers MUST obey the durable-handoff-before-ACK
+contract defined by SPEC-000.11.
+```
+
+Sem acoplar a um ID interno da outra SPEC.
+
+Ou, se quisermos máxima rastreabilidade:
+
+```text
+I-STREAM-006:
+Ingress command consumers MUST satisfy
+SPEC-000.11:I-TDLQ-XXX.
+```
+
+Mas só depois de congelarmos o ID da 000.11.
+
+---
+
+# 3. `I-STREAM-001` precisa ser ligeiramente mais preciso
+
+Hoje:
+
+> Internal state projections and reactions ... MUST communicate via in-process `@ApplicationModuleListener`.
+
+Isso é bom, mas pode ficar excessivamente absoluto.
+
+Temos três tipos diferentes de comunicação dentro do Core:
+
+```text
+command → use case
+domain event → listener
+module API → direct invocation
+```
+
+Nem toda comunicação entre módulos deve obrigatoriamente ser evento.
+
+Eu escreveria:
+
+```text
+I-STREAM-001 — Intra-Core Event Transport
+
+Domain events emitted within Wallet Core MUST be delivered to
+interested Wallet Core modules through Spring Modulith in-process
+events (`@ApplicationModuleListener`).
+
+Such events MUST NOT be serialized, published to external NATS,
+and consumed again by another module in the same JVM.
+```
+
+Isso é mais correto arquiteturalmente.
+
+Porque:
+
+```text
+fraud → ledgerService.somePublicOperation()
+```
+
+não precisa virar evento simplesmente porque são módulos diferentes.
+
+---
+
+# 4. O `@ApplicationModuleListener` não deveria necessariamente ser "transactional async"
+
+Na tabela você colocou:
+
+> `I-STREAM-001 (@ApplicationModuleListener transactional async)`
+
+Eu removeria **async** dessa frase.
+
+Porque existe uma decisão arquitetural importante aqui:
+
+```text
+@TransactionalEventListener
+```
+
+versus
+
+```text
+@ApplicationModuleListener
+```
+
+e ainda:
+
+```text
+async
+```
+
+pode alterar:
+
+* ordering;
+* transaction boundary;
+* error propagation;
+* retry;
+* consistency;
+* observability.
+
+A SPEC não precisa decidir isso se o requisito real é simplesmente:
+
+> **não usar NATS para eventos intra-Core.**
+
+Eu deixaria:
+
+```text
+I-STREAM-001
+...
+through Spring Modulith in-process events.
+```
+
+E a escolha:
+
+```text
+sync vs async
+transactional vs non-transactional
+```
+
+vai para ARCH/PLAN conforme o caso de uso.
+
+---
+
+# 5. `I-STREAM-002` está bom, mas "message consumer classes" é amplo
+
+Hoje:
+
+```text
+Message consumer classes MUST reside inside <module>.internal.messaging
+```
+
+Mas no Pillar B temos:
+
+```text
+fraud.internal.listener.FraudGraphListener
+```
+
+Ou seja, a própria SPEC usa dois conceitos:
+
+```text
+internal.messaging
+internal.listener
+```
+
+Eu não forçaria tudo para `internal.messaging`.
+
+Melhor:
+
+```text
+I-STREAM-002 — Modulith Ownership & Encapsulation
+
+Inbound adapters and event listeners MUST reside inside the
+owning module's `internal` package and MUST NOT be exposed as
+module API.
+
+They MAY be organized under `internal.messaging`,
+`internal.listener`, or another capability-specific internal
+subpackage.
+```
+
+Assim a arquitetura fica coerente com o código real.
+
+---
+
+# 6. `I-STREAM-003` precisa parar de assumir que tudo é `ledger`
+
+O princípio:
+
+```text
+commands.<capability>.<action>
+```
+
+está excelente.
+
+Mas os requisitos seguintes ainda fazem:
+
+```text
+TRANSFER → commands.ledger.transfer
+DEPOSIT  → commands.ledger.deposit
+WITHDRAW → commands.ledger.withdraw
+```
+
+Isso pode estar correto **para o estado atual**, mas existe uma diferença entre:
+
+> canonical taxonomy
+
+e
+
+> current command ownership.
+
+Eu manteria o padrão genérico e documentaria os comandos atuais:
+
+```text
+I-STREAM-003:
+Subject(cmd) = commands.<capability>.<action>
+```
+
+e:
+
+```text
+Current command routes:
+TRANSFER → commands.ledger.transfer
+DEPOSIT  → commands.ledger.deposit
+WITHDRAW → commands.ledger.withdraw
+```
+
+Isso deixa espaço para:
+
+```text
+commands.wallet.create
+```
+
+caso `WalletCreation` seja uma capability separada no futuro.
+
+---
+
+# 7. `CommandRoute` é uma das melhores decisões da SPEC
+
+Este ponto eu manteria exatamente.
+
+```text
+CommandType
+      │
+      ▼
+CommandRoute
+ ├── capability
+ └── subject
+```
+
+Em vez de:
+
+```java
+"commands." + commandType.name().toLowerCase()
+```
+
+Isso é importante porque impede que o Edge tenha conhecimento implícito da taxonomia.
+
+Eu adicionaria apenas uma regra:
+
+```text
+I-STREAM-004:
+Every CommandType MUST have exactly one CommandRoute.
+```
+
+E um teste:
+
+```text
+CommandRouteMappingTest
+```
+
+com:
+
+```text
+TRANSFER → commands.ledger.transfer
+DEPOSIT  → commands.ledger.deposit
+WITHDRAW → commands.ledger.withdraw
+```
+
+---
+
+# 8. `I-STREAM-008` está correto, mas precisa considerar migration
+
+Você diz:
+
+> Every canonical command subject MUST have exactly one owning consumer within the active Wallet Core deployment.
+
+Perfeito.
+
+Mas durante rollout podemos ter:
+
+```text
+commands.wallet.*
+commands.ledger.*
+```
+
+Se existir consumer antigo e novo simultaneamente, temporariamente teremos dois possíveis consumidores.
+
+Então eu acrescentaria:
+
+```text
+I-STREAM-009 — Legacy Subject Migration
+
+Legacy command subjects MUST NOT have active business consumers
+after migration to the canonical subject taxonomy is complete.
+
+The migration MUST define an explicit removal milestone for
+legacy subjects.
+```
+
+Isso evita o clássico:
+
+> "deixamos o consumer antigo por segurança".
+
+E seis meses depois ninguém sabe qual é o oficial.
+
+---
+
+# 9. O maior ponto conceitual: `Outbox` não é necessariamente "external egress"
+
+Você escreveu:
+
+> Keep Outbox Relay publishing to NATS strictly for external consumer egress.
+
+Eu faria uma pequena mudança:
+
+```text
+Keep Outbox Relay publishing to NATS for
+inter-process/external consumers only.
+```
+
+Porque NATS não precisa necessariamente significar "third-party".
+
+Pode existir outro processo do próprio Wallet Service futuramente.
+
+A regra arquitetural mais forte é:
+
+```text
+same JVM → Modulith
+different process → NATS
+```
+
+Não:
+
+```text
+same company → Modulith
+third party → NATS
+```
+
+---
+
+# 10. A topologia precisa mostrar `status.*`
+
+A seção 1 diz:
+
+```text
+Core → Edge Status: status.* broadcasts
+```
+
+Mas a topologia não mostra isso.
+
+Eu colocaria:
+
+```text
+                 ┌──────────────────────┐
+                 │      wallet-edge     │
+                 └──────────▲───────────┘
+                            │
+                       status.*
+                            │
+                 ┌──────────┴───────────┐
+                 │      wallet-core     │
+                 │                      │
+Edge ──commands──► command consumers    │
+                 │       │              │
+                 │       ▼              │
+                 │  Modulith Events     │
+                 │    │       │         │
+                 │  fraud   savings     │
+                 └──────────────────────┘
+```
+
+Porque `status.*` é uma das poucas coisas que **continua sendo NATS dentro da arquitetura**.
+
+---
+
+# 11. Pillar A está quase perfeito
+
+Eu manteria:
+
+```text
+REQ-STRM-001
+REQ-STRM-002
+REQ-STRM-003
+REQ-STRM-004
+```
+
+Mas acrescentaria um MUST:
+
+### `REQ-STRM-005`
+
+```text
+Every canonical command subject MUST have exactly one active
+owning consumer, and every CommandType MUST resolve to exactly
+one CommandRoute.
+```
+
+Isso transforma `I-STREAM-008` em algo efetivamente verificável.
+
+---
+
+# 12. Pillar B precisa preservar semântica transacional
+
+Aqui existe um ponto que merece ser explicitado.
+
+Hoje:
+
+```text
+Transfer
+   │
+   ├── ledger commit
+   │
+   └── TransferCompletedEvent
+          │
+          └── FraudGraphListener
+```
+
+Precisamos decidir se:
+
+```text
+FraudGraphListener
+```
+
+é:
+
+### A — parte da mesma transação
+
+ou:
+
+### B — reação pós-commit
+
+ou:
+
+### C — assíncrona eventualmente consistente.
+
+A SPEC atual não define isso.
+
+E **não deveríamos inventar essa decisão na SPEC**, porque depende da semântica real de `TransferCompletedEvent`.
+
+Eu colocaria um requisito:
+
+```text
+REQ-STRM-009 [MUST]
+
+For each migrated Modulith event listener, the implementation
+MUST preserve the existing transactional and consistency
+semantics of the event flow unless an explicit architecture
+decision approves a change.
+```
+
+Isso é muito importante numa refatoração "pure refactor".
+
+---
+
+# 13. "Pure Refactor" precisa ser uma invariância explícita
+
+Esse é provavelmente o maior reforço que eu faria.
+
+Se o título diz:
+
+> Pure Refactor
+
+então precisamos provar que o comportamento não mudou.
+
+Adicionar:
+
+### `I-STREAM-010 — Behavioral Preservation`
+
+```text
+The migration MUST preserve the externally observable business
+semantics of the existing command and event flows, including:
+
+- command identity;
+- tenant context;
+- authorization/security context;
+- transaction boundaries;
+- idempotency;
+- operation status;
+- failure classification;
+- durable handoff semantics;
+- event payload semantics.
+```
+
+E eu colocaria isso como **MUST**.
+
+Porque estamos mexendo em:
+
+```text
+CoreCommandConsumer
+       ↓
+TransferCommandConsumer
+DepositCommandConsumer
+WithdrawCommandConsumer
+```
+
+e:
+
+```text
+NATS
+ ↓
+Modulith
+```
+
+Isso não pode virar uma oportunidade silenciosa para alterar comportamento.
+
+---
+
+# 14. Scope Fencing está bom, mas falta um WON'T
+
+Eu adicionaria:
+
+```text
+REQ-STRM-W03 [WON'T]:
+
+Redesign retry, DLQ, failure classification, quarantine,
+replay, or durable handoff semantics.
+
+These responsibilities remain governed by SPEC-000.11.
+```
+
+Isso cristaliza a separação que acabamos de estabelecer.
+
+---
+
+# Minha versão da estrutura final
+
+Eu deixaria a SPEC assim:
+
+```text
+0. Pre-Flight History
+1. Intent & Architectural Boundary
+2. Target Messaging Topology
+3. Impact Matrix
+4. Invariants
+   I-STREAM-001  Intra-Core Event Transport
+   I-STREAM-002  Modulith Ownership & Encapsulation
+   I-STREAM-003  Canonical Subject Standard
+   I-STREAM-004  Deterministic CommandRoute
+   I-STREAM-005  Zero Monolithic Dispatcher
+   I-STREAM-006  Durable Handoff Dependency → SPEC-000.11
+   I-STREAM-007  Consumer Ownership
+   I-STREAM-008  Deterministic Command Ownership
+   I-STREAM-009  Legacy Subject Migration
+   I-STREAM-010  Behavioral Preservation
+
+5. Functional Requirements
+
+5.1 Edge/Core Command Ingress
+    REQ-001 CommandRoute
+    REQ-002 Edge publisher
+    REQ-003 dedicated consumers
+    REQ-004 remove god consumer
+    REQ-005 uniqueness/mapping verification
+
+5.2 Intra-Core Modulith Events
+    REQ-006 FraudGraph
+    REQ-007 FraudConsumer
+    REQ-008 Outbox external/inter-process only
+    REQ-009 preserve transactional semantics
+    REQ-010 ApplicationModules.verify
+
+5.3 Scope Fencing
+    W01 crypto
+    W02 microservices
+    W03 DLQ/retry redesign
+```
+
+## Veredito
+
+**Eu considero a Rev.2 conceitualmente correta e muito próxima de READY**, mas ainda faria esses ajustes antes de gerar PLAN/TASKS.
+
+Os **4 que eu considero MUST antes de fechar a SPEC** são:
+
+1. **remover `dlq` do bounded-context/module da 000.12**;
+2. **formalizar `Behavioral Preservation`**, porque é uma refatoração pura;
+3. **definir explicitamente que 000.11 é a autoridade para durable handoff/retry/DLQ**, sem duplicar semântica;
+4. **separar claramente Modulith event transport de sync/async/transactional semantics**, deixando a decisão de implementação para ARCH/PLAN.
+
+Com isso, a fronteira fica muito elegante:
+
+> **000.11 garante que uma mensagem Edge → Core não seja perdida e possa ser reprocessada. 000.12 define como o Core organiza seus consumidores e como seus módulos internos se comunicam.**
+
+E isso também resolve a sobreposição que tínhamos identificado anteriormente entre `CORE_COMMAND` e `BOUNDED_CONTEXT`.

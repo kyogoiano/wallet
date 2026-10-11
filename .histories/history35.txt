@@ -1,0 +1,734 @@
+Perfeito — agora entendi. 👍 Essas são as **novas iniciativas forward-looking**, enquanto as anteriores eram apenas o reverse engineering do estado atual.
+
+E, sinceramente, o roadmap **000.9 → 000.10 → 000.11** faz bastante sentido. Mas eu faria alguns ajustes arquiteturais importantes **antes de ratificar as specs**, porque existem algumas afirmações no resumo que eu considero perigosas para um sistema financeiro de alta escala.
+
+# Minha recomendação de prioridade
+
+Eu seguiria:
+
+## 🥇 SPEC-000.9 — Edge Ingress & Resilience
+
+Primeiro.
+
+## 🥈 SPEC-000.10 — Security
+
+Em paralelo conceitualmente, mas implementada depois da fronteira do Edge estar definida.
+
+## 🥉 SPEC-000.11 — Tiered DLQ / Spillover
+
+Depois que soubermos exatamente:
+
+* quem aceita o comando;
+* quando um comando foi duravelmente aceito;
+* qual é o contrato de idempotência;
+* qual é o boundary entre Edge e Core.
+
+Porque o DLQ depende fortemente dessas decisões.
+
+---
+
+# 1. O maior ponto que precisamos corrigir no conceito do Edge
+
+Este trecho:
+
+```text
+CB OPEN
+   ↓
+Local Buffer
+   ↓
+Return 202
+```
+
+não pode simplesmente significar:
+
+> "aceitei financeiramente a operação porque guardei em memória".
+
+Para uma operação financeira precisamos definir **Acceptance Semantics**.
+
+Eu introduziria explicitamente na SPEC-000.9:
+
+## `I-EDGE-001 — Durable Acceptance`
+
+Uma operação só pode retornar:
+
+```http
+202 Accepted
+```
+
+se o comando estiver em um dos estados:
+
+### Estado A — duravelmente aceito pelo broker
+
+```text
+Client
+   ↓
+wallet-edge
+   ↓
+JetStream PUBACK
+   ↓
+202 Accepted
+```
+
+ou:
+
+### Estado B — duravelmente aceito pelo Edge Journal
+
+```text
+Client
+   ↓
+wallet-edge
+   ↓
+fsync durable journal
+   ↓
+202 Accepted
+```
+
+**Nunca:**
+
+```text
+Client
+   ↓
+Ring Buffer RAM
+   ↓
+202 Accepted ❌
+```
+
+Porque crash = dinheiro desaparecido da perspectiva do cliente.
+
+Esse, para mim, é o invariant mais importante da SPEC-000.9.
+
+---
+
+# 2. LMAX Disruptor não deve ser o durability layer
+
+Eu manteria:
+
+```text
+LMAX Disruptor
+```
+
+apenas como mecanismo de:
+
+```text
+in-process coordination
+batching
+backpressure
+producer/consumer handoff
+```
+
+Mas não como garantia de aceitação.
+
+Arquitetura melhor:
+
+```mermaid
+flowchart LR
+    C[Client] --> E[wallet-edge]
+
+    E --> RL[Rate Limit]
+    RL --> SG[Security Gate]
+
+    SG --> P{NATS Available?}
+
+    P -->|Yes| N[NATS JetStream]
+    P -->|No| J[Durable Local Journal]
+
+    J -->|fsync acknowledged| A[202 Accepted]
+
+    N -->|PUBACK| A
+
+    J --> D[Async Drainer]
+    D --> N
+```
+
+O Disruptor poderia ficar internamente:
+
+```text
+HTTP Event Loop
+       ↓
+Disruptor
+       ↓
+Publisher / Journal Writer
+```
+
+Mas a confirmação depende do durability boundary.
+
+---
+
+# 3. Eu evitaria RocksDB como primeira escolha para o journal
+
+Aqui está onde eu mudaria o desenho.
+
+Para:
+
+```text
+append-only financial command journal
+```
+
+RocksDB não é necessariamente a solução ideal.
+
+O workload é essencialmente:
+
+```text
+append
+append
+append
+append
+append
+        ↓
+sequential drain
+        ↓
+ack/delete
+```
+
+Isso é muito diferente de um KV store genérico.
+
+Eu avaliaria primeiro:
+
+## Opção A — Append-only segmented journal ⭐ minha favorita
+
+Algo como:
+
+```text
+/spool
+   ├── segment-000001.log
+   ├── segment-000002.log
+   └── segment-000003.log
+```
+
+Com:
+
+```text
+length
+CRC
+operationId
+timestamp
+payload
+```
+
+E:
+
+```text
+append → fsync → ACK
+```
+
+Vantagens:
+
+* extremamente simples;
+* previsível;
+* excelente para NVMe;
+* recovery fácil;
+* sequential I/O;
+* auditável;
+* sem compaction.
+
+---
+
+## Opção B — Chronicle Queue
+
+Também seria muito interessante para Java e workloads de journal.
+
+---
+
+## Opção C — RocksDB
+
+Eu usaria se precisarmos de:
+
+```text
+operationId → lookup
+state mutation
+random access
+dedup index
+```
+
+Mas não apenas como append-only spool.
+
+Então eu não fecharia ainda:
+
+> `Edge spillover = RocksDB`
+
+Eu escreveria na SPEC:
+
+> **Durable Spillover Journal SPI**
+
+e deixaria a implementação ser benchmark-driven.
+
+---
+
+# 4. Outro ponto crítico: local disk não resolve HA sozinho
+
+Imagine:
+
+```text
+Edge Pod A
+   ↓
+NVMe Journal
+   ↓
+202 Accepted
+```
+
+Agora:
+
+```text
+Node A morre permanentemente
+```
+
+O cliente recebeu 202.
+
+Mas ninguém consegue acessar aquele journal.
+
+Portanto precisamos diferenciar:
+
+## Durabilidade local
+
+```text
+survive process crash
+```
+
+de:
+
+## Alta disponibilidade
+
+```text
+survive node loss
+```
+
+Para uma appliance financeira, eu criaria dois níveis:
+
+### Bronze/normal mode
+
+```text
+JetStream quorum
+```
+
+### Degraded edge mode
+
+```text
+Local journal
+```
+
+Mas com uma política explícita:
+
+```text
+local disk failure
+→ edge becomes unavailable
+→ load balancer removes node
+→ operator recovery
+```
+
+Ou, para HA real:
+
+```text
+Edge A Journal
+        ↕ replication
+Edge B Journal
+```
+
+Só que aí estamos reinventando um distributed log.
+
+Por isso existe uma questão arquitetural fundamental:
+
+> Se NATS está indisponível, devemos continuar aceitando dinheiro?
+
+Minha resposta seria:
+
+### Para comandos financeiros críticos:
+
+**somente enquanto houver durable capacity suficiente e recuperação garantida**.
+
+Caso contrário:
+
+```http
+503 Service Unavailable
+Retry-After: x
+```
+
+é mais seguro que retornar um falso `202`.
+
+---
+
+# 5. Rate limiting: eu ajustaria o modelo
+
+O desenho:
+
+```text
+Local Token Bucket
++
+Global Dragonfly Rate Limiter
+```
+
+é bom, mas eu faria uma hierarquia:
+
+```text
+L0 — connection limits
+L1 — IP / CIDR limits
+L2 — Client/Tenant token bucket
+L3 — Operation-specific limits
+L4 — Global distributed quotas
+```
+
+Exemplo:
+
+```text
+IP
+  10k req/s
+
+Tenant
+  5k transfers/s
+
+Account
+  50 transfers/s
+
+Global
+  100k operations/s
+```
+
+O local limiter deve absorver o ataque primeiro.
+
+Não queremos fazer:
+
+```text
+DDoS
+ ↓
+cada request
+ ↓
+Dragonfly Lua ❌
+```
+
+Porque o próprio rate limiter vira vítima do ataque.
+
+---
+
+# 6. Circuit breaker: excelente, mas precisa de Bulkhead + Backpressure
+
+Eu adicionaria à SPEC-000.9:
+
+```text
+Rate Limiter
+      ↓
+Bulkhead
+      ↓
+Circuit Breaker
+      ↓
+Timeout
+      ↓
+NATS
+```
+
+Porque um CB sozinho não impede:
+
+```text
+10.000 requests
+        ↓
+todos aguardando NATS
+        ↓
+memory pressure
+```
+
+Precisamos de:
+
+## `I-EDGE-002 — Bounded Inflight Commands`
+
+```text
+inflightCommands <= MAX_INFLIGHT
+```
+
+Quando atingir o limite:
+
+```http
+429
+```
+
+ou:
+
+```http
+503
+```
+
+dependendo da causa.
+
+Isso é fundamental para appliance-grade behavior.
+
+---
+
+# 7. A SPEC-000.10 deve vir logo depois — mas eu mudaria um detalhe importante
+
+O HMAC está correto para certos parceiros B2B.
+
+Mas eu não faria HMAC universalmente obrigatório para todos os clients.
+
+Eu criaria:
+
+## Authentication Profiles
+
+### `PUBLIC`
+
+```text
+OAuth2/JWT
+```
+
+### `PARTNER`
+
+```text
+mTLS
++
+HMAC
++
+nonce
+```
+
+### `INTERNAL`
+
+```text
+mTLS
++
+service identity
+```
+
+---
+
+## O canonical request precisa ser rigidamente definido
+
+Algo como:
+
+```text
+METHOD \n
+CANONICAL_PATH \n
+TIMESTAMP \n
+NONCE \n
+IDEMPOTENCY_KEY \n
+SHA256(BODY)
+```
+
+Depois:
+
+```text
+HMAC-SHA256(secret, canonicalRequest)
+```
+
+Isso evita ambiguidades.
+
+Eu incluiria:
+
+### `I-SEC-001`
+
+```text
+constant-time signature comparison
+```
+
+### `I-SEC-002`
+
+```text
+canonical serialization
+```
+
+### `I-SEC-003`
+
+```text
+nonce uniqueness
+```
+
+Porque timestamp sozinho **não impede replay dentro dos 30 segundos**.
+
+Um atacante poderia repetir:
+
+```text
+request
+timestamp
+signature
+```
+
+100 vezes dentro da janela.
+
+Então precisamos:
+
+```text
+timestamp
++
+nonce
+```
+
+e:
+
+```text
+SET nonce NX EX 30
+```
+
+idealmente no edge/distributed cache.
+
+---
+
+# 8. PII encryption: cuidado com "encrypt everything"
+
+AES-GCM envelope encryption é uma boa direção.
+
+Mas eu separaria:
+
+```text
+PII
+```
+
+em categorias.
+
+### Searchable identifiers
+
+Por exemplo CPF.
+
+Você pode precisar:
+
+```text
+HMAC(CPF)
+```
+
+para busca/equality matching.
+
+E:
+
+```text
+AES-GCM(CPF)
+```
+
+para recuperação.
+
+Assim:
+
+```text
+cpf_lookup_hash
+cpf_ciphertext
+```
+
+Isso permite:
+
+```sql
+WHERE cpf_lookup_hash = ?
+```
+
+sem descriptografar toda a tabela.
+
+---
+
+# 9. SPEC-000.11: eu gosto muito, mas classificaria falhas antes do Postgres
+
+Essa é uma melhoria enorme.
+
+Eu faria:
+
+```mermaid
+flowchart LR
+    F[Failure] --> C{Failure Classifier}
+
+    C -->|Permanent| Q[Quarantine]
+    C -->|Transient| R[Retry Queue]
+    C -->|Unknown| I[Investigation Queue]
+
+    R --> B[Full Jitter Backoff]
+    B --> P[Replay]
+
+    Q --> A[Operator API]
+```
+
+A classificação deveria ser algo como:
+
+```java
+public enum FailureClass {
+
+    TRANSIENT,
+    PERMANENT,
+    POISON,
+    SECURITY,
+    UNKNOWN
+}
+```
+
+Eu adicionaria especialmente:
+
+## `SECURITY`
+
+Exemplo:
+
+```text
+invalid signature
+replay detected
+authorization failure
+```
+
+Esses eventos **não deveriam ser tratados como transient retries**.
+
+---
+
+# 10. A sequência das specs que eu adotaria
+
+Eu manteria os números:
+
+## SPEC-000.9
+
+# Reactive Edge Gateway & Ingress Resilience
+
+Mas incluiria:
+
+* durable acceptance semantics;
+* bounded inflight;
+* backpressure;
+* bulkheads;
+* local journal SPI;
+* crash recovery;
+* edge HA policy.
+
+---
+
+## SPEC-000.10
+
+# Financial Security & Cryptographic Request Protection
+
+Incluindo:
+
+* mTLS;
+* OAuth/JWT;
+* HMAC canonical requests;
+* nonce + replay prevention;
+* field encryption;
+* key rotation;
+* security audit.
+
+---
+
+## SPEC-000.11
+
+# Tiered Failure Handling, Durable Spillover & Intelligent Replay
+
+Incluindo:
+
+* edge journal;
+* NATS DLQ;
+* PostgreSQL operational DLQ;
+* failure classification;
+* full jitter;
+* quarantine;
+* replay governance.
+
+---
+
+# Minha visão do roadmap
+
+```text
+CURRENT WALLET
+      │
+      ▼
+SPEC-000.9
+EDGE DECOUPLING
+      │
+      ▼
+SPEC-000.10
+SECURITY BOUNDARY
+      │
+      ▼
+SPEC-000.11
+FAILURE & RECOVERY
+      │
+      ▼
+SPEC-003
+SUBSCRIPTION / SPENDING INTELLIGENCE
+```
+
+🎯 **Minha recomendação é começar agora pela SPEC-000.9**, mas já incorporando esses invariantes de **durable acceptance, bounded inflight e explicit HA semantics**.
+
+Esses três pontos vão evitar que o `wallet-edge` vire apenas um controller WebFlux mais rápido — ele precisa se tornar uma **verdadeira financial command ingress boundary**.

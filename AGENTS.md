@@ -1,0 +1,84 @@
+# 🤖 Antigravity Agent Guide — Wallet Service
+
+Welcome to the **Wallet Service** codebase. This repository uses **Spec-Driven Design (SDD)** and **Antigravity Customizations** to ensure reliable, high-performance financial engineering.
+
+---
+
+## 🧠 Context Hierarchy & Progressive Disclosure
+
+To maximize reasoning efficiency and prevent context window degradation ("lost in the middle" problem), follow the **5-layer cache hierarchy**:
+
+| Layer | Type | Location | Purpose |
+| :--- | :--- | :--- | :--- |
+| **L0: Constitution** | Immutable Constraints | [`.agents/rules/constitution.md`](file:///.agents/rules/constitution.md) | Absolute financial & architectural invariants (never violate). |
+| **L1: Rules** | Persistent Context | [`.agents/rules/`](file:///.agents/rules/) | Architectural standards, coding conventions, testing guidelines. |
+| **L2: Skills** | On-Demand Knowledge | [`.agents/skills/`](file:///.agents/skills/) | Procedural domain workflows (loaded progressively when needed). |
+| **L3: Specifications**| Working Set | [`.spec/`](file:///.spec/) | Feature requirements, architecture specifications, tasks & plans. |
+| **L4: Source Code** | Implementation Evidence | [`src/`](file:///src/), [`core/`](file:///core/), [`fraud/`](file:///fraud/) | Targeted files modified strictly within specification bounds. |
+
+> **Context Hygiene Rule**: Never load entire classes or massive command outputs into memory. When executing a task, isolate focus using the **Active Task Card Protocol**.
+
+---
+
+## 🔄 Spec-Driven Development (SDD) Pipeline — V2 Deterministic Edition
+
+Every significant feature, refactor, or architectural change follows the **9-Stage Spec Kit Pipeline**:
+
+```mermaid
+flowchart LR
+    PreFlight[0. Pre-Flight] --> Specify[1. Specify] --> Clarify[2. Clarify] --> Arch[3. Architecture] --> Plan[4. Plan] --> Tasks[5. Tasks] --> Analyze[6. Analyze] --> Implement[7. Implement] --> Converge[8. Converge]
+```
+
+1. **Pre-Flight**: Audit `.histories/` and preceding `SUMMARY-*.md` for past ADRs and established invariants.
+2. **Specify** (`.spec/SPEC-XXX.md`): Define user intent, atomic slice ($\le 250$ lines), **MoSCoW requirements** (`[MUST]`, `[SHOULD]`, `[COULD]`, `[WON'T]`), **Cross-Feature Impact Matrix**, and **mathematical invariants**.
+3. **Clarify**: Resolve ambiguities, trade-offs, and edge cases with the human engineer.
+4. **Architecture** (`.spec/architecture/ARCH-XXX.md`): Macro-topology, storage models, failure domains, and cross-cutting platform topologies.
+5. **Plan** (`.spec/plans/PLAN-XXX.md`): Modulith boundaries, interface contracts, ADRs, and concurrency strategy.
+6. **Tasks** (`.spec/tasks/TASKS-XXX.md`): Prioritized atomic TDD task breakdown with Active Task Cards (`[MUST]` tasks executed first).
+7. **Analyze**: Pre-implementation consistency gate verifying 100% traceability between Spec, Arch, Plan, and Tasks.
+8. **Implement**: Autonomous TDD execution (Red $\rightarrow$ Green $\rightarrow$ Refactor) with Zero Vibe Coding (exact `BigDecimal` scale 2 arithmetic, mandatory test triads). Once specifications are ratified, implementation runs fully autonomously without stopping for interactive file edit/create approvals.
+9. **Converge**: Bi-directional equivalence verification (zero spec-code drift), architecture test pass, coverage verification, and Practical Verification Guide with seed data (`I-SDD-002`, `I-SDD-003`).
+
+---
+
+## 👥 Strategic Subagent Team Topology
+
+To protect the orchestrator's context window from pollution, delegate work across specialized subagent roles:
+
+- **System Researcher** (Read-Only): Performs pre-flight audits, inspects code, builds cross-feature impact matrices.
+- **Spec Analyst** (Read-Only): Analyzes Spec ↔ Plan ↔ Tasks consistency at the Stage 5 gate.
+- **TDD Implementer** (Write / Branch): Executes Red $\to$ Green $\to$ Refactor cycles on an isolated task card in a dedicated workspace.
+- **Convergence Auditor** (Command): Runs `./gradlew test` and Modulith architecture checks, asserting zero drift before summary authoring.
+
+---
+
+## 🗂️ Active Customization Index
+
+### Rules ([`.agents/rules/`](file:///.agents/rules/))
+- [`constitution.md`](file:///.agents/rules/constitution.md) — Absolute financial invariants & core non-negotiable rules.
+- [`project-context.md`](file:///.agents/rules/project-context.md) — Architecture overview, tech stack, and module boundaries.
+- [`capability-boundaries.md`](file:///.agents/rules/capability-boundaries.md) — Architectural mantra, Spring Modulith boundaries, and capability rules.
+- [`coding-standards.md`](file:///.agents/rules/coding-standards.md) — Modern Java 27 patterns, immutability, zero boilerplate.
+- [`testing-standards.md`](file:///.agents/rules/testing-standards.md) — TDD methodology, Zero Vibe Coding, Testcontainers, and test triads.
+
+### Skills ([`.agents/skills/`](file:///.agents/skills/))
+- [`spec-driven-development`](file:///.agents/skills/spec-driven-development/SKILL.md) — 8-stage Spec Kit orchestration, templates, MoSCoW, and convergence verification.
+- [`design-spec-extraction`](file:///.agents/skills/design-spec-extraction/SKILL.md) — Token-compliant multi-pass extraction, product vs technical intent separation, and behavior over implementation focus.
+- [`capability-driven-development`](file:///.agents/skills/capability-driven-development/SKILL.md) — Spring Modulith capability building, action lifecycle, and boundaries.
+- [`ledger-engineering`](file:///.agents/skills/ledger-engineering/SKILL.md) — Hash-chained tamper detection, atomic transfers, ledger reconstruction.
+- [`antifraud-engineering`](file:///.agents/skills/antifraud-engineering/SKILL.md) — Multi-tier fraud detection, sliding windows, Lua scripts, Caffeine/DragonflyDB caching.
+- [`outbox-messaging`](file:///.agents/skills/outbox-messaging/SKILL.md) — Transactional outbox pattern, NATS JetStream, deduplication, retry exponential backoff.
+- [`observability-tracing`](file:///.agents/skills/observability-tracing/SKILL.md) — OpenTelemetry spans, baggage propagation (`operationId`), OTLP exports.
+- [`perimeter-security`](file:///.agents/skills/perimeter-security/SKILL.md) — HMAC-SHA256 request signing, zero-DB credential resolution, tenant rate limiting, and Core transactional validation.
+- [`onprem-infrastructure`](file:///.agents/skills/onprem-infrastructure/SKILL.md) — Rancher, SUSE Virtualization (Harvester HCI), vCluster, and HCI add-on orchestration for on-premises Wallet appliances.
+- [`typed-decision-algebra`](file:///.agents/skills/typed-decision-algebra/SKILL.md) — Native Java typed decision algebra, generic question-outcome binding, anti-coercion composition, machine-verifiable evidence hashing, and Five-Gate semantic evaluation protocol.
+- [`financial-cryptographic-security`](file:///.agents/skills/financial-cryptographic-security/SKILL.md) — Application-layer envelope encryption, AEAD with canonical AAD, secure key material lifecycle, replay protection algebra, zero-plaintext journals, telemetry non-emission, and Spring Modulith cryptographic isolation.
+- [`durable-modulith-events`](file:///.agents/skills/durable-modulith-events/SKILL.md) — Spring Modulith Event Publication Registry, PostgreSQL persistence, automatic lifecycle tracking, and in-process crash recovery.
+- [`financial-copilot-engine`](file:///.agents/skills/financial-copilot-engine/SKILL.md) — Asynchronous Financial Proposal Engine, human-in-the-loop authorization gates, atomic execution claim leases, and Spring AI MCP Gateway integration.
+- [`mcp-gateway-elicitation`](file:///.agents/skills/mcp-gateway-elicitation/SKILL.md) — Model Context Protocol (MCP) Streamable HTTP transport, 3-tier capability negotiation, human-in-the-loop elicitation protocols, three-identity non-conflation, anti-bearer URL security, ephemeral MRTR tracking algebra, and tool idempotency.
+
+
+### Workflows ([`.agents/workflows/`](file:///.agents/workflows/))
+- [`sdd-feature.md`](file:///.agents/workflows/sdd-feature.md) — End-to-end workflow for implementing new features.
+- [`sdd-bugfix.md`](file:///.agents/workflows/sdd-bugfix.md) — Reproduction and fix workflow with regression tests.
+- [`sdd-refactor.md`](file:///.agents/workflows/sdd-refactor.md) — Safe refactoring with behavioral equivalence guarantees.

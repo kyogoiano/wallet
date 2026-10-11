@@ -1,0 +1,354 @@
+version: "3.9"
+
+# ==============================================================================
+# 🏢 Plan B: Low-Cost Lean On-Premises Appliance Topology (REQ-TOP-005)
+# Slashes the Kubernetes Tax: Runs on commodity x86 server/VM without K8s control plane.
+# Direct HostPath NVMe mounts (Option A, I-STORAGE-002), total footprint < 8GB RAM.
+# ==============================================================================
+
+services:
+
+  nats:
+    image: nats:2.15.0-alpine
+    container_name: wallet-appliance-nats
+    restart: always
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - ./nats-data:/data/jetstream
+      - ./docker/nats.conf:/etc/nats.conf
+    command: [ "-c", "/etc/nats.conf" ]
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+    networks:
+      - appliance-net
+
+  postgres:
+    image: pgvector/pgvector:pg18
+    container_name: wallet-appliance-postgres
+    restart: always
+    environment:
+      POSTGRES_DB: wallet
+      POSTGRES_USER: wallet
+      POSTGRES_PASSWORD: wallet
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./postgres-data:/var/lib/postgresql
+      - ./docker/init:/docker-entrypoint-initdb.d
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wallet"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - appliance-net
+
+  schema-migration:
+    image: pgvector/pgvector:pg18
+    container_name: wallet-appliance-schema-migration
+    restart: "no"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./docker/init:/docker-entrypoint-initdb.d:ro
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        echo "▶ Synchronizing PostgreSQL schema..."
+        PGPASSWORD=wallet psql -h postgres -U wallet -d wallet -v ON_ERROR_STOP=1 -f /docker-entrypoint-initdb.d/schema.sql
+        echo "✅ PostgreSQL schema synchronized successfully."
+    networks:
+      - appliance-net
+
+  dragonfly:
+    image: docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0
+    container_name: wallet-appliance-dragonfly
+    restart: always
+    user: "0:0"
+    ports:
+      - "6379:6379"
+    entrypoint:
+      - "/bin/sh"
+      - "-c"
+      - |
+        mkdir -p /var/run/redis
+        chmod 777 /var/run/redis
+        rm -f /var/run/redis/redis.sock
+        exec entrypoint.sh "$$@"
+      - "--"
+    command:
+      - "--logtostderr"
+      - "--proactor_threads=2"
+      - "--unixsocket=/var/run/redis/redis.sock"
+      - "--unixsocketperm=777"
+      - "--maxmemory=768mb"
+      - "--cache_mode=true"
+    volumes:
+      - ./dragonfly-data:/data
+      - redis-socket:/var/run/redis
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 768M
+        reservations:
+          cpus: '0.2'
+          memory: 256M
+    healthcheck:
+      test: ["CMD-SHELL", "test -S /var/run/redis/redis.sock"]
+      interval: 2s
+      timeout: 2s
+      retries: 10
+    networks:
+      appliance-net:
+        aliases:
+          - redis
+          - dragonfly
+
+  core:
+    build:
+      context: .
+      dockerfile: dockerfile
+      target: core
+    container_name: wallet-appliance-core
+    restart: always
+    user: "10001:10001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      schema-migration:
+        condition: service_completed_successfully
+      nats:
+        condition: service_started
+      dragonfly:
+        condition: service_healthy
+    volumes:
+      - redis-socket:/var/run/redis
+    environment:
+      SERVER_PORT: 8081
+      WALLET_RUNTIME_MODE: multi-process
+      WALLET_EDGE_ENABLED: "false"
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/wallet
+      SPRING_DATASOURCE_USERNAME: wallet
+      SPRING_DATASOURCE_PASSWORD: wallet
+      SPRING_DATA_REDIS_HOST: dragonfly
+      SPRING_DATA_REDIS_PORT: 6379
+      REDIS_SOCKET_ENABLED: "true"
+      REDIS_SOCKET_PATH: /var/run/redis/redis.sock
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-appliance-core,service.version=0.0.1-SNAPSHOT
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
+    ports:
+      - "8081:8081"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2048M
+        reservations:
+          cpus: '0.5'
+          memory: 1024M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8081/actuator/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    networks:
+      - appliance-net
+
+  spool-init:
+    image: oraclelinux:10-slim
+    container_name: wallet-appliance-spool-init
+    user: "0:0"
+    command: ["/bin/sh", "-c", "mkdir -p /spool && chown -R 10001:10001 /spool && chmod 755 /spool && chmod -R a+rX,u+rwX /spool"]
+    volumes:
+      - ./spool-data:/spool
+    networks:
+      - appliance-net
+
+  edge:
+    build:
+      context: .
+      dockerfile: dockerfile
+      target: edge
+    container_name: wallet-appliance-edge
+    restart: always
+    user: "10001:10001"
+    depends_on:
+      nats:
+        condition: service_started
+      core:
+        condition: service_healthy
+      dragonfly:
+        condition: service_healthy
+      spool-init:
+        condition: service_completed_successfully
+    volumes:
+      # Option A: Direct HostPath NVMe Mount for single-writer spool journal (I-STORAGE-001, I-STORAGE-002)
+      - ./spool-data:/spool
+      - redis-socket:/var/run/redis
+    environment:
+      SERVER_PORT: 8080
+      WALLET_RUNTIME_MODE: multi-process
+      WALLET_EDGE_ENABLED: "true"
+      NATS_URL: nats://nats:4222
+      NATS_TOKEN: dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n
+      SPRING_DATA_REDIS_HOST: dragonfly
+      SPRING_DATA_REDIS_PORT: 6379
+      REDIS_SOCKET_ENABLED: "true"
+      REDIS_SOCKET_PATH: /var/run/redis/redis.sock
+      EDGE_SPOOL_DIRECTORY: /spool
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4318
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_RESOURCE_ATTRIBUTES: service.name=wallet-appliance-edge,service.version=0.0.1-SNAPSHOT
+      JAVA_TOOL_OPTIONS: "-XX:MaxRAMPercentage=75 -XX:InitialRAMPercentage=50 -XX:+UseStringDeduplication -XX:+ExitOnOutOfMemoryError -Duser.timezone=UTC --enable-native-access=ALL-UNNAMED"
+    ports:
+      - "8080:8080"
+      - "8443:8443/udp"
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 1024M
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8080/actuator/health/readiness || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    networks:
+      - appliance-net
+
+  portainer:
+    image: portainer/portainer-ce:latest
+    container_name: wallet-appliance-portainer
+    restart: always
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      - appliance-net
+
+  victorialogs:
+    image: victoriametrics/victoria-logs:latest
+    container_name: wallet-appliance-victorialogs
+    restart: unless-stopped
+    profiles:
+      - telemetry
+    command:
+      - "-storageDataPath=/vlogs-data"
+    ports:
+      - "9428:9428"
+    volumes:
+      - victorialogs-data:/vlogs-data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      appliance-net:
+        aliases:
+          - victorialogs
+
+  victoriatraces:
+    image: victoriametrics/victoria-traces:latest
+    container_name: wallet-appliance-victoriatraces
+    restart: unless-stopped
+    profiles:
+      - telemetry
+    command:
+      - "-storageDataPath=/victoria-traces-data"
+    ports:
+      - "10428:10428"
+    volumes:
+      - victoriatraces-data:/victoria-traces-data
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      appliance-net:
+        aliases:
+          - victoriatraces
+
+  otel-collector:
+    image: otel/opentelemetry-collector:latest
+    container_name: wallet-appliance-otel-collector
+    restart: unless-stopped
+    profiles:
+      - telemetry
+    command: [ "--config=/etc/otel-collector-config.yml" ]
+    depends_on:
+      - victorialogs
+      - victoriatraces
+    volumes:
+      - ./docker/otel-collector-appliance-config.yml:/etc/otel-collector-config.yml
+    ports:
+      - "4317:4317" # gRPC
+      - "4318:4318" # HTTP
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
+        reservations:
+          cpus: '0.1'
+          memory: 64M
+    networks:
+      appliance-net:
+        aliases:
+          - otel-collector
+
+volumes:
+  redis-socket:
+  portainer-data:
+  victorialogs-data:
+  victoriatraces-data:
+
+networks:
+  appliance-net:
+    driver: bridge

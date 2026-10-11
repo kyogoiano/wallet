@@ -1,0 +1,827 @@
+Sim — e a **TASKS-000.8 está muito mais madura e implementável** agora. A sequência também está correta: primeiro matemática pura, depois infraestrutura assíncrona, política, hot state, ML e finalmente E2E.
+
+Mas eu faria uma revisão final antes de começar a implementar. Há alguns pontos importantes que eu corrigiria.
+
+---
+
+# Minha avaliação geral
+
+## 🟢 Estrutura: muito boa
+
+A evolução ficou coerente:
+
+```text
+SPEC-000.5 → Graph Intelligence
+       ↓
+SPEC-000.6 → Temporal Propagation
+       ↓
+SPEC-000.7 → Behavioral Embeddings + Investigation
+       ↓
+SPEC-000.8 → Fusion + Decision + Orchestration
+```
+
+E o principal acerto da 0.8 foi separar:
+
+### Quantitative decision path
+
+```text
+Signals
+   ↓
+Fusion
+   ↓
+Attribution
+   ↓
+Decision Policy
+   ↓
+RiskProfile
+```
+
+de:
+
+### Investigation path
+
+```text
+REVIEW / RESTRICT
+       ↓
+Phase 0.7 InvestigationService
+       ↓
+Grounded Dossier
+       ↓
+Checkpoint
+       ↓
+Human Review
+```
+
+Isso evita transformar o LLM em parte da decisão financeira.
+
+---
+
+# 🔴 Ponto 1 — DDL da fila precisa realmente usar Partial Unique Index
+
+Na TASK você corretamente fala:
+
+> Partial Unique Index coalescing (`WHERE status = 'PENDING'`)
+
+Mas o DDL anterior tinha:
+
+```sql
+CONSTRAINT uq_fusion_job_pending UNIQUE (entity_id, status)
+```
+
+Isso **não implementa corretamente o comportamento desejado**.
+
+Com essa constraint:
+
+```text
+entity A + RUNNING
+entity A + RUNNING
+```
+
+não poderia existir mais de um RUNNING.
+
+E mais importante:
+
+```text
+entity A + COMPLETED
+entity A + COMPLETED
+```
+
+também seria limitado.
+
+O correto é:
+
+```sql
+CREATE TABLE fraud_fusion_jobs (
+    job_id UUID PRIMARY KEY,
+    entity_id UUID NOT NULL,
+    model_version VARCHAR(32) NOT NULL,
+
+    status VARCHAR(32) NOT NULL,
+
+    as_of TIMESTAMP WITH TIME ZONE NOT NULL,
+
+    attempt_count INT NOT NULL DEFAULT 0,
+
+    worker_token UUID,
+    lease_expires_at TIMESTAMP WITH TIME ZONE,
+
+    next_attempt_at TIMESTAMP WITH TIME ZONE,
+
+    idempotency_key VARCHAR(128),
+
+    payload JSONB,
+
+    last_error TEXT,
+
+    created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW()
+);
+```
+
+E:
+
+```sql
+CREATE UNIQUE INDEX uq_fusion_job_pending_entity
+ON fraud_fusion_jobs(entity_id)
+WHERE status = 'PENDING';
+```
+
+Esse detalhe é fundamental.
+
+Assim temos:
+
+```text
+Entity X
+│
+├── RUNNING job #100
+│
+└── PENDING job #101
+```
+
+Mas nunca:
+
+```text
+Entity X
+├── PENDING #101
+└── PENDING #102 ❌
+```
+
+Isso implementa exatamente o modelo de **coalescing latest-state**.
+
+---
+
+# 🔴 Ponto 2 — TASK-2.1 deveria testar explicitamente o UPSERT
+
+Eu adicionaria um teste específico:
+
+```java
+shouldCoalesceMultiplePendingEventsIntoLatestAsOf()
+```
+
+Cenário:
+
+```text
+T0 → Event A → enqueue(entity)
+T1 → Event B → enqueue(entity)
+T2 → Event C → enqueue(entity)
+```
+
+Resultado esperado:
+
+```text
+jobs count = 1
+
+status = PENDING
+
+as_of = T2
+
+payload = latest payload
+```
+
+SQL provavelmente será algo como:
+
+```sql
+INSERT INTO fraud_fusion_jobs (
+    job_id,
+    entity_id,
+    model_version,
+    status,
+    as_of,
+    payload
+)
+VALUES (
+    :jobId,
+    :entityId,
+    :modelVersion,
+    'PENDING',
+    :asOf,
+    CAST(:payload AS jsonb)
+)
+ON CONFLICT (entity_id)
+WHERE status = 'PENDING'
+DO UPDATE SET
+    as_of = EXCLUDED.as_of,
+    payload = EXCLUDED.payload,
+    updated_at = NOW();
+```
+
+Isso merece ser uma acceptance criterion explícita.
+
+---
+
+# 🔴 Ponto 3 — Lease recovery precisa definir limite de tentativas
+
+Hoje está:
+
+> retrying or failing them
+
+Mas falta a política.
+
+Eu colocaria no modelo:
+
+```text
+MAX_ATTEMPTS = 5
+```
+
+E a máquina de estados:
+
+```text
+PENDING
+   ↓
+RUNNING
+   ↓
+COMPLETED
+```
+
+ou:
+
+```text
+RUNNING
+   ↓ lease expired
+RETRY_WAIT
+   ↓
+PENDING
+```
+
+até:
+
+```text
+attempt_count >= MAX_ATTEMPTS
+          ↓
+        FAILED
+```
+
+Sugiro também backoff:
+
+```text
+attempt 1 → 5 seconds
+attempt 2 → 30 seconds
+attempt 3 → 2 minutes
+attempt 4 → 10 minutes
+attempt 5 → FAILED
+```
+
+Isso evita um job quebrado consumindo continuamente workers.
+
+---
+
+# 🟡 Ponto 4 — A ordem das fases está boa, mas eu inverteria ML e Hot State
+
+Atualmente:
+
+```text
+Phase 4 → Redis + Gate
+Phase 5 → ONNX
+```
+
+Eu provavelmente faria:
+
+```text
+Phase 4 → ONNX
+Phase 5 → Hot State + Gate
+```
+
+Porque o pipeline lógico fica:
+
+```text
+Signal extraction
+      ↓
+ML scoring
+      ↓
+Fusion
+      ↓
+Decision
+      ↓
+Materialization
+      ↓
+Gate
+```
+
+Mas isso é preferência de implementação — **não é um problema arquitetural**.
+
+A ordem atual ainda funciona porque o `RiskProfile` pode ser criado inicialmente sem ML.
+
+---
+
+# 🔴 Ponto 5 — Benchmark de `< 2ms` não deveria ser um teste unitário rígido
+
+Este trecho:
+
+```text
+Evaluation latency within P95 < 2ms
+```
+
+dentro de:
+
+```text
+OnnxRiskModelEvaluatorTest
+```
+
+é perigoso.
+
+Em CI:
+
+* CPU compartilhada
+* JVM cold/warm
+* GitHub Actions
+* Docker
+* virtualização
+
+podem gerar falsos negativos.
+
+Eu dividiria:
+
+### Unit test
+
+```text
+shouldEvaluateValidFeatureVector()
+shouldRejectVersionMismatch()
+shouldReturnUnavailableWhenModelFails()
+```
+
+### Performance verification
+
+```text
+OnnxRiskModelBenchmark
+```
+
+executado separadamente.
+
+Por exemplo:
+
+```bash
+./gradlew onnxBenchmark
+```
+
+Com output:
+
+```text
+P50 = 0.42ms
+P95 = 1.18ms
+P99 = 2.71ms
+```
+
+A especificação pode continuar dizendo:
+
+```text
+Target P95 < 2ms
+Hard ceiling P99 < 10ms
+```
+
+Mas isso deveria ser **performance gate**, não um teste JUnit normal.
+
+---
+
+# 🟢 Ponto 6 — Excelente mudança: sem synthetic ML proxy
+
+Este ponto ficou muito melhor:
+
+```text
+MlRiskResult.unavailable()
+```
+
+em vez de:
+
+> Deterministic linear heuristic proxy
+
+Concordo totalmente.
+
+Porque:
+
+```text
+ML unavailable
+```
+
+não significa:
+
+```text
+ML = heuristic pretending to be ML
+```
+
+Isso contaminaria a explicabilidade.
+
+Eu sugiro que o modelo fique algo como:
+
+```java
+public sealed interface MlRiskResult {
+
+    record Available(
+        double score,
+        String modelVersion
+    ) implements MlRiskResult {}
+
+    record Unavailable(
+        String reason
+    ) implements MlRiskResult {}
+}
+```
+
+E então:
+
+```text
+Available → ML participates in fusion
+
+Unavailable → ML omitted from fusion
+              degradedReason recorded
+              metrics incremented
+```
+
+Muito melhor para auditoria.
+
+---
+
+# 🔴 Ponto 7 — Direct rule primacy precisa acontecer ANTES da matemática
+
+Hoje o teste fala:
+
+```text
+R_direct = 1.0 → R_final = 1.0
+```
+
+Eu implementaria explicitamente:
+
+```java
+if (signals.directRisk() >= 1.0) {
+    return RiskFusionResult.hardBlocked(...);
+}
+```
+
+Não dependeria apenas da fórmula:
+
+```text
+1 - (1 - 1.0) × ...
+```
+
+Matematicamente funciona, mas semanticamente a regra é:
+
+> HARD BLOCK is a policy override, not merely a mathematical contribution.
+
+Isso ajuda também a attribution:
+
+```text
+Decision = HARD_BLOCK
+Primary Driver = DIRECT_HARD_RULE
+```
+
+E não gera uma atribuição estranha como:
+
+```text
+DIRECT 72%
+GRAPH 15%
+ML 13%
+```
+
+quando, na prática, o hard rule sozinho decidiu.
+
+---
+
+# 🔴 Ponto 8 — LOO attribution precisa tratar interação entre fatores
+
+O LOO está correto para explainability simples:
+
+```text
+C_s = R_final - R_without_s
+```
+
+Mas há um detalhe: as contribuições podem **não somar intuitivamente** em sistemas não lineares.
+
+Vocês já resolveram isso com:
+
+```text
+normalized %
+```
+
+Então eu colocaria explicitamente:
+
+```text
+Raw marginal contribution
+        +
+Normalized attribution share
+```
+
+Modelo:
+
+```java
+public record FactorContribution(
+    String factor,
+    double marginalImpact,
+    double normalizedPercentage
+) {}
+```
+
+E uma invariant:
+
+```text
+Σ normalizedPercentage = 100%
+```
+
+com tolerância:
+
+```text
+1e-9
+```
+
+---
+
+# 🟢 Ponto 9 — Correlation Group é a melhor parte da 0.8
+
+Isso aqui é arquiteturalmente muito importante:
+
+```text
+Graph
++
+Propagation
+```
+
+não deveriam ser tratados como dois sinais totalmente independentes.
+
+Porque propagation deriva, parcialmente, da estrutura/topologia e relações anteriores.
+
+O modelo:
+
+```text
+R_graph-group =
+1 - (1 - R_graph)
+    (1 - w_p R_propagated)
+```
+
+é muito melhor do que:
+
+```text
+R_final =
+fusion(graph)
++
+fusion(propagated)
+```
+
+que poderia inflar artificialmente o risco.
+
+Eu manteria `RiskCorrelationGroup` extensível:
+
+```java
+public interface RiskCorrelationGroup {
+
+    String name();
+
+    GroupedRisk evaluate(FraudSignalSet signals);
+}
+```
+
+Assim futuramente:
+
+```text
+GraphIntelligenceCorrelationGroup
+
+BehavioralMlCorrelationGroup
+
+IdentityDeviceCorrelationGroup
+```
+
+podem ser adicionados sem alterar o core.
+
+---
+
+# 🟡 Ponto 10 — RiskSubject é uma excelente evolução
+
+A mudança de:
+
+```text
+user:{userId}:risk_profile
+```
+
+para:
+
+```text
+risk_profile:{type}:{id}
+```
+
+é melhor.
+
+Exemplos:
+
+```text
+risk_profile:USER:123
+risk_profile:ACCOUNT:456
+risk_profile:DEVICE:abc
+risk_profile:PIX_KEY:xyz
+```
+
+Eu faria:
+
+```java
+public record RiskSubject(
+    RiskSubjectType type,
+    UUID id
+) {}
+```
+
+ou, se alguns IDs não forem UUID:
+
+```java
+public record RiskSubject(
+    RiskSubjectType type,
+    String id
+) {}
+```
+
+Isso prepara o sistema para propagação futura multi-entidade.
+
+---
+
+# 🔴 Ponto 11 — Fail-open / fail-closed precisa ser explicitamente decidido
+
+TASK-4.3 diz:
+
+> fail-open/fail-closed cache resilience policies
+
+Mas isso é crítico demais para ficar genérico.
+
+Eu sugiro:
+
+### HARD_BLOCK cached
+
+```text
+Cache unavailable
+    ↓
+consult durable fallback?
+    ↓
+if unavailable → FAIL CLOSED
+```
+
+### ALLOW cached
+
+```text
+Cache unavailable
+    ↓
+run fallback deterministic checks
+```
+
+Ou seja, o comportamento deveria depender do contexto.
+
+Nunca simplesmente:
+
+```text
+Redis down → ALLOW everything
+```
+
+nem:
+
+```text
+Redis down → BLOCK everyone
+```
+
+A política deveria ser algo como:
+
+```java
+public enum GateDegradationPolicy {
+    FAIL_CLOSED_FOR_HIGH_RISK,
+    FALLBACK_TO_DETERMINISTIC_EVALUATION
+}
+```
+
+---
+
+# 🟢 Minha sugestão de ordem final
+
+Eu deixaria as tasks assim:
+
+## Phase 1 — Pure Math
+
+```text
+TASK-1.x
+```
+
+Zero Spring, zero Docker.
+
+```text
+FraudSignalSet
+RiskFusionWeights
+Correlation Groups
+Fusion
+LOO Attribution
+```
+
+---
+
+## Phase 2 — Durable Orchestration
+
+```text
+TASK-2.x
+```
+
+```text
+PostgreSQL
+SKIP LOCKED
+Partial unique index
+Coalescing
+Lease recovery
+```
+
+---
+
+## Phase 3 — ONNX Micro-ML
+
+```text
+TASK-5.x → moved here
+```
+
+Porque agora podemos testar:
+
+```text
+Signals → ML → Fusion
+```
+
+---
+
+## Phase 4 — Decision + Investigation
+
+```text
+TASK-3.x
+```
+
+```text
+ALLOW
+REVIEW
+RESTRICT
+HARD_BLOCK
+```
+
+E:
+
+```text
+REVIEW/RESTRICT
+       ↓
+SPEC-000.7 InvestigationService
+```
+
+---
+
+## Phase 5 — Materialization + Gate
+
+```text
+TASK-4.x
+```
+
+```text
+RiskProfile
+Redis/Dragonfly
+FraudGateV4
+```
+
+---
+
+## Phase 6 — E2E
+
+```text
+TASK-6.x
+```
+
+---
+
+# Minha recomendação para começar a implementação
+
+Eu começaria imediatamente pela **TASK-1.1**, mas faria um pequeno ajuste no contrato antes.
+
+### Primeiro definiria o domínio:
+
+```java
+FraudSignalSet
+RiskFusionWeights
+RiskFusionResult
+RiskAttribution
+FactorContribution
+```
+
+Depois escreveria os testes matemáticos.
+
+A primeira suíte deveria conseguir rodar assim:
+
+```bash
+./gradlew :fraud:test \
+  --tests "*RiskFusionEngineTest"
+```
+
+Sem:
+
+* Spring Context
+* PostgreSQL
+* Redis
+* Testcontainers
+* ONNX
+* Docker
+
+Se essa parte estiver matematicamente sólida, todo o restante da SPEC-000.8 fica muito mais simples.
+
+## Veredito
+
+**Eu considero a TASKS-000.8 pronta para implementação**, com estes ajustes antes do primeiro commit:
+
+1. 🔴 Corrigir DDL para **partial unique index real**.
+2. 🔴 Definir explicitamente **lease retry/backoff/max attempts**.
+3. 🔴 Tratar `HARD_BLOCK` como **policy override**, não apenas resultado matemático.
+4. 🔴 Mover benchmark ONNX para **performance gate separado**.
+5. 🟡 Definir explicitamente política **cache degradation / fail-open / fail-closed**.
+6. 🟢 Manter `MlRiskResult.unavailable()` — excelente decisão.
+7. 🟢 Manter Correlation Groups — é uma das peças mais importantes da arquitetura.
+
+Depois disso, eu seguiria para **TASK-1.1 RED**. Aí podemos desenhar juntos uma suíte de testes extremamente rigorosa para a matemática de fusion, incluindo casos de borda, monotonicidade e LOO attribution.

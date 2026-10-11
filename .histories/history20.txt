@@ -1,0 +1,336 @@
+Aqui está a implementação completa em **Python** e em **Go**, cobrindo o ciclo de vida estipulado na sua especificação:
+
+1. Extração e mapeamento das 16 métricas comportamentais no intervalo $[0.0, 1.0]$.
+2. Normalização $L_2$ ($\Vert{}\vec{v}\Vert{} = 1.0$) para viabilizar busca rápida via Produto Interno (`<#>`).
+3. Persistência no PostgreSQL usando a extensão `pgvector`.
+
+---
+
+### Opção 1: Implementação em Python (usando `psycopg` + `pgvector` + `numpy`)
+
+#### Pré-requisitos:
+
+```bash
+pip install psycopg[binary] pgvector numpy
+
+```
+
+#### Código (`behavioral_extractor.py`):
+
+```python
+import math
+import uuid
+import numpy as np
+import psycopg
+from pgvector.psycopg import register_vector
+from dataclasses import dataclass
+from datetime import datetime, timezone
+
+@dataclass
+class TransactionSummary:
+    """Métricas agregadas da janela temporal (ex: 30 dias) do usuário."""
+    tx_count_30d: int
+    total_amount_out: float
+    avg_amount_out: float
+    std_amount_out: float
+    velocity_1h_max: int
+    nocturnal_tx_count: int      # Transações entre 22h e 06h
+    unique_counterparties: int
+    new_counterparties_7d: int
+    rapid_drain_count: int       # Depósito seguido de saque imediato
+    fan_out_ratio: float         # Razão entre destinatários únicos e total de envios
+    fan_in_ratio: float          # Razão entre remetentes únicos e total de recebimentos
+    international_tx_count: int
+    failed_auth_count: int
+    device_switch_count: int
+    out_of_pattern_amount_ratio: float
+    chargeback_or_dispute_count: int
+
+
+class BehavioralFeatureExtractor:
+    FEATURE_VERSION = 1
+    DIMENSIONS = 16
+
+    @staticmethod
+    def _normalize_bounded(val: float, min_val: float, max_val: float) -> float:
+        """Min-Max scaler com corte rígido entre [0.0, 1.0]."""
+        if max_val <= min_val:
+            return 0.0
+        norm = (val - min_val) / (max_val - min_val)
+        return float(np.clip(norm, 0.0, 1.0))
+
+    @classmethod
+    def extract_and_normalize_vector(cls, metrics: TransactionSummary) -> np.ndarray:
+        """
+        Extrai 16 dimensões comportamentais e aplica normalização L2 (unit vector).
+        """
+        raw_dims = [
+            # d1: Frequência/volume de transações (ex: 0 a 500 tx)
+            cls._normalize_bounded(metrics.tx_count_30d, 0, 500),
+            # d2: Ticket médio normalizado (escala log/linear até R$ 50.000)
+            cls._normalize_bounded(metrics.avg_amount_out, 0, 50000),
+            # d3: Volatilidade/Desvio padrão do valor
+            cls._normalize_bounded(metrics.std_amount_out, 0, 25000),
+            # d4: Spike de velocidade (max transações em 1 hora, ex: 0 a 30)
+            cls._normalize_bounded(metrics.velocity_1h_max, 0, 30),
+            # d5: Razão de atividade noturna (22h - 06h)
+            metrics.nocturnal_tx_count / max(metrics.tx_count_30d, 1),
+            # d6: Dispersão de contrapartes únicas (0 a 100)
+            cls._normalize_bounded(metrics.unique_counterparties, 0, 100),
+            # d7: Novas contrapartes nos últimos 7 dias (0 a 50)
+            cls._normalize_bounded(metrics.new_counterparties_7d, 0, 50),
+            # d8: Padrão 'Pass-Through' / Rapid Drain (dinheiro entra e sai rápido)
+            cls._normalize_bounded(metrics.rapid_drain_count, 0, 20),
+            # d9: Fan-out ratio (dispersão para muitos destinos)
+            np.clip(metrics.fan_out_ratio, 0.0, 1.0),
+            # d10: Fan-in ratio (recebimento de muitas origens)
+            np.clip(metrics.fan_in_ratio, 0.0, 1.0),
+            # d11: Transações transfronteiriças / internacionais
+            cls._normalize_bounded(metrics.international_tx_count, 0, 10),
+            # d12: Falhas de autenticação/biometria (0 a 10)
+            cls._normalize_bounded(metrics.failed_auth_count, 0, 10),
+            # d13: Trocas de device/hardware identificadas (0 a 5)
+            cls._normalize_bounded(metrics.device_switch_count, 0, 5),
+            # d14: Razão de valores fora do padrão histórico (Z-Score > 3)
+            np.clip(metrics.out_of_pattern_amount_ratio, 0.0, 1.0),
+            # d15: Contestação / Chargebacks recentes (0 a 5)
+            cls._normalize_bounded(metrics.chargeback_or_dispute_count, 0, 5),
+            # d16: Volume total movimentado (0 a 200k)
+            cls._normalize_bounded(metrics.total_amount_out, 0, 200000),
+        ]
+
+        vec = np.array(raw_dims, dtype=np.float32)
+
+        # Invariante I-VEC-001: L2 Normalization (||v|| = 1.0)
+        norm = np.linalg.norm(vec)
+        if norm == 0:
+            # Fallback seguro para vetor não-nulo com norma 1
+            vec[0] = 1.0
+            return vec
+        return vec / norm
+
+
+class FraudRepository:
+    def __init__(self, db_url: str):
+        self.db_url = db_url
+
+    def save_entity_vector(self, entity_id: uuid.UUID, feature_version: int, vector: np.ndarray):
+        with psycopg.connect(self.db_url) as conn:
+            register_vector(conn)
+            with conn.cursor() as cur:
+                # Upsert da feature com pgvector
+                cur.execute(
+                    """
+                    INSERT INTO fraud_entity_features (entity_id, feature_version, behavioral_vector, updated_at)
+                    VALUES (%s, %s, %s, %s)
+                    ON CONFLICT (entity_id)
+                    DO UPDATE SET
+                        feature_version = EXCLUDED.feature_version,
+                        behavioral_vector = EXCLUDED.behavioral_vector,
+                        updated_at = EXCLUDED.updated_at;
+                    """,
+                    (entity_id, feature_version, vector, datetime.now(timezone.utc))
+                )
+                conn.commit()
+
+
+# --- Exemplo de Execução ---
+if __name__ == "__main__":
+    # Simulação de métricas agregadas do cliente
+    mock_metrics = TransactionSummary(
+        tx_count_30d=120,
+        total_amount_out=45000.0,
+        avg_amount_out=375.0,
+        std_amount_out=150.0,
+        velocity_1h_max=12,
+        nocturnal_tx_count=45,
+        unique_counterparties=30,
+        new_counterparties_7d=18,
+        rapid_drain_count=4,
+        fan_out_ratio=0.75,
+        fan_in_ratio=0.10,
+        international_tx_count=0,
+        failed_auth_count=2,
+        device_switch_count=1,
+        out_of_pattern_amount_ratio=0.08,
+        chargeback_or_dispute_count=0
+    )
+
+    vector_16d = BehavioralFeatureExtractor.extract_and_normalize_vector(mock_metrics)
+    print(f"Vetor 16D Gerado: {vector_16d}")
+    print(f"Norma L2: {np.linalg.norm(vector_16d):.4f}") # Deve ser 1.0000
+
+    # Persistência no PostgreSQL
+    # DB_URI = "postgresql://user:pass@localhost:5432/wallet_db"
+    # repo = FraudRepository(DB_URI)
+    # repo.save_entity_vector(uuid.uuid4(), 1, vector_16d)
+
+```
+
+---
+
+### Opção 2: Implementação em Go (usando `pgx/v5` + `pgvector-go`)
+
+#### Pré-requisitos:
+
+```bash
+go get github.com/jackc/pgx/v5
+go get github.com/pgvector/pgvector-go
+
+```
+
+#### Código (`extractor.go`):
+
+```go
+package main
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/pgvector/pgvector-go"
+)
+
+type TransactionMetrics struct {
+	TxCount30d              float64
+	TotalAmountOut          float64
+	AvgAmountOut            float64
+	StdAmountOut            float64
+	Velocity1hMax           float64
+	NocturnalTxCount        float64
+	UniqueCounterparties    float64
+	NewCounterparties7d     float64
+	RapidDrainCount         float64
+	FanOutRatio             float64
+	FanInRatio              float64
+	InternationalTxCount    float64
+	FailedAuthCount         float64
+	DeviceSwitchCount       float64
+	OutOfPatternAmountRatio float64
+	ChargebackCount         float64
+}
+
+func minMaxNormalize(val, minVal, maxVal float64) float32 {
+	if maxVal <= minVal {
+		return 0.0
+	}
+	norm := (val - minVal) / (maxVal - minVal)
+	if norm < 0.0 {
+		return 0.0
+	}
+	if norm > 1.0 {
+		return 1.0
+	}
+	return float32(norm)
+}
+
+// ExtractL2NormalizedVector compila as 16 dimensões e aplica norma euclidiana = 1.0
+func ExtractL2NormalizedVector(m TransactionMetrics) []float32 {
+	raw := make([]float32, 16)
+
+	raw[0] = minMaxNormalize(m.TxCount30d, 0, 500)
+	raw[1] = minMaxNormalize(m.AvgAmountOut, 0, 50000)
+	raw[2] = minMaxNormalize(m.StdAmountOut, 0, 25000)
+	raw[3] = minMaxNormalize(m.Velocity1hMax, 0, 30)
+
+	// Razão noturna
+	if m.TxCount30d > 0 {
+		raw[4] = float32(math.Min(m.NocturnalTxCount/m.TxCount30d, 1.0))
+	} else {
+		raw[4] = 0.0
+	}
+
+	raw[5] = minMaxNormalize(m.UniqueCounterparties, 0, 100)
+	raw[6] = minMaxNormalize(m.NewCounterparties7d, 0, 50)
+	raw[7] = minMaxNormalize(m.RapidDrainCount, 0, 20)
+	raw[8] = float32(math.Min(math.Max(m.FanOutRatio, 0.0), 1.0))
+	raw[9] = float32(math.Min(math.Max(m.FanInRatio, 0.0), 1.0))
+	raw[10] = minMaxNormalize(m.InternationalTxCount, 0, 10)
+	raw[11] = minMaxNormalize(m.FailedAuthCount, 0, 10)
+	raw[12] = minMaxNormalize(m.DeviceSwitchCount, 0, 5)
+	raw[13] = float32(math.Min(math.Max(m.OutOfPatternAmountRatio, 0.0), 1.0))
+	raw[14] = minMaxNormalize(m.ChargebackCount, 0, 5)
+	raw[15] = minMaxNormalize(m.TotalAmountOut, 0, 200000)
+
+	// Invariante I-VEC-001: L2 Normalization
+	var sumSquares float64
+	for _, v := range raw {
+		sumSquares += float64(v * v)
+	}
+	l2Norm := float32(math.Sqrt(sumSquares))
+
+	normalized := make([]float32, 16)
+	if l2Norm == 0 {
+		normalized[0] = 1.0
+		return normalized
+	}
+
+	for i, v := range raw {
+		normalized[i] = v / l2Norm
+	}
+
+	return normalized
+}
+
+func SaveBehavioralVector(ctx context.Context, conn *pgx.Conn, entityID uuid.UUID, featureVersion int, vec []float32) error {
+	pgVec := pgvector.NewVector(vec)
+
+	query := `
+		INSERT INTO fraud_entity_features (entity_id, feature_version, behavioral_vector, updated_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (entity_id)
+		DO UPDATE SET
+			feature_version = EXCLUDED.feature_version,
+			behavioral_vector = EXCLUDED.behavioral_vector,
+			updated_at = EXCLUDED.updated_at;
+	`
+	_, err := conn.Exec(ctx, query, entityID, featureVersion, pgVec, time.Now().UTC())
+	return err
+}
+
+func main() {
+	sample := TransactionMetrics{
+		TxCount30d:           80,
+		TotalAmountOut:       15000,
+		AvgAmountOut:         187.5,
+		StdAmountOut:         95.0,
+		Velocity1hMax:        8,
+		NocturnalTxCount:     25,
+		UniqueCounterparties: 15,
+		NewCounterparties7d:  6,
+		RapidDrainCount:      2,
+		FanOutRatio:          0.6,
+		FanInRatio:           0.2,
+		FailedAuthCount:      1,
+		DeviceSwitchCount:    1,
+	}
+
+	vec16 := ExtractL2NormalizedVector(sample)
+	fmt.Printf("Vetor 16D Normalizado (Go): %v\n", vec16)
+}
+
+```
+
+---
+
+### Consulta de Busca por Similaridade (SQL via pgvector)
+
+Para buscar os 10 clientes mais parecidos com o centróide de um padrão de fraude (ex: *Mula com Saque Rápido*) usando o índice HNSW de produto interno:
+
+```sql
+-- O operador <#> calcula o produto interno negativo.
+-- Ordenar ASC por (vector <#> centroid) equivale a maior similaridade de cosseno.
+SELECT
+    entity_id,
+    feature_version,
+    (behavioral_vector <#> $1) * -1 AS cosine_similarity,
+    updated_at
+FROM fraud_entity_features
+ORDER BY behavioral_vector <#> $1 ASC
+LIMIT 10;
+
+```

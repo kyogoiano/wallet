@@ -1,8 +1,8 @@
 package br.com.wallet.fraud.rules;
 
 import br.com.wallet.fraud.domain.*;
-import br.com.wallet.fraud.domain.context.FraudContext;
-import br.com.wallet.fraud.infrasctructure.NewRecipientStore;
+import br.com.wallet.core.context.FraudContext;
+import br.com.wallet.fraud.infrastructure.NewRecipientStore;
 import org.jspecify.annotations.NonNull;
 import org.springframework.stereotype.Component;
 
@@ -26,7 +26,8 @@ public class NewRecipientRule implements FraudRule {
                 .checkNewRecipient(
                         ctx.userId(),
                         ctx.targetUserId(),
-                        ctx.timestamp()
+                        ctx.timestamp(),
+                        ctx.tenantId()
                 )
                 .thenApply(result ->
                          switch (result) {

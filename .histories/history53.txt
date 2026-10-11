@@ -1,0 +1,1062 @@
+Yes. I’d review **SPEC-000.9.2 as the deployment/packaging layer immediately after 000.9.1 and before 000.9.3**, and there are several things I would change before implementation.
+
+The overall direction is good, but I see **4 architectural issues that are important enough to fix in the spec**, plus several smaller consistency issues.
+
+## Overall assessment
+
+**Current: ~8.7/10**
+
+After the corrections below: **~9.5/10**.
+
+The strongest part is the separation of concerns:
+
+```text
+                ┌───────────────┐
+                │ Load Balancer │
+                └───────┬───────┘
+                        │
+              ┌─────────▼─────────┐
+              │   Edge x N         │
+              │ HTTP/SSE/QUIC      │
+              │ Rate limit         │
+              │ HMAC               │
+              │ Local journal      │
+              └─────────┬─────────┘
+                        │
+                        │ NATS JetStream
+                        ▼
+              ┌───────────────────┐
+              │     Core x M      │
+              │ Ledger / Fraud    │
+              │ PostgreSQL        │
+              └─────────┬─────────┘
+                        │
+              ┌─────────┴─────────┐
+              │                   │
+          PostgreSQL           Dragonfly
+```
+
+That is exactly the layer 000.9.2 should formalize.
+
+But I would **not implement the spec exactly as written**.
+
+---
+
+# 1. Biggest issue: `I-TOPOLOGY-001` is mathematically wrong
+
+You currently have:
+
+> `N ≥ 2, M ≥ 2, N ≠ M`
+
+This shouldn't be an invariant.
+
+There is no architectural reason that:
+
+```text
+Edge = 2
+Core = 2
+```
+
+is invalid.
+
+Likewise:
+
+```text
+Edge = 4
+Core = 4
+```
+
+can be perfectly valid.
+
+The actual invariant is:
+
+> **Edge and Core replica counts MUST be independently scalable.**
+
+So I'd replace it with something like:
+
+### `I-TOPOLOGY-001 — Independent Horizontal Scaling`
+
+```text
+Replicas(Edge) = N
+Replicas(Core) = M
+
+N >= 1
+M >= 1
+
+N and M MUST be independently configurable.
+```
+
+And:
+
+> Core instances MUST consume commands through the shared JetStream durable consumer group; no Edge→Core affinity may be required for financial correctness.
+
+This is much stronger architecturally.
+
+### Why this matters
+
+Your own convergence test currently says:
+
+> `N_edge != M_core`
+
+That's testing an arbitrary numerical relationship rather than the actual architecture.
+
+The useful test is:
+
+```text
+Edge replicas = 3
+Core replicas = 5
+
+→ all operate correctly
+→ no affinity
+→ no duplicate financial effect
+→ JetStream distributes work
+```
+
+And another:
+
+```text
+Edge 5 → Core 2
+Edge 2 → Core 5
+```
+
+Both must work.
+
+---
+
+# 2. `StatefulSet` for Edge is inconsistent with 000.9.1
+
+This is probably the most important topology issue.
+
+You have:
+
+> `REQ-TOP-006`: CSI Block Volume `ReadWriteOnce` via StatefulSet `volumeClaimTemplates`
+
+But `000.9.1` explicitly established that each Edge owns its **single-writer local journal**.
+
+Therefore:
+
+```text
+Edge-1 → /spool-1
+Edge-2 → /spool-2
+Edge-3 → /spool-3
+```
+
+is correct.
+
+But that does **not necessarily mean Edge itself should be a StatefulSet**.
+
+In Kubernetes, the natural model is:
+
+```text
+Edge Deployment
+   │
+   ├── Pod Edge-1 → its own storage
+   ├── Pod Edge-2 → its own storage
+   └── Pod Edge-3 → its own storage
+```
+
+The difficulty is provisioning one RWO volume per independently scheduled Edge pod.
+
+A StatefulSet gives you deterministic identities and `volumeClaimTemplates`, but introduces a semantic implication:
+
+> Edge has stable identity.
+
+That isn't actually required by the journal architecture.
+
+More importantly, your requirement says:
+
+> “with zero concurrent-locking overhead”
+
+But 000.9.1 explicitly uses:
+
+```text
+.spool.lock
+FileChannel.tryLock()
+```
+
+So the system **does have a locking mechanism**.
+
+The correct wording is:
+
+> The journal has a single writer per spool directory; the deployment topology MUST ensure exclusive ownership of each spool volume/directory. The application-level lock remains a safety mechanism and is not the primary concurrency mechanism.
+
+That reconciles the two specs.
+
+---
+
+# 3. HostPath vs CSI needs much more precise semantics
+
+Currently:
+
+```text
+Option A = Local NVMe HostPath
+Option B = CSI Block PV RWO
+```
+
+This is directionally good, but they provide **different failure guarantees**.
+
+### HostPath
+
+```text
+Edge pod
+   ↓
+Node A
+   ↓
+/nvme/wallet-edge-1/spool
+```
+
+If the pod moves to Node B:
+
+```text
+Node A storage != Node B storage
+```
+
+The journal does **not follow the pod**.
+
+So:
+
+> HostPath does not provide pod-reschedule durability.
+
+It provides:
+
+> node-local restart durability while the underlying node/storage remains available.
+
+That's consistent with `I-EDGE-006`.
+
+### CSI RWO
+
+Potentially:
+
+```text
+Edge pod
+   ↓
+PVC
+   ↓
+Block volume
+```
+
+and the volume can be reattached after pod rescheduling **if the CSI implementation/storage platform supports it**.
+
+Therefore I would explicitly put the distinction into the spec:
+
+| Storage       | Process restart | Pod restart same node |       Node failure |       Pod reschedule |
+| ------------- | --------------: | --------------------: | -----------------: | -------------------: |
+| HostPath NVMe |               ✅ |                     ✅ |                  ❌ | ❌/platform-dependent |
+| CSI RWO       |               ✅ |                     ✅ | platform-dependent |          ✅ generally |
+
+Don't claim more than the storage class guarantees.
+
+This is especially important because your `I-EDGE-006` already says:
+
+> fsync is not node-destruction durability.
+
+Good. Keep that principle here.
+
+---
+
+# 4. `StatefulSet volumeClaimTemplates` is not equivalent to “pod reschedule reattachment”
+
+The current text implies:
+
+> StatefulSet + RWO = cloud reschedule durability.
+
+Not necessarily.
+
+It depends on:
+
+* StorageClass
+* CSI driver
+* topology constraints
+* zone availability
+* volume attachment semantics
+
+So change:
+
+> “for cloud pod reschedule reattachment”
+
+to:
+
+> “where the selected CSI implementation provides durable volume reattachment across pod rescheduling.”
+
+That keeps 000.9.2 platform-neutral.
+
+---
+
+# 5. I would move platform-specific Kubernetes details out of the invariant
+
+This part:
+
+> `Option A (Local NVMe HostPath) OR Option B (Dedicated CSI Block PV RWO)`
+
+is already getting close to implementation topology.
+
+And:
+
+> RKE2 / Rancher / GKE / vCluster
+
+belongs in the **deployment profiles**, not in application architecture.
+
+I'd structure it:
+
+```text
+SPEC-000.9.2
+│
+├── Runtime contract
+├── OCI packaging
+├── topology
+├── storage contract
+├── lifecycle
+│
+└── deployment profiles
+    ├── Docker Compose
+    ├── Kubernetes
+    ├── vCluster
+    └── GKE
+```
+
+The application says:
+
+```text
+SPOOL_DIR=/spool
+```
+
+The platform decides:
+
+```text
+what /spool actually is
+```
+
+That's the clean boundary.
+
+---
+
+# 6. Tier numbering is confusing
+
+You have:
+
+```text
+Tier 0
+Tier 1 & 2
+Tier 3 & 4
+```
+
+but only four conceptual environments:
+
+* Docker Compose
+* RKE2/Rancher
+* vCluster
+* GKE
+
+I would avoid unexplained numerical tiers.
+
+Something like:
+
+### Deployment Profiles
+
+| Profile | Environment       | Purpose                       |
+| ------- | ----------------- | ----------------------------- |
+| D0      | Docker Compose    | Development / small appliance |
+| P1      | Kubernetes / RKE2 | Private cloud / enterprise    |
+| P2      | vCluster          | Multi-tenant appliance        |
+| P3      | GKE Standard      | Public cloud                  |
+
+Much easier to understand.
+
+---
+
+# 7. The NATS topology deserves one explicit invariant
+
+This is a very important architectural point and currently implicit.
+
+I'd add:
+
+### `I-MESSAGING-001 — Broker-Mediated Process Communication`
+
+```text
+Edge MUST NOT directly invoke Core through HTTP/RPC
+for financial command execution.
+
+Edge → NATS JetStream → Core
+```
+
+This reinforces 000.9.1's:
+
+> WON'T direct sync HTTP/REST/RPC.
+
+And makes the deployment topology unambiguous.
+
+Also:
+
+```text
+N Edge
+   ↓
+NATS durable consumer
+   ↓
+M Core
+```
+
+is the actual scaling fabric.
+
+---
+
+# 8. HPA on NATS consumer lag: good idea, but don't make it too simple
+
+This:
+
+> Core scales on NATS JetStream consumer lag
+
+is good.
+
+But:
+
+> Edge scales on CPU/RPS
+
+is potentially insufficient.
+
+Edge workload can be dominated by:
+
+* active connections
+* request rate
+* journal writes
+* SSE connections
+* cryptographic HMAC computation
+* downstream latency
+
+So I'd make it:
+
+```text
+Edge:
+  CPU and/or RPS and/or active connections
+
+Core:
+  consumer lag and/or processing latency
+```
+
+And importantly:
+
+> HPA is SHOULD, not MUST.
+
+Good choice.
+
+---
+
+# 9. `REQ-TOP-002` needs one correction
+
+You currently say:
+
+> all environment-specific configs (`NATS_URL`, `REDIS_HOST`, `DB_URL`, `SPOOL_DIR`) MUST be injected via environment variables.
+
+This is slightly too rigid.
+
+The **12-factor principle** is the important part, not literally environment variables for every value.
+
+For Kubernetes you'll often have:
+
+```text
+env
+ConfigMap
+Secret
+Downward API
+mounted secret
+```
+
+And:
+
+```text
+SPOOL_DIR=/spool
+```
+
+is effectively infrastructure configuration.
+
+I'd say:
+
+> Environment-specific configuration MUST be externally supplied through environment variables or platform-native configuration injection; it MUST NOT be compiled into the image.
+
+That is more portable.
+
+And obviously:
+
+```text
+HMAC secrets
+DB credentials
+NATS credentials
+TLS private keys
+```
+
+must not be ordinary ConfigMaps.
+
+That will become particularly important with 000.9.3.
+
+---
+
+# 10. `REQ-TOP-001` should explicitly require non-root
+
+Your test already says:
+
+> Root user execution → Non-root gate fail
+
+But the requirement itself doesn't say non-root.
+
+Add:
+
+> Containers MUST run as a non-root UID and MUST NOT require privileged mode.
+
+Also ideally:
+
+```text
+readOnlyRootFilesystem = true
+```
+
+where compatible with the application.
+
+For Edge:
+
+```text
+/opt/app      read-only
+/spool        writable
+/tmp          writable only if required
+```
+
+This fits extremely well with your appliance-grade objective.
+
+---
+
+# 11. Don't say “minimal” without defining what gets excluded
+
+I'd make `I-CONTAINER-001` more concrete:
+
+```text
+Edge image MUST NOT contain:
+- JDBC drivers
+- JPA/Hibernate
+- PostgreSQL driver
+- Flyway
+- Core-only persistence implementation
+```
+
+and Core:
+
+```text
+Core image MAY contain:
+- JDBC
+- PostgreSQL
+- ledger persistence
+- fraud persistence
+```
+
+This becomes testable with your `ContainerImageVerificationTest`.
+
+---
+
+# 12. Graceful shutdown: 30 seconds should be a minimum, not necessarily the invariant
+
+You currently have:
+
+```text
+T <= 30s
+```
+
+and:
+
+```text
+terminationGracePeriodSeconds >= 30s
+```
+
+This is slightly contradictory.
+
+If:
+
+```text
+terminationGracePeriod = 30s
+```
+
+then the application cannot safely assume it has the entire 30 seconds.
+
+Kubernetes sends SIGTERM and eventually SIGKILL after the grace period.
+
+I'd define:
+
+```text
+terminationGracePeriodSeconds >= configured application shutdown timeout + safety margin
+```
+
+For example:
+
+```text
+application shutdown deadline = 20s
+pod grace period = 30s
+```
+
+Then:
+
+```text
+SIGTERM
+  ↓
+stop ingress
+  ↓
+OUT_OF_SERVICE
+  ↓
+finish/force journal batch
+  ↓
+stop consumers
+  ↓
+exit
+```
+
+And if the deadline is exceeded:
+
+```text
+SIGKILL
+```
+
+The journal recovery mechanism is what protects against incomplete shutdown.
+
+---
+
+# 13. Important: Edge shutdown ordering
+
+I'd explicitly define the order.
+
+For Edge:
+
+```text
+1. Mark readiness OUT_OF_SERVICE
+2. Stop accepting new commands
+3. Stop/disable new journal writes from ingress
+4. Allow currently accepted operations to finish their durable acceptance
+5. force pending journal batch
+6. stop replay workers
+7. stop NATS publishers
+8. close HTTP/QUIC server
+9. exit
+```
+
+The critical invariant is:
+
+> **Never acknowledge an accepted command after the shutdown sequence has passed the durability point unless the command is durably persisted.**
+
+This connects directly to 000.9.1 and 000.9.
+
+---
+
+# 14. Core shutdown needs equal attention
+
+The spec focuses heavily on Edge shutdown.
+
+But Core has an equally important concern:
+
+```text
+SIGTERM
+ ↓
+stop accepting new JetStream deliveries
+ ↓
+finish current financial transaction
+ ↓
+commit PostgreSQL
+ ↓
+ACK NATS
+ ↓
+terminate
+```
+
+This is actually one of your most important financial correctness properties.
+
+I'd add:
+
+### `I-GRACEFUL-002 — Core ACK Safety`
+
+> Core MUST NOT acknowledge a financial command to JetStream before the corresponding durable financial transaction has committed successfully.
+
+This already exists conceptually in 000.9.1's `REQ-PRC-022`; 000.9.2 should **reference rather than redefine** it.
+
+---
+
+# 15. The test `Core down → Edge remains healthy and accepts` is too strong
+
+This is subtle.
+
+If Core is down:
+
+```text
+Edge
+ ↓
+NATS
+ ↓
+Core ❌
+```
+
+Edge can indeed remain healthy and **durably accept commands** while JetStream is available.
+
+But if:
+
+```text
+NATS ❌
+```
+
+then:
+
+```text
+Edge → local spool
+```
+
+and eventually:
+
+```text
+spool watermark
+```
+
+can force:
+
+```text
+503
+```
+
+So the test should say:
+
+> Core unavailable → Edge remains operational and continues durable acceptance while broker/spool capacity permits.
+
+Not simply:
+
+> accepts.
+
+This matches the degraded acceptance architecture much better.
+
+---
+
+# 16. NATS and PostgreSQL should not necessarily be StatefulSets by default
+
+You say:
+
+> StatefulSet for NATS and PostgreSQL.
+
+For these two, StatefulSet makes sense much more strongly than for Edge because they have persistent identity/storage requirements.
+
+Still, the spec should distinguish:
+
+```text
+NATS:
+StatefulSet + persistent storage
+```
+
+from:
+
+```text
+PostgreSQL:
+StatefulSet is acceptable for simple/single-instance deployment
+```
+
+because production PostgreSQL HA is a separate concern.
+
+I would **not let 000.9.2 accidentally become a PostgreSQL HA specification**.
+
+Something like:
+
+> PostgreSQL HA, replication, failover, and backup topology are outside the scope of 000.9.2.
+
+Same for NATS clustering if you're not defining it here.
+
+---
+
+# 17. vCluster deserves a slightly different framing
+
+This:
+
+> Tier 3 & 4 workloads MUST deploy into virtual Kubernetes clusters (vCluster) and GKE Standard
+
+is overly prescriptive.
+
+vCluster is a deployment option, not a universal requirement.
+
+I'd say:
+
+> The OCI images and Helm packaging MUST be deployable without modification on Kubernetes-compatible environments including RKE2, vCluster, and GKE Standard.
+
+That gives you:
+
+```text
+same image
+same application
+same Helm chart
+different platform
+```
+
+which is exactly the portability goal.
+
+---
+
+# 18. Security integration with 000.9.3
+
+Because **000.9.2 is implemented before 000.9.3**, I would explicitly leave hooks for security without implementing it here.
+
+For example:
+
+```text
+000.9.2
+    │
+    ├── TLS termination capability
+    ├── Secret injection
+    ├── network isolation
+    └── service identity
+             │
+             ▼
+000.9.3
+    HMAC authentication
+    tenant derivation
+    authorization
+```
+
+Don't implement HMAC in 000.9.2.
+
+But make sure the topology doesn't prevent it.
+
+For example:
+
+```text
+Ingress
+ ↓
+Edge
+ ↓
+NATS
+ ↓
+Core
+```
+
+allows 000.9.3 to add:
+
+```text
+TLS 1.3
+HMAC
+tenant/principal metadata
+```
+
+without changing the topology.
+
+---
+
+# 19. One very important missing requirement: resource isolation
+
+You mention:
+
+> independent CPU/memory/concurrency/connection limits
+
+in 000.9.1.
+
+But 000.9.2 should actually define the deployment manifestation.
+
+Add:
+
+### `REQ-TOP-013`
+
+> Edge and Core deployments MUST support independently configurable CPU/memory requests and limits.
+
+And ideally:
+
+```text
+Edge:
+  CPU request/limit
+  memory request/limit
+  max connections
+
+Core:
+  CPU request/limit
+  memory request/limit
+  consumer concurrency
+```
+
+This is important because the whole purpose of 000.9.1/000.9.2 is **independent scaling and failure domains**.
+
+---
+
+# 20. PodDisruptionBudget `(N-1)` is not always correct
+
+You have:
+
+> PDB ($N-1$)
+
+That means:
+
+```text
+N=3
+maxUnavailable=2
+```
+
+potentially leaving only one Edge.
+
+That's not necessarily desirable.
+
+For availability, you'd normally want something like:
+
+```text
+maxUnavailable: 1
+```
+
+or:
+
+```text
+minAvailable: 2
+```
+
+depending on replica count.
+
+More importantly, PDB shouldn't be an absolute architecture invariant.
+
+I'd change:
+
+> PDB preserving the configured minimum availability target.
+
+This can be:
+
+```yaml
+minAvailable: 2
+```
+
+for a three-node Edge deployment, for example.
+
+---
+
+# Recommended revised topology model
+
+I'd make the core architecture of 000.9.2 explicitly:
+
+```text
+                   External Network
+                         │
+                  ┌──────▼──────┐
+                  │ LB / Ingress│
+                  └──────┬──────┘
+                         │
+             ┌───────────┼───────────┐
+             ▼           ▼           ▼
+          Edge-1       Edge-2      Edge-N
+          /spool       /spool      /spool
+             │           │           │
+             └───────────┼───────────┘
+                         ▼
+                  NATS JetStream
+                         │
+             ┌───────────┼───────────┐
+             ▼           ▼           ▼
+          Core-1       Core-2      Core-M
+             │           │           │
+             └───────────┼───────────┘
+                         ▼
+                    PostgreSQL
+                         +
+                     Dragonfly
+```
+
+With the fundamental rule:
+
+> **N and M are independent variables.**
+
+Not:
+
+> N ≠ M.
+
+---
+
+# Suggested invariant set
+
+I would reduce the current five invariants to something closer to:
+
+### `I-CONTAINER-001 — Discrete OCI Artifacts`
+
+Edge and Core MUST be independent OCI images; Edge contains no relational persistence stack.
+
+### `I-TOPOLOGY-001 — Independent Scaling`
+
+Edge and Core MUST scale independently through NATS JetStream without process affinity.
+
+### `I-STORAGE-001 — Single-Writer Spool`
+
+Each Edge instance MUST have exclusive ownership of its `/spool` directory/volume. The journal remains single-writer.
+
+### `I-STORAGE-002 — Explicit Durability Scope`
+
+Host-local spool durability survives process/container restart but does not guarantee node-loss durability. CSI durability is dependent on platform/storage guarantees.
+
+### `I-PLATFORM-001 — Runtime Portability`
+
+Application images MUST NOT depend on Kubernetes/vCluster APIs.
+
+### `I-LIFECYCLE-001 — Edge Shutdown Safety`
+
+SIGTERM causes readiness withdrawal before shutdown and preserves accepted journal data.
+
+### `I-LIFECYCLE-002 — Core ACK Safety`
+
+Core MUST NOT ACK JetStream delivery before durable financial commit.
+
+That is a much tighter constitutional layer.
+
+---
+
+# One thing I would remove from 000.9.2
+
+I would remove this from the **mandatory** requirements:
+
+> `REQ-TOP-005`: workloads MUST deploy into virtual Kubernetes clusters and GKE Standard.
+
+Replace with:
+
+> **MUST be deployable to** RKE2/Kubernetes, vCluster, and GKE Standard without image/application changes.
+
+Otherwise you're turning deployment options into architecture requirements.
+
+---
+
+# Recommended execution order
+
+Since you said **000.9.2 will be implemented before 000.9.3**, I would implement it in this order:
+
+```text
+000.9.1
+  │
+  ├── EdgeApplication
+  ├── CoreApplication
+  └── contracts
+       │
+       ▼
+000.9.2
+  │
+  ├── Dockerfiles
+  ├── OCI images
+  ├── Compose
+  ├── Helm
+  ├── /spool provisioning
+  ├── probes
+  ├── graceful lifecycle
+  ├── resource isolation
+  └── topology/scaling tests
+       │
+       ▼
+000.9.3
+  │
+  ├── TLS 1.3
+  ├── HMAC
+  ├── credential snapshot
+  ├── tenant derivation
+  ├── tenant rate limiting
+  └── Core tenant boundary
+```
+
+That sequencing is excellent.
+
+### Bottom line
+
+**I would ratify the concept, but not the current text.** The main changes I'd make before generating TASKS-000.9.2 are:
+
+1. **Remove `N ≠ M`; require independent scaling.**
+2. **Clarify single-writer spool ownership vs application file lock.**
+3. **Separate HostPath durability from CSI durability.**
+4. **Don't imply RWO automatically guarantees rescheduling durability.**
+5. **Make Core ACK-after-commit explicit/reference 000.9.1.**
+6. **Define Edge and Core shutdown ordering.**
+7. **Change “Core down → Edge accepts” to “accepts while durable capacity permits.”**
+8. **Make Kubernetes/vCluster/GKE deployment targets portable options, not mandatory simultaneous targets.**
+9. **Add non-root/container hardening.**
+10. **Make resource isolation explicit.**
+11. **Fix PDB semantics.**
+12. **Leave PostgreSQL HA and NATS HA topology outside this spec unless you deliberately want 000.9.2 to own them.**
+
+With those changes, **000.9.2 becomes a very clean bridge between the logical process separation of 000.9.1 and the security boundary of 000.9.3**, without leaking Kubernetes implementation details back into the application architecture.

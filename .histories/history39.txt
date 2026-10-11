@@ -1,0 +1,702 @@
+Sim. A revisão da **SPEC-000.9** ficou significativamente mais madura. Eu a considero **arquiteturalmente consistente**, mas antes de transformar isso em `TASKS-000.9` eu faria alguns ajustes importantes — principalmente em **financial correctness**, **QUIC/0-RTT**, **SSE durability** e na semântica do journal.
+
+### Minha avaliação
+
+| Área                    | Estado       | Observação                                               |
+| ----------------------- | ------------ | -------------------------------------------------------- |
+| Durable acceptance      | 🟢 Muito boa | `202` condicionado a JetStream durability ou `fsync`     |
+| Bulkhead / backpressure | 🟢           | Limite explícito de inflight                             |
+| Segmented journal       | 🟢           | Framing e CRC32C estão bem definidos                     |
+| Crash recovery          | 🟢           | Muito melhor com readiness gate                          |
+| Idempotência            | 🟢           | Correta ao delegar efeito financeiro ao core             |
+| Rate limiting           | 🟢           | Hierarquia L0/L1/L2/L3 faz sentido                       |
+| SSE                     | 🟡           | Falta definir durabilidade do estado                     |
+| HTTP/3 / QUIC           | 🟡           | **0-RTT precisa de uma restrição financeira importante** |
+| Edge/Core separation    | 🟡           | REQ-021/022 precisa de cuidado com fronteira de módulos  |
+| DLQ/corrupção           | 🟡           | Há uma contradição no test triad                         |
+| Fair drain 80/20        | 🟡           | Precisa de definição operacional                         |
+| `202` semântica         | 🟢           | Conceito correto, mas eu mudaria uma expressão           |
+
+## 1. Principal problema: QUIC 0-RTT + operações financeiras
+
+Este é o ponto que eu **obrigatoriamente corrigiria**.
+
+Você escreveu:
+
+> HTTP/3 over QUIC for 0-RTT connection establishment
+
+Isso é tecnicamente válido, mas **não devemos permitir que uma operação financeira mutável seja processada via QUIC 0-RTT sem uma proteção adicional contra replay**.
+
+O problema não é o QUIC em si. É que **0-RTT permite replay do early data** em determinadas condições.
+
+Para `POST /operations`, isso é perigoso.
+
+Eu alteraria `REQ-EDG-020` para algo como:
+
+```text
+REQ-EDG-020 [MUST]:
+Edge MUST support HTTP/3 over QUIC and advertise HTTP/3 through
+Alt-Svc, with automatic HTTP/2/TLS fallback.
+
+Financial command requests MUST NOT be accepted as replay-sensitive
+0-RTT early data unless the request carries a valid operationId and
+passes the Edge replay/idempotency gate before durable acceptance.
+
+0-RTT MAY be used for connection establishment and replay-safe
+operations, but financial command acceptance MUST remain protected
+by I-IDEMPOTENCY-001 and I-EDGE-003.
+```
+
+Ou, para uma primeira versão ainda mais conservadora:
+
+> **0-RTT MAY be enabled for connection establishment, but financial mutation requests MUST require a 1-RTT handshake.**
+
+Eu particularmente escolheria a segunda no V4.
+
+Isso preserva a vantagem do HTTP/3 sem introduzir uma superfície desnecessária no caminho financeiro.
+
+---
+
+# 2. SSE tem um problema de durabilidade
+
+Hoje:
+
+```text
+EdgeCommandConsumer
+        ↓
+OperationStatusHub
+        ↓
+SSE
+```
+
+O `OperationStatusHub` aparentemente é memória.
+
+Imagine:
+
+```text
+POST /transfer
+       ↓
+202
+       ↓
+NATS
+       ↓
+Ledger COMPLETED
+       ↓
+OperationStatusHub
+       ↓
+SSE
+```
+
+Mas o frontend estava offline naquele momento.
+
+Depois:
+
+```text
+GET /operations/{id}/stream
+```
+
+O que responde?
+
+Se o status só existia no Hub, você perdeu o evento.
+
+Isso é particularmente ruim porque o `202` prometeu que a operação estava aceita.
+
+Eu adicionaria uma regra:
+
+### `REQ-EDG-019` deveria exigir replay do estado terminal
+
+Algo como:
+
+```text
+The SSE stream MUST expose the latest durable operation state
+before subscribing to live transitions.
+
+Terminal states MUST remain queryable after process restart,
+independently of the in-memory OperationStatusHub.
+```
+
+Arquiteturalmente:
+
+```text
+                  ┌───────────────┐
+                  │ Durable State │
+                  │ operation ... │
+                  └───────┬───────┘
+                          │
+                     initial state
+                          ↓
+Client ── SSE ──> OperationStatusHub ──> live events
+                          ↑
+                    NATS/Core event
+```
+
+Você não precisa necessariamente criar outra tabela agora. Se já existe uma fonte durável de operação/status, **reutilize-a**.
+
+O importante é o princípio:
+
+> **SSE is notification, not the source of truth.**
+
+Eu colocaria isso como novo:
+
+### `I-EDGE-007 — Durable Operation Visibility`
+
+```text
+An accepted operation MUST have a durable status source independent
+of the in-memory SSE connection/hub.
+
+SSE MAY lose an individual notification, but MUST NOT make the
+terminal state permanently unobservable.
+```
+
+Isso é uma característica bem mais "financial appliance".
+
+---
+
+# 3. Há uma pequena contradição no CRC/DLQ
+
+Na spec você definiu:
+
+> `REQ-EDG-018`: CRC32C failure MUST halt segment scan, preserve segment for forensics, raise CRITICAL alert, and isolate the segment **without DLQ routing**.
+
+Isso está correto.
+
+Mas no Mandatory Test Triad:
+
+> `Corrupt CRC32C → Quarantine segment`
+
+e no contexto anterior aparecia:
+
+> `CRC32C failure ... DLQ quarantine`
+
+Aqui eu mudaria a terminologia.
+
+Não use `Quarantine` se você já tem **DLQ** como conceito operacional.
+
+Melhor:
+
+```text
+Corrupt CRC32C → forensic segment isolation
+```
+
+E:
+
+```text
+CRC failure MUST NOT enter the application DLQ.
+```
+
+Porque são coisas diferentes:
+
+```text
+Application poison message
+        ↓
+DLQ / Quarantine
+
+Journal corruption
+        ↓
+Forensic isolation
+        ↓
+CRITICAL alert
+        ↓
+operator recovery
+```
+
+Isso evita que alguém implemente:
+
+```java
+catch (CorruptJournalException e) {
+    dlq.publish(...)
+}
+```
+
+que seria justamente o comportamento que sua spec quer evitar.
+
+---
+
+# 4. `PUBACK` eu deixaria mais preciso
+
+Você usa:
+
+```text
+JetStream PUBACK
+```
+
+Eu prefiro:
+
+```text
+JetStream publish acknowledgement satisfying the configured
+stream/storage durability policy
+```
+
+Porque "PUBACK" sozinho pode induzir alguém a pensar em um simples acknowledgement de protocolo.
+
+A sua própria spec já começou a corrigir isso:
+
+> `Ack_broker(DurabilityPolicy)`
+
+Então eu manteria essa formulação em todos os lugares.
+
+Por exemplo:
+
+```text
+202 ACCEPTED iff
+
+JetStreamPublishAck(DurabilityPolicy)
+OR
+DurableJournal.force(success)
+```
+
+Muito melhor.
+
+---
+
+# 5. `FileChannel.force(false)` — cuidado com a palavra "atomic"
+
+No Plan anterior apareceu:
+
+> atomic FileChannel.force
+
+Eu evitaria essa expressão.
+
+`force(false)` fornece uma **durability barrier** para os dados que foram escritos, mas não transforma todo o processo de append em uma operação transacional/atomicamente indivisível.
+
+Eu usaria:
+
+```text
+append records
+        ↓
+force(false)
+        ↓
+durability barrier
+        ↓
+complete promises
+```
+
+Isso é tecnicamente mais preciso.
+
+---
+
+# 6. Group commit está muito bom, mas falta definir o limite de espera
+
+Você tem:
+
+```text
+MAX_BATCH_RECORDS = 100
+OR
+elapsed >= 1ms
+```
+
+Excelente.
+
+Mas existe um problema de carga baixa:
+
+```text
+request
+↓
+journal queue
+↓
+waiting...
+```
+
+O primeiro request pode esperar até 1 ms.
+
+Isso está OK.
+
+Eu só adicionaria:
+
+```text
+MAX_GROUP_COMMIT_DELAY = 1ms
+```
+
+como uma garantia de **upper bound do batching delay**, deixando claro que:
+
+> o timer começa quando o primeiro item entra em um batch vazio.
+
+Isso facilita muito o teste.
+
+---
+
+# 7. Fair 80/20: boa ideia, mas eu faria uma pequena alteração
+
+A ideia:
+
+```text
+80% replay
+20% live
+```
+
+é boa para evitar starvation.
+
+Mas existe uma situação problemática:
+
+```text
+spool backlog = 10 million
+live traffic = 50k/s
+```
+
+Se o drainer consumir 80%:
+
+```text
+replay = 40k/s
+live = 10k/s
+```
+
+e o backlog continuar crescendo.
+
+Então eu não trataria 80/20 como uma constante absoluta.
+
+Melhor:
+
+```text
+replay-share = 0.80
+live-share   = 0.20
+```
+
+como **default scheduling policy**, mas com:
+
+```text
+live traffic MUST retain reserved capacity
+replay MUST NOT consume the entire available dispatch capacity
+```
+
+E possivelmente:
+
+```text
+edge.recovery.replay-share=0.80
+edge.recovery.live-reserved-share=0.20
+```
+
+Isso transforma a ideia em uma política operacional mais clara.
+
+---
+
+# 8. `I-EDGE-004` está excelente
+
+Esta versão:
+
+```text
+READY iff RecoveryScanCompleted AND RecoveryPipelineOperational
+```
+
+é melhor que:
+
+```text
+READY iff JournalBacklog == empty
+```
+
+Porque você **não quer necessariamente esperar o backlog inteiro ser drenado para colocar o node em serviço**.
+
+Imagine:
+
+```text
+restart
+↓
+100k records
+↓
+scan = completed
+↓
+drainer = operational
+↓
+READY
+↓
+new traffic accepted
+```
+
+Isso é muito mais HA-friendly.
+
+Eu manteria exatamente essa semântica.
+
+---
+
+# 9. O maior ponto arquitetural restante: Edge/Core
+
+Você colocou:
+
+```text
+br.com.wallet.edge
+```
+
+como subprojeto independente.
+
+Excelente.
+
+Mas depois:
+
+```text
+REQ-EDG-021
+NatsEdgeCommandPublisher
+br.com.wallet.infrastructure.messaging.publisher
+```
+
+e:
+
+```text
+REQ-EDG-022
+EdgeCommandConsumer
+br.com.wallet.infrastructure.messaging.consumer
+```
+
+Aqui eu faria uma separação conceitual muito clara.
+
+### Edge
+
+```text
+:edge
+ ├── HTTP/WebFlux
+ ├── security
+ ├── rate limiting
+ ├── bulkhead
+ ├── journal
+ ├── recovery
+ └── NATS publisher
+```
+
+### Core
+
+```text
+:wallet-core
+ ├── NATS consumer
+ ├── command deserialization
+ ├── FraudCheckHelper
+ ├── ledger use cases
+ └── operation status publication
+```
+
+Ou seja, **o Edge não deveria depender do Core**.
+
+O contrato deve ser:
+
+```text
+                 NATS
+                  │
+       ┌──────────┴──────────┐
+       ↓                     ↓
+    :edge                 :core
+ publisher              consumer
+```
+
+Isso é fundamental para a propriedade que você quer:
+
+> database outage must not starve ingress.
+
+Se `:edge` depender transitivamente do mesmo módulo Spring que inicializa:
+
+```text
+PostgreSQL
+Fraud
+Ledger
+Outbox
+Consumers
+```
+
+você perde parte da vantagem do isolamento.
+
+---
+
+# 10. Eu adicionaria uma invariant de isolamento
+
+Algo como:
+
+### `I-EDGE-007 — Core Failure Isolation`
+
+```text
+Failure, saturation, or unavailability of PostgreSQL, ledger
+connection pools, or core command consumers MUST NOT prevent the
+Edge process from performing durable acceptance through NATS or
+the local journal, subject only to Edge-local resource limits.
+```
+
+Isso formaliza justamente a motivação original da SPEC.
+
+O fluxo vira:
+
+```text
+                 ┌─────────────┐
+                 │   Client    │
+                 └──────┬──────┘
+                        ↓
+                ┌───────────────┐
+                │     EDGE      │
+                │               │
+                │ rate limiter  │
+                │ bulkhead      │
+                │ journal       │
+                │ NATS producer │
+                └───────┬───────┘
+                        │
+                     NATS
+                        │
+                ┌───────▼───────┐
+                │     CORE      │
+                │               │
+                │ fraud         │
+                │ ledger        │
+                │ PostgreSQL    │
+                └───────────────┘
+```
+
+**Core pode estar completamente doente e Edge ainda pode aceitar comandos**, enquanto houver capacidade de NATS ou journal.
+
+Esse é o verdadeiro ganho arquitetural do 000.9.
+
+---
+
+# 11. Um detalhe importante sobre `I-EDGE-003`
+
+Você escreveu:
+
+```text
+FinancialEffects(opId) <= 1
+```
+
+Eu gosto, mas tecnicamente isso não é uma propriedade que o Edge consegue garantir sozinho.
+
+Você já colocou:
+
+> Downstream ledger execution guarantees
+
+Portanto eu mudaria para:
+
+```text
+I-EDGE-003 — Effectively-Once Financial Effect
+
+The Edge MUST preserve operationId without modification across all
+transport, retry, journaling and recovery paths.
+
+The Core Ledger MUST enforce the invariant:
+
+∀ opId, FinancialEffects(opId) ≤ 1
+```
+
+Assim não existe risco de alguém achar que:
+
+```java
+EdgeCommandConsumer
+```
+
+é responsável pela idempotência financeira inteira.
+
+---
+
+# 12. Acceptance Criteria: ainda tem `[x]` demais
+
+Isso é uma questão de SDD importante.
+
+A spec está:
+
+```text
+Status: Ratified
+```
+
+mas:
+
+```text
+[x] Ingress endpoints...
+[x] SSE...
+[x] HTTP/3...
+[x] journal...
+[x] CRC...
+...
+[ ] Production publisher
+[ ] Consumer
+```
+
+Isso mistura **acceptance criteria da implementação** com **requirements da spec**.
+
+Se a SPEC ainda está sendo implementada, eu usaria:
+
+```text
+Status: Ratified
+Implementation Status: In Progress
+```
+
+e os `[x]` deveriam significar apenas coisas realmente verificadas no código.
+
+Ou melhor ainda, separar:
+
+### Specification Acceptance Criteria
+
+o que deverá ser verdadeiro.
+
+### Implementation Verification
+
+o que já foi demonstrado.
+
+Isso evita o problema de uma spec "Ratified" parecer já implementada.
+
+---
+
+# 13. Sobre o TidesDB
+
+Aqui eu manteria exatamente sua decisão atual:
+
+```text
+REQ-EDG-012 [COULD]:
+DurableSpilloverJournal SPI
+```
+
+e:
+
+```text
+SegmentedFileJournal
+```
+
+como baseline.
+
+**Eu não colocaria TidesDB no caminho principal do 000.9.**
+
+E isso é importante porque você perguntou anteriormente sobre substituir RocksDB por TidesDB.
+
+Neste desenho, a pergunta praticamente desaparece:
+
+```text
+                    DurableSpilloverJournal
+                            │
+              ┌─────────────┴─────────────┐
+              ↓                           ↓
+     SegmentedFileJournal          RocksDB/TidesDB
+          BASELINE                    OPTIONAL
+```
+
+Para um **append-only financial spillover journal**, um log segmentado sequencial tem uma propriedade extremamente interessante:
+
+```text
+write → sequential append → fsync → replay → reclaim segment
+```
+
+Você não precisa automaticamente das propriedades de uma LSM/KV database.
+
+Portanto eu faria **benchmark primeiro**, exatamente como a spec propõe.
+
+TidesDB pode ser uma excelente implementação futura se aparecer uma necessidade real de:
+
+* random lookup por `operationId`;
+* índice persistente;
+* concurrent readers;
+* replay parcial;
+* recuperação seletiva;
+* retenção/compaction mais sofisticada.
+
+Mas para:
+
+> "aceitei este comando e preciso sobreviver a crash"
+
+um journal segmentado é conceitualmente mais simples.
+
+---
+
+# Minha recomendação final
+
+Eu **não reabriria a arquitetura**. A SPEC-000.9 está boa o suficiente para congelar.
+
+Eu faria apenas estes **6 ajustes antes da TASKS-000.9**:
+
+1. 🔴 **Restringir 0-RTT para financial mutation requests**.
+2. 🔴 **Tornar SSE observável após reconnect/restart através de estado durável**.
+3. 🟠 Corrigir CRC corruption → **forensic isolation**, nunca DLQ.
+4. 🟠 Formalizar **Edge/Core failure isolation**.
+5. 🟠 Tornar `80/20` uma política de scheduling com **reserved live capacity**, não uma regra rígida.
+6. 🟡 Refinar `I-EDGE-003` para deixar claro que **Core Ledger**, e não Edge, garante `FinancialEffects ≤ 1`.
+
+Depois disso, eu considero a arquitetura bastante sólida para partir para as tasks.
+
+E **não adicionaria TidesDB à implementação do 000.9**: manteria `SegmentedFileJournal` como baseline e deixaria TidesDB/RocksDB atrás do SPI para um benchmark posterior. Isso inclusive deixa a evolução muito mais profissional: **primeiro provar o workload real, depois escolher a engine**, em vez de escolher a engine antes de conhecer o workload.

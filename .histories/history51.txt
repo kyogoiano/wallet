@@ -1,0 +1,243 @@
+Yes — I agree. For the architecture we're building, **HMAC-only is probably the better V1**.
+
+It gives us a much smaller security surface:
+
+```text
+Client
+  │
+  │ TLS 1.3
+  │
+  │ X-Key-Id
+  │ X-Timestamp
+  │ X-Nonce
+  │ X-Signature
+  ▼
+Edge
+  │
+  ├─ lookup key
+  ├─ verify HMAC
+  ├─ verify timestamp
+  ├─ verify replay/idempotency
+  ├─ derive tenant/principal
+  ├─ rate limit
+  │
+  ▼
+NATS JetStream
+  │
+  ▼
+Core
+  │
+  └─ verify tenant/account ownership
+```
+
+### Why I prefer this for our V1
+
+**1. No JWT/JWKS machinery**
+
+We eliminate:
+
+* JWT parsing
+* claims validation
+* JWKS cache
+* key discovery
+* JWKS refresh failures
+* identity-provider dependency
+* token lifecycle complexity
+
+For a financial server-to-server API, that's a lot of machinery we don't necessarily need.
+
+**2. HMAC is extremely cheap**
+
+The operation is essentially:
+
+```text
+canonical_request
+       ↓
+SHA-256
+       ↓
+HMAC-SHA256
+       ↓
+constant-time comparison
+```
+
+That's a very good match for the Edge requirement we already established: **bounded CPU, no blocking I/O, no PostgreSQL**.
+
+And with modern JDK cryptography, we should let the JDK implementation do the work rather than introducing another crypto library.
+
+**3. Tenant identity becomes simple**
+
+Instead of:
+
+```http
+X-Tenant-Id: tenant-a
+```
+
+we have:
+
+```http
+X-Key-Id: key_123
+X-Timestamp: 1789320000
+X-Nonce: ...
+X-Operation-Id: ...
+X-Signature: ...
+```
+
+The Edge resolves:
+
+```text
+key_123
+    ↓
+Credential
+    ├── tenantId
+    ├── principalId
+    ├── permissions
+    └── secret
+```
+
+So the client **cannot choose its tenant identity**.
+
+---
+
+## I'd simplify SPEC-000.9.3 accordingly
+
+Instead of:
+
+> Cryptographic Edge Security & Multi-Tenant Command Boundary
+
+I'd actually call it:
+
+# **SPEC-000.9.3 — HMAC-Signed Ingress & Multi-Tenant Security Boundary**
+
+And make one authentication mechanism normative:
+
+> **HMAC-SHA-256 is the V1 financial API authentication mechanism.**
+
+mTLS can remain an optional future deployment profile, but it doesn't need to exist in this spec.
+
+JWT can simply disappear from 000.9.3.
+
+---
+
+### One important refinement
+
+I wouldn't use only:
+
+```text
+timestamp + method + path + body
+```
+
+for the signature.
+
+I'd use a deterministic canonical request:
+
+```text
+HTTP method
+canonical path
+canonical query
+X-Key-Id
+X-Timestamp
+X-Nonce
+X-Operation-Id
+SHA-256(canonical payload)
+```
+
+Then:
+
+```text
+signature =
+HMAC-SHA256(
+    secret,
+    canonicalRequest
+)
+```
+
+This gives us protection against:
+
+* body modification
+* path modification
+* parameter modification
+* timestamp modification
+* operation ID modification
+* credential substitution
+
+while keeping the implementation very small.
+
+---
+
+## And JDK 27 should be the crypto boundary
+
+I would explicitly put an architectural constraint in the spec:
+
+> **Cryptographic primitives MUST use the JDK cryptographic APIs unless a future benchmark/security requirement demonstrates a measurable need for an alternative implementation.**
+
+That means no Guava crypto, Bouncy Castle, JWT library, etc. just to calculate an HMAC.
+
+Something along the lines of:
+
+```java
+Mac mac = Mac.getInstance("HmacSHA256");
+mac.init(secretKey);
+byte[] signature = mac.doFinal(canonicalRequestBytes);
+```
+
+with constant-time comparison for the received signature.
+
+The interesting part is therefore not the HMAC itself — it's designing the **canonicalization, key lookup, replay window and credential lifecycle** correctly.
+
+---
+
+### I would also avoid distributed replay state initially
+
+This is another place where we can keep it fast.
+
+We already have:
+
+```text
+operationId
+```
+
+as the financial idempotency key.
+
+So:
+
+```text
+HMAC
+ +
+timestamp window
+ +
+operationId
+ +
+existing idempotency
+```
+
+is a very powerful combination.
+
+We don't need to immediately create:
+
+```text
+Dragonfly SET nonce:{tenant}:{nonce}
+```
+
+for every request unless the threat model specifically requires independent nonce replay detection.
+
+That keeps the cryptographic verification path:
+
+```text
+O(1)
+        ↓
+local credential lookup
+        ↓
+HMAC
+        ↓
+timestamp
+        ↓
+existing operationId machinery
+```
+
+rather than turning authentication into another distributed-state dependency.
+
+---
+
+**So yes: I would ratify HMAC-only for 000.9.3.** It is much more aligned with the architecture's philosophy so far: **few moving parts, extremely fast hot path, no unnecessary infrastructure, and strong security boundaries.**
+
+The next step I'd take is to rewrite the scratch into the actual **≤250-line SPEC-000.9.3**, with HMAC as the sole V1 authentication mechanism and JDK 27 as the cryptographic implementation baseline.

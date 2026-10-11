@@ -1,0 +1,374 @@
+Yes. After Rev.1, I think **Spring Modulith is a very good addition**, but I would use it for **architectural isolation**, not as another runtime/security mechanism.
+
+The revised spec is already much cleaner: it now explicitly separates Edge encryption, Core decryption, AAD binding, GCM IVs, protocol nonces, and the pre-transaction cryptographic gate.
+
+### Where I'd put Modulith
+
+I would introduce a dedicated **`security` Modulith application/module boundary**, rather than scattering crypto classes through `edge`, `core`, and `ledger`.
+
+Conceptually:
+
+```text
+:edge
+ ├── ingress
+ ├── hmac
+ ├── replay
+ ├── envelope
+ └── journal
+          │
+          ▼
+   ┌──────────────────────┐
+   │ Security Modulith     │
+   │                       │
+   │ crypto                │
+   │ envelope              │
+   │ keymanagement         │
+   │ nonce                  │
+   │ telemetry              │
+   │ failure                │
+   └──────────────────────┘
+          │
+          ▼
+        :core
+          │
+          ▼
+       :ledger
+```
+
+But there's an important distinction:
+
+### Don't make `security` a giant shared utility module
+
+I'd define **explicit Modulith application components**:
+
+```text
+br.com.wallet.security
+├── envelope
+│   ├── CryptoEnvelope
+│   ├── EnvelopeEncryptor
+│   ├── EnvelopeDecryptor
+│   └── EnvelopeCodec
+│
+├── keymanagement
+│   ├── KeyManagementClient
+│   ├── DataEncryptionKey
+│   └── KeyId
+│
+├── replay
+│   ├── NonceTracker
+│   └── ReplayKey
+│
+├── telemetry
+│   ├── SensitiveFieldPolicy
+│   └── TelemetrySanitizer
+│
+└── failure
+    └── CryptographicFailure...
+```
+
+Then expose **small APIs** from each package.
+
+For example:
+
+```java
+package br.com.wallet.security.envelope;
+
+public interface EnvelopeEncryptor {
+
+    CryptoEnvelope encrypt(
+        TenantId tenantId,
+        OperationId operationId,
+        FinancialPayload payload
+    );
+}
+```
+
+and:
+
+```java
+package br.com.wallet.security.envelope;
+
+public interface EnvelopeDecryptor {
+
+    FinancialPayload decrypt(CryptoEnvelope envelope);
+}
+```
+
+Core should not know about:
+
+```text
+AES/GCM/NoPadding
+Cipher
+SecretKey
+GCMParameterSpec
+KMS SDK
+Dragonfly
+```
+
+It should only know:
+
+```text
+CryptoEnvelope
+EnvelopeDecryptor
+CryptographicIntegrityException
+```
+
+That is exactly the kind of boundary Modulith is useful for.
+
+---
+
+## Even more important: separate `security` from `ledger`
+
+The current spec lists:
+
+> `:edge`, `:core`, and Root Transactional Ledger `:ledger`
+
+I would **not allow the ledger to depend on the cryptographic protection module**.
+
+The dependency direction should be:
+
+```text
+                  ┌───────────────┐
+                  │   security    │
+                  └───────┬───────┘
+                          │
+             ┌────────────┴────────────┐
+             ▼                         ▼
+           edge                       core
+                                       │
+                                       ▼
+                                    ledger
+```
+
+Not:
+
+```text
+ledger ──► security
+```
+
+The ledger's cryptographic hash chain is a **different security concern** from payload confidentiality.
+
+This preserves:
+
+```text
+WALLET-ENV-V1
+       ≠
+WALLET-LEDGER-HASH-V1
+```
+
+which the revised spec already correctly establishes as separate cryptographic domains.
+
+---
+
+# I would also introduce a `FinancialSecurity` Modulith boundary
+
+Rather than calling the package simply `security`, I think the architectural concept should be:
+
+```text
+br.com.wallet.security
+```
+
+with Spring Modulith enforcing:
+
+```text
+security
+ ├── envelope
+ ├── keymanagement
+ ├── replay
+ ├── telemetry
+ └── failure
+```
+
+And then:
+
+```java
+@ApplicationModule(
+    displayName = "Financial Security"
+)
+package br.com.wallet.security;
+```
+
+with package-level boundaries.
+
+Then ArchUnit/Spring Modulith verification becomes part of the acceptance criteria:
+
+```text
+verifyApplicationModules()
+```
+
+and we can explicitly prohibit:
+
+```text
+ledger -> security.envelope
+ledger -> security.keymanagement
+ledger -> security.replay
+
+security -> ledger
+security -> fraud
+security -> wallet use cases
+```
+
+The security module becomes a **leaf infrastructure/domain capability**, not something that owns financial business logic.
+
+---
+
+## One subtle improvement: don't put nonce tracking entirely inside `security`
+
+There are two layers:
+
+```text
+security.replay
+    │
+    └── NonceTracker SPI
+             ▲
+             │
+    Dragonfly adapter
+```
+
+So:
+
+```java
+public interface NonceTracker {
+    NonceAdmission admit(ReplayKey key);
+}
+```
+
+and separately:
+
+```java
+public final class DragonflyNonceTracker
+        implements NonceTracker {
+    ...
+}
+```
+
+This keeps the **security contract** independent from Dragonfly.
+
+That aligns nicely with the architecture we've established where Dragonfly is non-authoritative hot state.
+
+---
+
+# KMS should get the same treatment
+
+Likewise:
+
+```text
+security.keymanagement
+       │
+       ├── KeyManagementClient     // domain-facing SPI
+       │
+       ├── InMemoryKms              // test/appliance
+       │
+       └── adapters
+             ├── AwsKms
+             ├── GcpKms
+             └── Vault
+```
+
+The spec already explicitly defines Edge `generateDataKey` and Core `decryptDataKey` permissions.
+
+That means we can enforce an even better architectural rule:
+
+```text
+EDGE
+  └── security.keymanagement.generate
+
+CORE
+  └── security.keymanagement.decrypt
+
+LEDGER
+  └── neither
+```
+
+This makes the KMS trust model visible in the code architecture instead of existing only as documentation.
+
+---
+
+# I would add a new section to SPEC-000.10
+
+Something along these lines:
+
+### 4.x — Financial Security Module Boundary
+
+**`I-SEC-013` — Financial Security Encapsulation**
+
+> Cryptographic envelope handling, key-management abstraction, replay protection, and telemetry security policies MUST be isolated behind the `br.com.wallet.security` Spring Modulith boundary.
+
+**`I-SEC-014` — Ledger Isolation**
+
+> `br.com.wallet.ledger` MUST NOT depend on payload encryption, KMS, replay, Dragonfly, or telemetry-security implementation packages.
+
+**`I-SEC-015` — Provider Isolation**
+
+> `:edge` and `:core` MUST depend only on provider-neutral security contracts. Concrete KMS/Dragonfly implementations MUST remain behind adapter boundaries.
+
+**`I-SEC-016` — Financial Transaction Isolation**
+
+> No security provider operation requiring external I/O may execute while a financial database transaction holds locks.
+
+Then add requirements:
+
+```text
+REQ-SEC-035 [MUST]
+Create Financial Security Spring Modulith.
+
+REQ-SEC-036 [MUST]
+Verify module boundaries with Spring Modulith verification.
+
+REQ-SEC-037 [MUST]
+Expose provider-neutral envelope/key/replay contracts.
+
+REQ-SEC-038 [MUST]
+Prevent ledger dependency on Financial Security implementation modules.
+
+REQ-SEC-039 [MUST]
+Prevent concrete KMS/Dragonfly dependencies from leaking into Edge/Core domain packages.
+```
+
+---
+
+## This also improves our SDD traceability
+
+The architecture becomes:
+
+```text
+SPEC-000.9.3
+    │
+    └── HMAC / tenant trust
+             │
+             ▼
+SPEC-000.10
+    │
+    ├── envelope encryption
+    ├── KMS
+    ├── replay
+    ├── telemetry
+    │
+    └── Financial Security Modulith
+             │
+             ├── ARCH-000.10
+             ├── PLAN-000.10
+             └── TASKS-000.10
+```
+
+And the testing becomes particularly strong:
+
+```text
+Security domain tests
+        +
+Envelope integration tests
+        +
+Spring Modulith architecture verification
+        +
+Edge/Core integration
+        +
+Ledger isolation tests
+```
+
+So **yes, I'd add Modulith to 000.10**, and I'd make it a **MUST architectural requirement**, not merely a suggested implementation detail.
+
+The key principle I'd preserve is:
+
+> **Financial Security protects financial data; it does not own financial state.**
+
+That gives us a very clean boundary between **security**, **fraud/risk**, **financial execution**, and the **authoritative ledger**.

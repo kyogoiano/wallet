@@ -1,0 +1,638 @@
+Yes — with the TASKS in front of us, the situation is clearer. **The task breakdown already incorporates most of the corrections I raised against the SPEC**, including `REQ-DF20-014/015/016/017`, semantic normalization, cache-before-transaction ordering, and the stronger tenant audit.
+
+I would **not rewrite the TASKS**. I would make a small set of corrections before implementation, because there are still a few places where the tasks either conflict with the intended semantics or leave traceability gaps.
+
+## 1. First: the good news
+
+The task structure is strong:
+
+```text
+Gate 1
+  ↓
+DF20-AUDIT / tenant refactor
+  ↓
+Gate 2 / dual-version oracle
+  ↓
+Gate 3 / benchmark
+  ↓
+architectural boundary
+  ↓
+promotion
+  ↓
+optional optimization
+```
+
+The `[MUST] → [SHOULD]/[COULD]` execution rule is also exactly what we want.
+
+The traceability is particularly useful because it makes `REQ → implementation → verification` explicit rather than relying on the developer to infer it.
+
+---
+
+# 2. Major issue: `REQ-DF20-017` appears from nowhere
+
+Your matrix contains:
+
+> `REQ-DF20-017`, `I-DF20-001`, `I-DF20-002`
+
+and `TASK-DF20-4.1` implements it.
+
+But in the SPEC you supplied, the requirements jump from:
+
+```text
+REQ-DF20-013
+```
+
+to the existing `014/015/016` referenced by the TASKS, while the supplied SPEC itself only explicitly defines through `REQ-DF20-013` in the visible requirements section.
+
+So **REQ-DF20-017 needs to exist in the SPEC before the TASKS claim traceability to it**.
+
+This is exactly the kind of SDD traceability issue we want to catch.
+
+### Recommendation
+
+Either:
+
+```text
+REQ-DF20-017 [MUST]
+Gate 3 performance benchmark and non-regression verification...
+```
+
+in SPEC,
+
+or change the task/matrix to map directly to:
+
+```text
+I-DF20-001
+I-DF20-002
+Gate 3
+```
+
+I prefer adding `REQ-DF20-017`, because the benchmark is important enough to deserve a formal requirement.
+
+---
+
+# 3. `TASK-DF20-2.2` still has a semantic problem
+
+You correctly fixed the dangerous wording from the previous version:
+
+> “without falsely claiming transactional atomicity”
+
+That's good.
+
+But the task now says:
+
+> Batch `HSET` and `EXPIRE` via pipelining to reduce round-trips from 2 to 1.
+
+The problem is not that this is false; the problem is that **we haven't established that the operation actually requires HSET + EXPIRE as two independent commands**.
+
+If the intended invariant is:
+
+```text
+HSET
++
+TTL
+```
+
+with the guarantee:
+
+```text
+the profile must never exist without its intended TTL
+```
+
+then pipeline is insufficient.
+
+So TASK 2.2 should explicitly state:
+
+```text
+Determine whether HSET + EXPIRE requires atomicity.
+
+If atomicity is required:
+    use a single atomic primitive / Lua / transaction.
+
+If atomicity is not required:
+    pipeline is permitted as a latency optimization.
+```
+
+That prevents the implementation from mechanically applying pipeline just because the task says so.
+
+---
+
+# 4. `TASK-DF20-1.1`: I would remove `chmod 777`
+
+This is the biggest security concern remaining in the TASKS.
+
+You currently have:
+
+> Preserve entrypoint script configuring permissions for `/var/run/redis/redis.sock` (`chmod 777`).
+
+That is too specific for a task unless `777` is itself a formally required part of the architecture.
+
+The SPEC only requires UDS transport; it doesn't establish that every local user/process must have unrestricted socket access.
+
+I'd change the task to:
+
+```text
+Configure UDS ownership and permissions so that the authorized
+Wallet/Dragonfly client process can access the socket.
+
+Do not broaden permissions beyond the appliance threat model.
+```
+
+Then the exact mode can be determined from the existing container architecture.
+
+If the current implementation genuinely requires `777`, document **why** and test it. Don't make `777` an accidental permanent security contract.
+
+---
+
+# 5. `TASK-DF20-1.3`: cancellation wording is too strong
+
+This line:
+
+> “with in-flight cancellation to prevent thread leakage”
+
+is potentially implementation-specific.
+
+A timeout does not automatically imply that an underlying network operation has been physically cancelled.
+
+What we actually care about is:
+
+```text
+request waits <= 20ms
++
+no unbounded in-flight commands
++
+no leaked tasks
++
+no DB transaction thread blocking
+```
+
+So I'd rewrite the acceptance criteria to behavioral semantics:
+
+```text
+Emergency timeout MUST bound caller-visible waiting to <=20ms.
+
+After timeout, the implementation MUST NOT create unbounded
+in-flight fallback work or thread/task accumulation.
+
+The test MUST demonstrate zero thread/task leakage under repeated
+timeout conditions.
+```
+
+That gives the implementation freedom to use Lettuce/Netty correctly rather than forcing a possibly incorrect cancellation mechanism.
+
+---
+
+# 6. `TASK-DF20-2.3`: replay key is not really `I-DF20-004`
+
+You have:
+
+```text
+fraud:op:{operationId}
+```
+
+and:
+
+> Verify replay key `fraud:op:{operationId}` is globally unique UUID/ULID (`I-DF20-004`).
+
+But `I-DF20-004` is specifically about **tenant key namespacing**.
+
+Global uniqueness of `operationId` is a different invariant.
+
+I'd separate it:
+
+```text
+I-DF20-004
+    tenant-scoped state contains tenantId
+
+I-SEC-006 / operation identity contract
+    operationId is globally unique
+```
+
+Or introduce:
+
+```text
+I-DF20-007
+Global replay keys MUST use globally unique operationId values.
+```
+
+Don't overload `I-DF20-004`.
+
+---
+
+# 7. `TASK-DF20-3.1` is good — but TTL normalization needs care
+
+This is a good addition:
+
+> `DragonflyOutputNormalizer`
+
+because exact byte-level equality is inappropriate for some results.
+
+But:
+
+> “normalizing ... residual millisecond TTL drift”
+
+could accidentally hide a real behavioral difference.
+
+For example:
+
+```text
+DF1.40 = TTL 998ms
+DF2.0  = TTL 920ms
+```
+
+We don't want the normalizer to simply erase the difference.
+
+Instead define a tolerance:
+
+```text
+TTL difference <= declared clock/measurement tolerance
+```
+
+and fail outside it.
+
+So:
+
+```text
+normalize TTL
+→ compare within explicit tolerance
+```
+
+rather than:
+
+```text
+normalize TTL
+→ ignore differences
+```
+
+This is important for proving actual expiration semantics.
+
+---
+
+# 8. `TASK-DF20-3.2`: excellent test boundaries
+
+This part is exactly what I wanted to see:
+
+```text
+t - W        excluded
+t - W + ε    included
+t            included
+t + ε        excluded
+```
+
+That directly operationalizes the mathematical invariant in the SPEC.
+
+And separating:
+
+```text
+Count
+Amount
+```
+
+is also the right direction.
+
+One small improvement: explicitly test the **zero-event window**:
+
+```text
+no transactions in W
+→ count = 0
+→ amount = 0
+```
+
+and:
+
+```text
+only expired transactions
+→ count = 0
+→ amount = 0
+```
+
+That catches stale sorted-set members and `ZREMRANGEBYSCORE` errors.
+
+---
+
+# 9. `TASK-DF20-3.3`: this is one of the strongest tasks
+
+This is now very aligned with the architecture:
+
+```text
+cache
+  ↓
+fraud evaluation
+  ↓
+DB transaction
+```
+
+rather than:
+
+```text
+DB transaction
+  ↓
+cache
+```
+
+And you're explicitly testing:
+
+* ordering;
+* cache miss;
+* eviction;
+* partition;
+* timeout;
+* Netty leakage;
+* DB-thread blocking.
+
+That's exactly the failure domain we care about.
+
+One thing I'd add:
+
+### Repeat the timeout test
+
+Not just:
+
+```text
+1 partition
+→ 1 timeout
+```
+
+but:
+
+```text
+N repeated timeouts
+→ bounded resources
+→ no accumulation
+```
+
+Otherwise `ThreadLeak(Fallback)=0` isn't really demonstrated.
+
+---
+
+# 10. `TASK-DF20-4.1` needs the biggest benchmark correction
+
+Currently:
+
+```text
+10,000 mixed operations
+16 virtual threads
+```
+
+is a useful **test workload**, but not enough by itself to establish a statistically meaningful performance comparison.
+
+And:
+
+```text
+P99(DF2.0) <= P99(DF1.40)
+```
+
+repeats the overly strict invariant issue from the SPEC.
+
+I'd change the benchmark acceptance to:
+
+```text
+Run multiple warm-up + measurement iterations.
+
+Compare DF1.40 and DF2.0 under identical workload vectors.
+
+Report:
+- P50
+- P95
+- P99
+- throughput
+- memory/RSS
+- error rate
+
+Determine regression using a declared statistical/acceptance threshold.
+
+Record the >=30% throughput and >=30% memory reduction
+as optimization targets, not correctness requirements.
+```
+
+The task should **measure**, not manufacture a pass/fail from one 10k sample.
+
+---
+
+# 11. Benchmark workload needs deterministic vectors
+
+For a dual-version comparison, I'd make the workload reproducible:
+
+```text
+seed
++
+fixed operation sequence
++
+same key cardinality
++
+same TTL distribution
++
+same tenant distribution
+```
+
+Otherwise:
+
+```text
+DF1.40 receives workload A
+DF2.0 receives workload B
+```
+
+and we're comparing noise.
+
+For example:
+
+```text
+10k operations
+100k active keys
+70/30 read/write
+N tenants
+fixed transaction timestamps
+fixed amounts
+fixed TTLs
+fixed random seed
+```
+
+Then both versions receive the same logical workload.
+
+---
+
+# 12. `TASK-DF20-5.1` has one subtle ArchUnit problem
+
+You wrote:
+
+> asserting no class in `br.com.wallet.ledger` or `TransferFundsUseCase` invokes Redis/Dragonfly directly inside an active database transaction.
+
+Architecture tests normally cannot easily prove **runtime transaction state**.
+
+ArchUnit can prove:
+
+```text
+ledger package
+    MUST NOT depend on Redis infrastructure
+```
+
+But:
+
+```text
+method executes while @Transactional is active
+```
+
+is a runtime property.
+
+So split it:
+
+### Architecture test
+
+```text
+ledger
+  → no dependency on Dragonfly client/store
+```
+
+### Integration test
+
+```text
+begin transaction
+instrument Dragonfly
+assert zero calls
+```
+
+That makes the verification honest.
+
+---
+
+# 13. `TASK-DF20-5.2` needs Gate evidence, not just boolean tests
+
+This:
+
+```text
+Gate1 = PASS
+AND Gate2 = PASS
+AND Gate3 = PASS
+```
+
+is fine as the final promotion rule.
+
+But the implementation should produce evidence:
+
+```text
+Gate 1
+  compatibility report
+
+Gate 2
+  oracle report
+
+Gate 3
+  benchmark report
+
+Promotion
+  derived from the three artifacts
+```
+
+Otherwise `Gate1=true` can become an arbitrary manually maintained flag.
+
+Given our SDD discipline, I'd make:
+
+```text
+GatePromotionReport
+```
+
+or equivalent generated test/report artifact.
+
+---
+
+# 14. The Traceability Matrix has one important inconsistency
+
+This row:
+
+```text
+REQ-DF20-005, I-DF20-006
+```
+
+is suspicious because `I-DF20-006` wasn't in the SPEC you supplied; it was introduced by the later task evolution.
+
+Similarly:
+
+```text
+REQ-DF20-014
+REQ-DF20-015
+REQ-DF20-016
+REQ-DF20-017
+```
+
+are being consumed by TASKS.
+
+That means the TASKS are currently **ahead of the SPEC revision**.
+
+That's not necessarily bad — actually it shows the design evolved — but under our SDD rules we should not silently let TASKS become the source of truth.
+
+### Correct sequence
+
+```text
+SPEC Rev.1
+    ↓
+PLAN Rev.1
+    ↓
+TASKS Rev.1
+```
+
+So before implementation I'd reconcile those IDs.
+
+---
+
+# 15. What I would change — and what I would NOT
+
+### MUST fix before implementation
+
+| Item                       | Action                                           |
+| -------------------------- | ------------------------------------------------ |
+| `REQ-DF20-017`             | Add to SPEC or remove from TASKS                 |
+| `REQ/I-DF20-014..017`      | Reconcile SPEC ↔ TASKS                           |
+| `chmod 777`                | Remove as hard requirement                       |
+| pipeline vs atomicity      | Make semantic decision explicit                  |
+| replay key uniqueness      | Give it its own invariant/requirement            |
+| TTL normalization          | Define tolerance                                 |
+| benchmark                  | Warm-up + repeated measurements + fixed workload |
+| ArchUnit transaction claim | Split static vs runtime verification             |
+| Gate promotion             | Generate evidence/report                         |
+| cache timeout              | Test repeated timeout/resource boundedness       |
+
+### Should improve
+
+```text
+zero-event sliding-window test
+expired-event test
+deterministic benchmark seed
+explicit memory measurement methodology
+```
+
+### Don't touch
+
+These are good:
+
+```text
+DragonflyOutputNormalizer
+dual-version oracle
+tenant-alpha / tenant-beta isolation test
+cache-before-transaction test
+Count + Amount boundary tests
+MUST before SHOULD/COULD
+Gate 1 → Gate 2 → Gate 3 execution
+```
+
+---
+
+## Bottom line
+
+**TASKS-000.9.4 is substantially better than the raw SPEC and already incorporates most of the architectural corrections.** I would keep the overall task decomposition.
+
+The one thing I would **not** do is start implementing it exactly as written yet. The remaining work is mostly **contract reconciliation**, not redesign:
+
+```text
+SPEC
+  └─ add/reconcile 014–017
+          ↓
+PLAN
+  └─ reconcile pipeline/atomicity + benchmark semantics
+          ↓
+TASKS
+  └─ minor corrections above
+          ↓
+IMPLEMENTATION
+```
+
+Once those IDs and the few semantic points are reconciled, **this is a good implementation-ready TASKS structure**.

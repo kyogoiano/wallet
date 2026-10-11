@@ -1,0 +1,432 @@
+Yes — and I think **splitting SPEC-004 is the better architecture**, especially now that we're explicitly bringing Spring AI + MCP Elicitation + Streamable HTTP into the design.
+
+And since you're currently on **Spring Boot 4.2.0-M2**, I would make the Spring AI compatibility decision part of the specification/plan rather than pretending we already have a GA compatibility baseline.
+
+### I would split Phase 4 like this
+
+```text
+Phase 4 — AI Financial Copilot
+
+SPEC-004
+AI Financial Copilot & Proposal Domain
+        │
+        │ copilot::api
+        ▼
+SPEC-004.1
+MCP Gateway & Human Interaction
+        │
+        ├── Spring AI MCP
+        ├── Streamable HTTP
+        ├── MCP tools
+        ├── Elicitation
+        └── AI/agent boundary
+```
+
+That gives us a very clean separation:
+
+---
+
+# SPEC-004 — AI Financial Copilot & Proposal Engine
+
+**Bounded context:** `br.com.wallet.copilot`
+
+This should own the **financially meaningful domain capability**, independent of MCP.
+
+### Owns
+
+* `FinancialProposal`
+* proposal lifecycle
+* proposal persistence
+* proposal TTL
+* proposal idempotency
+* execution identity / `operationId`
+* human authorization semantics
+* precondition validation
+* proposal → domain UseCase bridge
+* audit events
+* tenant isolation
+* deterministic financial/configuration mutation execution
+
+### Does NOT own
+
+* MCP
+* Spring AI
+* LLM
+* Streamable HTTP
+* elicitation protocol
+* MCP JSON schemas
+
+The core conceptual flow becomes:
+
+```text
+AI / MCP / REST / future UI
+             │
+             ▼
+       copilot::api
+             │
+             ▼
+    FinancialProposal
+             │
+       Human approval
+             │
+             ▼
+   Domain-specific UseCase
+```
+
+This makes `FinancialProposal` a **first-class domain primitive**, which is exactly consistent with the earlier history you mentioned.
+
+---
+
+# SPEC-004.1 — MCP Gateway & Human-in-the-Loop Interaction
+
+This becomes the **adapter/integration spec**.
+
+Potential module/package:
+
+```text
+br.com.wallet.copilot.internal.mcp
+```
+
+or, if we decide the MCP gateway deserves an actual independent module:
+
+```text
+br.com.wallet.copilot.mcp
+```
+
+I'd initially keep it inside Copilot rather than creating another Modulith module unless the implementation proves that separation necessary.
+
+### Owns
+
+**Spring AI**
+
+* MCP Server
+* MCP tool definitions
+* MCP client compatibility where necessary
+* annotations
+* MCP lifecycle
+
+**Transport**
+
+* Streamable HTTP
+* WebFlux/reactive handling
+* SSE streaming where protocol semantics require it
+
+**Human interaction**
+
+* MCP Elicitation
+* form elicitation
+* URL elicitation where applicable
+* multi-round-trip interaction
+
+**Tools**
+
+Read:
+
+```text
+wallet_get_balance
+wallet_get_cashflow_projections
+wallet_get_active_subscriptions
+wallet_simulate_goal_strategy
+```
+
+Mutation:
+
+```text
+copilot_propose_savings_rule
+copilot_propose_goal_adjustment
+copilot_propose_transfer
+```
+
+But these become **thin adapters** to `copilot::api`.
+
+---
+
+# The boundary becomes very clean
+
+```text
+                 ┌─────────────────────────┐
+                 │       AI Agent          │
+                 └────────────┬────────────┘
+                              │
+                       MCP Streamable HTTP
+                              │
+                 ┌────────────▼────────────┐
+                 │       SPEC-004.1        │
+                 │      MCP Gateway        │
+                 │                         │
+                 │ Spring AI               │
+                 │ MCP Tools               │
+                 │ Elicitation             │
+                 │ Streamable HTTP         │
+                 └────────────┬────────────┘
+                              │
+                         copilot::api
+                              │
+                 ┌────────────▼────────────┐
+                 │        SPEC-004         │
+                 │ Financial Copilot       │
+                 │                         │
+                 │ FinancialProposal       │
+                 │ Lifecycle               │
+                 │ Authorization           │
+                 │ Idempotency             │
+                 │ Execution Bridge        │
+                 └────────────┬────────────┘
+                              │
+                ┌─────────────┼─────────────┐
+                ▼             ▼             ▼
+             ledger        savings         goals
+```
+
+This is much better than putting everything into one 250-line spec.
+
+---
+
+# Spring Boot 4.2.0-M2 changes the compatibility question
+
+This is the other reason I like the split.
+
+We should explicitly establish:
+
+```text
+Spring Boot baseline:
+4.2.0-M2
+```
+
+and then verify the **compatible Spring AI milestone/version** rather than just adding "Spring AI" to the architecture.
+
+Because the MCP layer is exactly where framework compatibility is likely to move fastest.
+
+So I would put this in **SPEC-004.1**, not SPEC-004:
+
+> The implementation MUST use a Spring AI MCP release compatible with the project's ratified Spring Boot 4.2.0-M2 baseline. Exact Spring AI version is resolved during PLAN-004.1 and MUST be verified through compilation, MCP integration tests, and protocol compatibility tests.
+
+That prevents the architecture spec from becoming tied to a transient Spring AI artifact version.
+
+---
+
+# One other thing I'd change from my previous recommendation
+
+I would **not make MCP Elicitation `[MUST]` for every mutation**.
+
+Instead:
+
+### MUST
+
+The MCP Gateway **supports** elicitation where the MCP client advertises the capability.
+
+### MUST
+
+Financial mutations always go through:
+
+```text
+FinancialProposal
+→ human authorization
+→ deterministic domain execution
+```
+
+### SHOULD
+
+Use MCP Elicitation as the preferred interactive UX for compatible MCP clients.
+
+Why?
+
+Because **MCP capability negotiation matters**. Not every MCP client necessarily supports every elicitation mechanism.
+
+So:
+
+```text
+MCP client supports elicitation
+        │
+        ├── yes → interactive confirmation
+        │
+        └── no  → proposal created / alternate
+                  human approval channel
+```
+
+But **lack of elicitation support must never turn into automatic execution**.
+
+That's an important invariant.
+
+---
+
+# I would also split the requirements
+
+## SPEC-004
+
+Something like:
+
+```text
+REQ-COPILOT-001
+Modulith module and boundaries
+
+REQ-COPILOT-002
+FinancialProposal domain
+
+REQ-COPILOT-003
+Proposal persistence
+
+REQ-COPILOT-004
+Proposal lifecycle
+
+REQ-COPILOT-005
+Human authorization
+
+REQ-COPILOT-006
+Execution preconditions
+
+REQ-COPILOT-007
+Execution idempotency
+
+REQ-COPILOT-008
+Tenant isolation
+
+REQ-COPILOT-009
+Domain execution bridge
+
+REQ-COPILOT-010
+Audit/domain events
+```
+
+While:
+
+## SPEC-004.1
+
+gets:
+
+```text
+REQ-MCP-001
+Spring AI MCP integration
+
+REQ-MCP-002
+Streamable HTTP
+
+REQ-MCP-003
+Read-only tool catalog
+
+REQ-MCP-004
+Proposal tools
+
+REQ-MCP-005
+MCP elicitation
+
+REQ-MCP-006
+Elicitation capability negotiation
+
+REQ-MCP-007
+Multi-round-trip interaction
+
+REQ-MCP-008
+MCP authentication/context propagation
+
+REQ-MCP-009
+MCP rate limiting / abuse boundary
+
+REQ-MCP-010
+MCP adapter isolation
+```
+
+This also gives us much cleaner test suites.
+
+---
+
+# And there is a beautiful security boundary
+
+The most important invariant becomes:
+
+```text
+                    MCP
+                     │
+                     ▼
+              "I want to do X"
+                     │
+                     ▼
+             FinancialProposal
+                     │
+               human approval
+                     │
+                     ▼
+              domain authority
+                     │
+                     ▼
+                financial state
+```
+
+Never:
+
+```text
+MCP
+ ↓
+LLM
+ ↓
+ledger
+```
+
+And never:
+
+```text
+MCP elicitation accepted
+        ↓
+direct mutation
+```
+
+Instead:
+
+```text
+MCP elicitation accepted
+        ↓
+human authorization recorded
+        ↓
+proposal execution
+        ↓
+domain preconditions
+        ↓
+idempotent operationId
+        ↓
+financial mutation
+```
+
+That is the architecture I'd want to defend in a senior/staff-level design review.
+
+---
+
+## One more possible split
+
+I **would not split a third spec for Spring AI**.
+
+Keep:
+
+```text
+SPEC-004
+Financial Copilot domain
+
+SPEC-004.1
+MCP Gateway / Spring AI / Elicitation
+```
+
+Spring AI is an **implementation technology of the gateway**, not a business capability deserving its own bounded-context specification.
+
+And I would keep **LLM/SLM semantics in SPEC-000.8.1** where possible. SPEC-004.1 should care about *how an agent interacts with Wallet*, not how the model reasons.
+
+So the Phase 4 roadmap becomes nicely compositional:
+
+```text
+000.8.1  Typed Decision / Semantic Evaluation
+      │
+      └──────────────┐
+                     │
+003.1 Intelligence ─┤
+003.2 Cashflow ─────┤
+                     ▼
+               SPEC-004
+           Financial Copilot
+                     │
+                     ▼
+              SPEC-004.1
+           MCP Gateway / AI UX
+                     │
+                     ▼
+          External AI Agents
+```
+
+**I'd proceed with the split before writing either PLAN.** The next useful step is to rewrite the current SPEC-004 into **SPEC-004 + SPEC-004.1**, preserving the existing IDs where possible and introducing new IDs only where the new boundary genuinely requires them.

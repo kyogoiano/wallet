@@ -1,0 +1,46 @@
+Yes — **this is the final TASKS layer**, and it now has the right structure to execute the plan. The execution rule is also explicit: `[MUST]` first, with `[SHOULD]/[COULD]` locked until the mandatory criteria are green.
+
+I would freeze this as **TASKS-000.8.1**.
+
+### What is now properly covered
+
+* **Traceability:** requirements/invariants/triads map to concrete task IDs and verification tests.
+* **Native algebra:** `DecisionValue`, typed questions, and sealed outcomes are implemented before evaluator infrastructure.
+* **Generic safety:** `EvaluatedQuestion<T>` preserves `DecisionQuestion<T> → DecisionOutcome<T>`, including runtime witness validation.
+* **Grounding:** evidence gets canonical hashing rather than merely carrying textual provenance.
+* **Domain catalog:** questions are first-class and typed.
+* **Anti-coercion:** unavailable results cannot become `false`, `0`, or synthetic risk.
+* **Evaluator isolation:** timeout/failure handling is explicitly separated from the transactional path.
+* **Benchmark gates:** contract, grounding, correctness, calibration, and operational/deterministic behavior are executable tasks rather than merely architectural prose.
+* **Airgap:** the final task verifies both package dependency direction and the hot-path latency boundary.
+
+There is also an important improvement over the previous version: the unavailable test now explicitly checks **structural absence of score/confidence**, rather than relying on an `Optional.empty()` accessor.  That's the right interpretation of the architecture.
+
+### One thing I would *not* change now
+
+There are some things we could theoretically refine further — e.g. the exact catalog questions, benchmark dataset, or the eventual `OllamaDecisionEvaluator` API — but those are **implementation-level decisions** now.
+
+The SPEC → PLAN → TASKS chain is sufficiently closed:
+
+```text
+SPEC-000.8.1
+   │
+   │ architectural contract
+   ▼
+PLAN-000.8.1
+   │
+   │ implementation strategy
+   ▼
+TASKS-000.8.1
+   │
+   │ executable work + acceptance tests
+   ▼
+Implementation
+   │
+   ▼
+Verification
+```
+
+So I would **not reopen the architecture** at this point.
+
+**Next step is implementation, strictly in TDD order, starting with `TASK-TYPED-1.1`.**

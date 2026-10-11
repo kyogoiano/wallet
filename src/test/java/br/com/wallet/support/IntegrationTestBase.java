@@ -1,25 +1,23 @@
 package br.com.wallet.support;
 
-
+import br.com.wallet.integration.outbox.publisher.FailingEventPublisher;
+import br.com.wallet.ledger.api.event.EventPublisher;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Conditional;
+import org.springframework.context.annotation.Primary;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 import org.testcontainers.utility.DockerImageName;
-import tools.jackson.databind.ObjectMapper;
-
 
 @TestConfiguration(proxyBeanMethods = false)
 public class IntegrationTestBase {
 
-    @Bean
-    public ObjectMapper objectMapper() {
-        return new ObjectMapper();
-    }
 
-    private static final DockerImageName POSTGRES_FSYNC_OFF_IMAGE = DockerImageName.parse("postgres:18.3-alpine");
+    private static final DockerImageName POSTGRES_FSYNC_OFF_IMAGE = DockerImageName.parse("pgvector/pgvector:pg18")
+            .asCompatibleSubstituteFor("postgres");
 
     /**
      * Optimized postgres image
@@ -31,10 +29,9 @@ public class IntegrationTestBase {
      */
     @Bean
     @ServiceConnection
+    @Conditional(DockerAvailableCondition.class)
     public PostgreSQLContainer postgresContainer() {
         return new PostgreSQLContainer(POSTGRES_FSYNC_OFF_IMAGE)
-                //.withCommand("postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "full_page_writes=off")
-                //.withTmpFs(Map.of("/var/lib/postgresql/data", "rw"))
                 .withReuse(true)
                 .withDatabaseName("wallet")
                 .withUsername("test")
@@ -42,29 +39,64 @@ public class IntegrationTestBase {
                 .withInitScript("schema.sql");
     }
 
-    private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.12.6-alpine");
+    private static final DockerImageName NATS_IMAGE_NAME = DockerImageName.parse("nats:2.15.0-alpine");
+    public static final DockerImageName DRAGONFLY_IMAGE = DockerImageName.parse("docker.dragonflydb.io/dragonflydb/dragonfly:v2.0.0");
 
-    // Definimos como static para que ele inicie antes do Contexto do Spring
-    public static final GenericContainer<?> NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
-            .withExposedPorts(4222)
-            .withCommand("-js")
-            .waitingFor(Wait.forListeningPort());
-
-    private static final DockerImageName REDIS_IMAGE = DockerImageName.parse("redis:8.6-alpine");
-    public static final GenericContainer<?> REDIS = new GenericContainer<>(REDIS_IMAGE).withExposedPorts(6379);
-
+    private static final boolean DOCKER_AVAILABLE;
+    public static final GenericContainer<?> NATS_CONTAINER;
+    public static final GenericContainer<?> REDIS;
 
     static {
-        NATS_CONTAINER.start();
-        REDIS.start();
+        boolean available = false;
+        try {
+            available = org.testcontainers.DockerClientFactory.instance().isDockerAvailable();
+        } catch (Throwable t) {
+        }
+        DOCKER_AVAILABLE = available;
+
+        if (DOCKER_AVAILABLE) {
+            NATS_CONTAINER = new GenericContainer<>(NATS_IMAGE_NAME)
+                    .withExposedPorts(4222, 8222)
+                    .withCommand("-js", "-sd", "/tmp", "--auth", "dfji348934jdd0i24uhjd29834ijrr0345jo0r3j034n", "-m", "8222")
+                    .waitingFor(
+                            Wait.forHttp("/healthz")
+                                    .forPort(8222)
+                                    .forStatusCode(200)
+                    );
+            REDIS = new GenericContainer<>(DRAGONFLY_IMAGE)
+                    .withExposedPorts(6379)
+                    .withCommand("--logtostderr", "--proactor_threads=2")
+                    .waitingFor(Wait.forListeningPort());
+
+            NATS_CONTAINER.start();
+            REDIS.start();
+        } else {
+            NATS_CONTAINER = null;
+            REDIS = null;
+        }
+    }
+
+    public static boolean isDockerAvailable() {
+        return DOCKER_AVAILABLE;
+    }
+
+    public static String getNatsUrl() {
+        if (DOCKER_AVAILABLE && NATS_CONTAINER != null) {
+            return "nats://" + NATS_CONTAINER.getHost() + ":" + NATS_CONTAINER.getMappedPort(4222);
+        }
+        return "nats://localhost:4222";
+    }
+
+    public static GenericContainer<?> createDragonflyV2Container() {
+        return new GenericContainer<>(DRAGONFLY_IMAGE)
+                .withExposedPorts(6379)
+                .withCommand("--logtostderr", "--proactor_threads=2")
+                .waitingFor(Wait.forListeningPort());
     }
 
     @Bean
-    public GenericContainer<?> nats() {
-        return NATS_CONTAINER;
+    @Primary
+    public EventPublisher eventPublisher() {
+        return new FailingEventPublisher();
     }
-
-
-
-
 }

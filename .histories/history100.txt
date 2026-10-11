@@ -1,0 +1,717 @@
+Sim. Agora temos uma peça importante que não tínhamos na revisão anterior: o **ARCH-004 já está ratificado** e formaliza exatamente a solução que faltava para `EXECUTING`: **atomic claim + lease + recovery usando o mesmo `executionOperationId`**.
+
+Então eu revisaria o `PLAN-004` **contra o ARCH-004 como autoridade arquitetural**, e não mais apenas contra a SPEC.
+
+## Veredito geral
+
+O `PLAN-004` está **conceitualmente alinhado**, mas **não está 100% convergente com o ARCH-004**.
+
+Eu classificaria:
+
+> 🟡 **PLAN-004 — quase pronto, mas requer uma rodada de convergence fixes antes de TASKS-004.**
+
+E encontrei **4 bloqueadores reais** + alguns ajustes menores.
+
+---
+
+# 1. ARCH resolveu o problema do `EXECUTING` — mas o PLAN ainda não incorporou tudo
+
+O ARCH agora define:
+
+```text
+PROPOSED
+   │
+   │ atomic claim
+   ▼
+EXECUTING
+   │
+   │ downstream OK
+   ▼
+EXECUTED
+```
+
+com:
+
+```text
+execution_claimed_at
+execution_lease_until
+```
+
+e lease de 2 minutos.
+
+O `PLAN` já tem `EXECUTING` no DDL, mas **não tem ainda**:
+
+```sql
+execution_claimed_at
+execution_lease_until
+```
+
+Isso é um drift direto.
+
+### Portanto:
+
+**PLAN precisa incorporar:**
+
+```sql
+execution_claimed_at TIMESTAMP WITH TIME ZONE,
+execution_lease_until TIMESTAMP WITH TIME ZONE
+```
+
+E o índice/consulta de recovery precisa ser definido.
+
+---
+
+# 2. O maior problema: `I-AI-001` ficou matematicamente incompatível com o novo lifecycle
+
+O ARCH diz:
+
+```text
+Execute(p) iff
+HumanApprove(p.id)
+AND Status = PROPOSED
+AND now <= expiresAt
+```
+
+
+
+Mas isso não é mais verdade depois que introduzimos:
+
+```text
+PROPOSED
+   ↓ human approval + claim
+EXECUTING
+   ↓ crash
+EXECUTING
+   ↓ recovery
+EXECUTED
+```
+
+Porque a **recovery legítima** ocorre quando:
+
+```text
+status = EXECUTING
+```
+
+e não:
+
+```text
+status = PROPOSED
+```
+
+### Precisamos separar duas coisas:
+
+**Authorization invariant:**
+
+```text
+Execution MAY begin iff
+HumanApproval occurred
+AND proposal was valid at claim time
+AND proposal was atomically claimed.
+```
+
+Depois:
+
+```text
+EXECUTING
+```
+
+é uma consequência daquela autorização.
+
+E recovery:
+
+```text
+EXECUTING + expired lease
+        ↓
+same executionOperationId
+        ↓
+reconcile/retry
+```
+
+**não é uma nova autorização humana.**
+
+Isso é extremamente importante.
+
+Eu mudaria `I-AI-001` para algo conceitualmente como:
+
+```text
+I-AI-001 — Human Authorization Gate
+
+A financial execution MUST originate from an explicit
+human approval of the proposal.
+
+Once execution ownership is atomically claimed,
+subsequent retries/reconciliation MUST reuse the same
+authorization and immutable executionOperationId and
+MUST NOT require a new approval.
+```
+
+Esse é provavelmente o **fix mais importante** antes de TASKS.
+
+---
+
+# 3. `I-AI-010` precisa ser refinado
+
+O ARCH define:
+
+> infrastructure timeouts remain retryable under lease.
+
+E a tabela diz:
+
+> Proposal claim reverts to retryable state.
+
+Aqui existe uma sutileza.
+
+Com lease, **não precisamos necessariamente "reverter" `EXECUTING → PROPOSED`**.
+
+Na verdade, o ARCH define:
+
+```text
+EXECUTING
+    |
+    | lease expires
+    v
+recovery
+```
+
+
+
+Então eu prefiro:
+
+```text
+EXECUTING
+    |
+    | lease valid
+    |    → another approval = 409 / in progress
+    |
+    | lease expired
+    ↓
+reconciliation
+    |
+    +-- downstream already executed
+    |       ↓
+    |    EXECUTED
+    |
+    +-- not executed
+            ↓
+       re-dispatch same operationId
+```
+
+Ou seja:
+
+**`EXECUTING` é retryable por recovery, não necessariamente convertido novamente em `PROPOSED`.**
+
+Isso é mais seguro porque preserva o fato de que **a autorização já ocorreu**.
+
+O PLAN atual diz:
+
+> “Technical infrastructure failure → proposta reverte para PROPOSED”
+
+Eu mudaria isso.
+
+---
+
+# 4. `parameters_hash` está no ARCH, mas não no PLAN
+
+O ARCH explicitamente introduz:
+
+```text
+parameters_json
+parameters_hash (SHA-256)
+```
+
+e diz:
+
+> Snapshot immutability ... frozen with `parameters_hash`.
+
+O PLAN atual tem:
+
+```sql
+parameters_json JSONB NOT NULL
+```
+
+mas não tem:
+
+```sql
+parameters_hash
+```
+
+Isso precisa ser convergido.
+
+### DDL deveria conter algo como:
+
+```sql
+parameters_hash CHAR(64) NOT NULL
+```
+
+se o hash for armazenado como lowercase hexadecimal SHA-256.
+
+E o PLAN deve definir que:
+
+```text
+parameters_hash =
+SHA-256(canonical(parameters_json))
+```
+
+Aqui eu **não inventaria a canonicalização ainda** se ela não estiver definida em outra regra. Mas o algoritmo e a imutabilidade precisam estar alinhados ao ARCH.
+
+---
+
+# 5. Creation idempotency agora está excelente
+
+Aqui o ARCH confirmou exatamente a decisão que queríamos.
+
+```text
+(tenant_id, idempotency_key)
+```
+
+e:
+
+```text
+same hash
+    → return existing proposal
+
+different hash
+    → 409
+```
+
+
+
+Isso deve entrar no PLAN como regra formal, não apenas como detalhe de implementação.
+
+Eu colocaria:
+
+```text
+same tenant + same idempotencyKey + same parametersHash
+    → idempotent replay
+
+same tenant + same idempotencyKey + different parametersHash
+    → 409 IdempotencyConflict
+```
+
+Esse ponto está muito bom arquiteturalmente.
+
+---
+
+# 6. Tripla identidade: ARCH e PLAN estão quase alinhados
+
+O PLAN tem:
+
+```text
+proposalId
+executionOperationId
+approvalRequestId
+```
+
+
+
+O ARCH reforça o papel do `executionOperationId`.
+
+Eu só manteria nossa correção anterior:
+
+```text
+proposalId
+    = proposal identity
+
+executionOperationId
+    = financial execution identity
+
+approvalRequestId
+    = approval attempt identity
+
+traceId
+    = observability identity
+```
+
+**Não usaria `TraceContext.operationId` como definição de `approvalRequestId`.**
+
+O ARCH não exige essa equivalência, então podemos corrigir somente no PLAN.
+
+---
+
+# 7. O ARCH resolve uma dúvida importante: recovery não é novo approval
+
+Isso merece entrar explicitamente no PLAN.
+
+O ARCH diz:
+
+> recovery workers consult downstream with immutable `executionOperationId`; if already completed, mark `EXECUTED`; otherwise safely re-execute.
+
+Então temos:
+
+```text
+Human
+  │
+  │ approve
+  ▼
+PROPOSED
+  │
+  │ claim
+  ▼
+EXECUTING
+  │
+  ├── success ──────→ EXECUTED
+  │
+  └── crash
+         │
+         ▼
+    lease expires
+         │
+         ▼
+     recovery
+         │
+         ├── already done → EXECUTED
+         │
+         └── not done → retry same operationId
+```
+
+Esse é agora o **canonical execution lifecycle**.
+
+Eu não mudaria isso.
+
+---
+
+# 8. Downstream ownership está muito bem definido
+
+Aqui o ARCH ficou excelente.
+
+Ele diz explicitamente:
+
+> Copilot enforces coarse eligibility, but double-entry accounting, balance consistency and row locking are owned strictly by downstream domains.
+
+E isso casa com:
+
+```text
+I-AI-009
+Financial Ownership
+```
+
+
+
+Então o PLAN deve preservar:
+
+```text
+Copilot
+  = orchestration / proposal lifecycle
+
+Ledger
+  = financial truth
+
+Savings
+  = savings business rules
+
+Goals
+  = goals business rules
+```
+
+Isso impede que o Copilot vire um segundo ledger disfarçado.
+
+---
+
+# 9. O boundary `core` genérico continua sendo um problema
+
+O PLAN ainda diz:
+
+```text
+allowedDependencies = {
+    "ledger::api",
+    "savings::api",
+    "goals::api",
+    "core"
+}
+```
+
+
+
+Mas o ARCH mostra que as dependências reais são:
+
+```text
+copilot
+   ↓
+ledger.api
+savings.api
+goals.api
+```
+
+
+
+Portanto eu removeria:
+
+```text
+"core"
+```
+
+a menos que exista uma necessidade concreta já estabelecida.
+
+Isso é importante para manter a regra:
+
+> **Módulos conversam através de capabilities públicas, não através do Core inteiro.**
+
+---
+
+# 10. O ARCH introduziu `parameters_hash`, mas eu não transformaria isso em "tamper detection" forte
+
+O ARCH chama isso de:
+
+> Snapshot immutability ... SHA-256.
+
+Eu faria uma distinção:
+
+```text
+parameters_hash
+    = integrity / consistency verification
+```
+
+não:
+
+```text
+cryptographic authenticity
+```
+
+Porque SHA-256 sem uma âncora confiável não impede alguém com acesso ao DB de alterar:
+
+```text
+parameters_json
+parameters_hash
+```
+
+simultaneamente.
+
+Isso não é necessariamente um problema — o banco é trusted infrastructure.
+
+Então no PLAN eu chamaria de:
+
+> **snapshot integrity hash**
+
+e não de mecanismo antifraude/anti-tampering.
+
+---
+
+# 11. O recovery worker precisa ser formalizado no PLAN
+
+O ARCH já introduziu:
+
+```text
+LeaseManager
+Atomic Claim & Stale Lease Reconciler
+```
+
+
+
+O PLAN só tem:
+
+```text
+ProposalService
+ProposalDao
+ProposalTtlSweeper
+```
+
+
+
+Precisamos adicionar algo como:
+
+```text
+ProposalExecutionRecovery
+```
+
+ou:
+
+```text
+ProposalLeaseReconciler
+```
+
+Não precisa ser necessariamente um componente separado — pode estar dentro do service — mas o PLAN precisa deixar claro:
+
+```text
+TTL sweeper ≠ execution recovery
+```
+
+São responsabilidades completamente diferentes:
+
+```text
+TTL Sweeper
+    PROPOSED + expired
+        ↓
+    EXPIRED
+
+Lease Reconciler
+    EXECUTING + stale lease
+        ↓
+    reconcile / retry / EXECUTED
+```
+
+---
+
+# 12. Isso também muda a matriz de testes
+
+Agora o PLAN precisa ter obrigatoriamente:
+
+### Teste A — crash before downstream
+
+```text
+PROPOSED
+→ EXECUTING
+→ simulated crash
+→ lease expires
+→ recovery
+→ downstream executes
+→ EXECUTED
+```
+
+### Teste B — crash after downstream
+
+```text
+PROPOSED
+→ EXECUTING
+→ downstream executes
+→ crash before proposal update
+→ recovery
+→ same operationId
+→ downstream reports already executed
+→ EXECUTED
+```
+
+### Teste C — stale lease cannot cause duplicate
+
+```text
+same executionOperationId
++
+100 recovery attempts
+        ↓
+1 financial mutation
+```
+
+Esse provavelmente será um dos testes mais importantes de toda a SPEC.
+
+---
+
+# 13. A matriz ARCH → PLAN → TASKS deveria ficar assim
+
+Eu faria a rastreabilidade central:
+
+| Arquitetura                        | PLAN               | Teste                  |
+| ---------------------------------- | ------------------ | ---------------------- |
+| `I-AI-001` Human approval          | Approval gate      | approval/security IT   |
+| `I-AI-004` tenant isolation        | tenant-scoped DAO  | cross-tenant 404       |
+| `I-AI-005` atomic lease            | conditional claim  | concurrent approval    |
+| `I-AI-006` operation idempotency   | stable operationId | duplicate execution    |
+| `I-AI-007` snapshot                | JSONB + hash       | mutation/hash test     |
+| `I-AI-008` creation idempotency    | unique constraint  | same/different payload |
+| `I-AI-009` ownership               | downstream APIs    | bridge contract        |
+| `I-AI-010` failure segregation     | lease recovery     | crash/retry            |
+| `I-MCP-001` adapter isolation      | 004.1              | Modulith architecture  |
+| `I-MCP-002` elicitation non-bypass | 004.1              | no-elicitation test    |
+
+Isso vai deixar o Stage 6 — **Analyze** — muito mais forte.
+
+---
+
+# 14. Um ponto que eu NÃO mudaria
+
+O ARCH coloca:
+
+```text
+Spring AI MCP Server
+Streamable HTTP / WebFlux
+```
+
+e:
+
+```text
+SPEC-004.1
+```
+
+fora do domínio.
+
+Isso está exatamente correto.
+
+O PLAN-004 não deve começar a absorver nada de:
+
+* MCP;
+* elicitation;
+* Spring AI;
+* Streamable HTTP;
+* JSON-RPC.
+
+Essa fronteira está muito boa.
+
+---
+
+# Minha decisão sobre o PLAN agora
+
+Eu faria a seguinte classificação:
+
+### 🟢 Fechado
+
+* proposal domain;
+* Modulith;
+* tenant isolation;
+* creation idempotency;
+* immutable snapshot;
+* `executionOperationId`;
+* atomic claim;
+* downstream ownership;
+* business vs technical failure;
+* synchronous V4 execution;
+* 404 cross-tenant.
+
+### 🟡 Corrigir antes de TASKS
+
+1. `EXECUTING` formalmente no state machine.
+2. `execution_claimed_at`.
+3. `execution_lease_until`.
+4. recovery/reconciliation component.
+5. corrigir `I-AI-001` para não exigir `PROPOSED` durante recovery.
+6. corrigir `I-AI-010` para **não depender de `EXECUTING → PROPOSED`**.
+7. adicionar `parameters_hash`.
+8. idempotency conflict por hash.
+9. remover `core` genérico do Modulith dependency.
+10. separar TTL sweeper de lease reconciler.
+11. corrigir `approvalRequestId ≠ trace operationId`.
+12. expandir traceability para as invariants do ARCH.
+
+### 🔴 Não vejo mais um bloqueador arquitetural fundamental
+
+Isso é importante: **o ARCH-004 resolveu o problema que me impedia de considerar o PLAN seguro anteriormente**.
+
+O modelo agora é coerente:
+
+```text
+                     AI / MCP
+                        │
+                        ▼
+                  CREATE PROPOSAL
+                        │
+                        ▼
+                    PROPOSED
+                        │
+                 Human Approval
+                        │
+                 Atomic Claim
+                        │
+                        ▼
+                    EXECUTING
+                        │
+              ┌─────────┴─────────┐
+              │                   │
+          downstream OK         crash
+              │                   │
+              ▼             lease expires
+          EXECUTED                │
+                                  ▼
+                            Reconciliation
+                                  │
+                     same executionOperationId
+                                  │
+                         ┌────────┴────────┐
+                         │                 │
+                    already done       not done
+                         │                 │
+                         ▼                 ▼
+                     EXECUTED        retry execution
+```
+
+E isso preserva a regra central:
+
+> **AI proposes → Human authorizes → Copilot claims execution → Domain executes → Recovery never creates a second financial operation.**
+
+O próximo passo, portanto, **não é ainda TASKS-004**. Eu faria primeiro uma **versão corrigida do PLAN-004**, incorporando o ARCH-004 e fechando esses 12 pontos. Depois disso, aí sim podemos fazer a revisão do `TASKS-004` contra **SPEC + ARCH + PLAN**, que é exatamente o que o Stage 6 do seu pipeline exige.

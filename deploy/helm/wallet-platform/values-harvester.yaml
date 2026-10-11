@@ -1,0 +1,42 @@
+# ==============================================================================
+# Plan C: SUSE Virtualization / Harvester HCI + Rancher + vCluster (REQ-TOP-006)
+# Bypasses 3x network storage replication latency with harv-lvm-local raw NVMe.
+# ==============================================================================
+
+global:
+  environment: onprem-appliance
+  infrastructure: harvester-hci
+
+edge:
+  replicaCount: 3
+  persistence:
+    enabled: true
+    storageClass: "harv-lvm-local"
+    accessMode: ReadWriteOnce
+    size: 20Gi
+    mountPath: /spool
+  resources:
+    limits:
+      cpu: "4000m"
+      memory: "4096Mi"
+    requests:
+      cpu: "1000m"
+      memory: "2048Mi"
+
+core:
+  replicaCount: 4
+  resources:
+    limits:
+      cpu: "8000m"
+      memory: "8192Mi"
+    requests:
+      cpu: "2000m"
+      memory: "4096Mi"
+
+networkPolicy:
+  enabled: true
+  provider: kube-ovn
+
+vcluster:
+  enabled: true
+  tenantIsolation: strict

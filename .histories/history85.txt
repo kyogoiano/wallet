@@ -1,0 +1,809 @@
+Sim. E comparando a **SPEC-003 atual** com o que já ratificamos em `SPEC-003.1`, `SPEC-000.8.1` e `SPEC-000.12`, eu diria que ela está **conceitualmente muito boa**, mas ainda tem alguns pontos importantes para corrigirmos antes de considerá-la uma macro-spec realmente estável.
+
+O principal: **a arquitetura híbrida está correta, mas a SPEC-003 ainda mistura arquitetura macro, contratos de implementação e responsabilidades que pertencem às slices 003.1/003.2.**
+
+### 1. O que está correto
+
+A separação em:
+
+> **Deterministic Pattern Engine → Typed Decision Algebra → Forecasting**
+
+é exatamente a direção que eu manteria.
+
+A 003.1 já estabelece o motor determinístico para detectar recorrência, cadência, ciclos, variância e price spike. O arquivo da 003.1, por exemplo, mantém explicitamente `REQ-SUB-010 [WON'T]` para mutação do ledger e `REQ-SUB-011 [WON'T]` para bloqueio automático de pagamentos.
+
+E a `SPEC-000.8.1` dá uma base muito boa para o segundo estágio: `DecisionQuestion<T>` → `DecisionOutcome<T>`, `DecisionUnavailable` sem confiança artificial, composição determinística e airgap do hot path.
+
+Então eu **não mudaria o conceito central**.
+
+---
+
+# 2. O maior problema: "Pillar 2" está forte demais na SPEC-003
+
+Hoje temos:
+
+> `SPEC-000.8.1 & SPEC-000.8 SHOULD`
+
+mas o texto de Intent diz:
+
+> "Incorpora Native Typed Decision Algebra ... e Micro-ML ONNX ..."
+
+E a arquitetura mostra:
+
+```text
+SubscriptionCandidate
+       │
+       ├── deterministic
+       │
+       └── ONNX + Ollama
+                │
+          DecisionComposer
+```
+
+Isso pode ser interpretado pelo Antigravity como:
+
+**003 exige ONNX + Ollama + Typed Decision Algebra.**
+
+Eu não acho que devemos fazer isso.
+
+A `SPEC-000.8.1` foi deliberadamente desenhada como **provider-neutral**, e os próprios requisitos dizem que falha/timeout deve resultar em `DecisionUnavailable`, sem bloquear o restante do sistema.
+
+Eu colocaria explicitamente:
+
+```text
+Pillar 1 = MUST
+Pillar 2 = SHOULD / optional enrichment
+Pillar 3 = owned by SPEC-003.2
+```
+
+E mais importante:
+
+### `Decision Algebra` é obrigatório como contrato quando semantic enrichment existir.
+
+Mas:
+
+### `ONNX` e `Ollama` não são obrigatórios para que 003 seja "green".
+
+Isso evita um problema futuro: se Ollama estiver indisponível, **SPEC-003 não fica vermelha**.
+
+---
+
+# 3. Precisamos separar "detecção" de "classificação"
+
+A frase atual:
+
+> Pillar 1 answers "Is there a recurrence?"
+>
+> Pillar 2 answers "What does this recurrence represent?"
+
+está excelente.
+
+Eu manteria praticamente literalmente.
+
+Isso cria uma fronteira arquitetural muito limpa:
+
+```text
+Transaction history
+       │
+       ▼
+┌────────────────────────┐
+│ Deterministic Engine   │
+│                        │
+│ Is there recurrence?   │
+└───────────┬────────────┘
+            │
+            ▼
+ SubscriptionCandidate
+            │
+            ▼
+┌────────────────────────┐
+│ Semantic Evaluation    │
+│                        │
+│ What is it?            │
+└───────────┬────────────┘
+            │
+            ▼
+SubscriptionClassification
+```
+
+Isso também evita um erro perigoso:
+
+**não deixar um modelo decidir se uma recorrência existe.**
+
+A existência da recorrência continua sendo matemática/determinística.
+
+O modelo apenas enriquece:
+
+```text
+recurrence = true
+classification = SUBSCRIPTION
+confidence = 0.94
+```
+
+ou:
+
+```text
+recurrence = true
+classification = DecisionUnavailable
+```
+
+---
+
+# 4. Há uma inconsistência com o `I-TYPED-001`
+
+Na 003 você escreveu:
+
+```text
+Deps(SynchronousTxPath) ∩ {LLM, SLM, Ollama, SpringAI} = ∅
+```
+
+Isso está correto.
+
+Mas a `SPEC-000.8.1` é ainda mais específica: o hot path de fraude continua sendo:
+
+```text
+Rules + ONNX + Dragonfly
+```
+
+e o Typed Decision Engine fica **nearline/offline**.
+
+Portanto, eu mudaria a terminologia da 003 para evitar a impressão de que:
+
+> "ONNX é sempre semantic evaluation nearline"
+
+Porque existem **dois usos conceitualmente diferentes de ONNX**:
+
+### Fraud hot path
+
+```text
+Rules + ONNX + Dragonfly
+```
+
+### Intelligence nearline
+
+```text
+SubscriptionCandidate
+       ↓
+DecisionQuestion
+       ↓
+ONNX / Ollama / outro evaluator
+```
+
+É o mesmo runtime/tecnologia potencialmente, mas **não é o mesmo bounded context nem o mesmo SLA**.
+
+Isso precisa ficar explícito.
+
+---
+
+# 5. `I-INTEL-003` precisa de uma pequena revisão
+
+Hoje:
+
+> All monetary calculations, variance, standard deviations, and projected liabilities MUST use canonical BigDecimal with scale 2...
+
+Aqui eu vejo um problema matemático.
+
+**Nem toda estatística deveria necessariamente ter scale 2.**
+
+Por exemplo:
+
+```text
+variance
+standard deviation
+CV
+confidence
+```
+
+não são valores monetários.
+
+Forçar:
+
+```java
+BigDecimal scale = 2
+```
+
+para tudo pode destruir precisão estatística.
+
+A própria 003.1 fala de CV/variância, portanto eu separaria:
+
+### Monetary values
+
+```text
+BigDecimal
+scale 2
+HALF_EVEN
+```
+
+### Statistical calculations
+
+```text
+BigDecimal
+deterministic precision policy
+```
+
+sem exigir scale 2 em cada operação intermediária.
+
+Por exemplo:
+
+```text
+amount:
+    scale 2 / HALF_EVEN
+
+variance:
+    BigDecimal
+    intermediate precision >= X
+
+CV:
+    BigDecimal
+    intermediate precision >= X
+
+confidence:
+    [0,1]
+    defined precision/rounding only at persistence/API boundary
+```
+
+Isso é importante porque **BigDecimal ≠ scale 2 em toda matemática**.
+
+Eu mudaria `I-INTEL-003`.
+
+---
+
+# 6. `I-INTEL-002` está correto, mas eu faria uma distinção
+
+A frase:
+
+> `@ApplicationModuleListener` backed by PostgreSQL event_publication
+
+está alinhada com nossa decisão de `SPEC-000.12`.
+
+Mas não devemos transformar detalhes do framework em uma garantia arquitetural excessivamente específica.
+
+O princípio arquitetural é:
+
+```text
+Ledger
+  ↓
+Spring Modulith event
+  ↓
+Event Publication Registry
+  ↓
+Intelligence
+```
+
+A 000.12 já estabeleceu que o Registry é o mecanismo de **durabilidade/recovery de eventos intra-Core**, e não uma DLQ.
+
+Então eu escreveria algo como:
+
+> Intelligence consumes ledger domain events through the Core's Spring Modulith event infrastructure and its durable Event Publication Registry. It MUST NOT consume internal domain events through NATS.
+
+Isso é mais forte arquiteturalmente e menos acoplado a detalhes de implementação.
+
+---
+
+# 7. `I-INTEL-004` está bom, mas falta uma coisa importante
+
+Hoje:
+
+> MUST NOT depend on internal ledger packages
+
+Perfeito.
+
+Mas temos outra regra importante:
+
+### Intelligence não deve depender do modelo interno de transação.
+
+Idealmente:
+
+```text
+ledger.internal
+       X
+       │
+       │
+       ▼
+intelligence
+```
+
+e:
+
+```text
+ledger.api/event
+       │
+       ▼
+intelligence.internal
+```
+
+Eu adicionaria explicitamente:
+
+```text
+Intelligence may consume stable ledger domain-event contracts,
+but MUST NOT depend on ledger persistence entities, repositories,
+transaction managers, or internal services.
+```
+
+Isso protege bastante a arquitetura Modulith.
+
+---
+
+# 8. O Cross-Feature Matrix precisa corrigir o comportamento do Goals
+
+Esta frase:
+
+> `Sync updates profile via published API`
+
+é perigosa.
+
+"Sync" pode sugerir que o processamento do evento faz uma chamada síncrona ao Goals.
+
+Eu preferiria:
+
+```text
+Intelligence publishes an updated InferredCashflowProfile
+through its public API/contract.
+
+Goals consumes the inferred profile according to its own
+consistency model.
+```
+
+Porque o objetivo é:
+
+```text
+Ledger
+   ↓
+Intelligence
+   ↓
+InferredCashflowProfile
+   ↓
+Goals
+```
+
+e não:
+
+```text
+Ledger transaction
+    ↓
+Intelligence
+    ↓
+Goals synchronous call
+```
+
+---
+
+# 9. A arquitetura mostra Pillar 3, mas a SPEC diz que ele é 003.2
+
+Isso é uma pequena inconsistência estrutural.
+
+Você chama:
+
+```text
+PILLAR 3: CASHFLOW FORECASTING & GOALS INTEGRATION
+```
+
+mas depois:
+
+> `(SPEC-003.2)`
+
+Eu faria uma distinção:
+
+### Macro capability
+
+```text
+SPEC-003
+Spending & Subscription Intelligence
+```
+
+### Capability slices
+
+```text
+SPEC-003.1
+Recurring Pattern & Subscription Detection
+
+SPEC-003.2
+Forward Cashflow Forecasting & Goals Integration
+```
+
+Então a 003 **não deveria definir detalhes de forecasting**.
+
+Ela apenas estabelece:
+
+```text
+003.2 owns forecasting and goals synchronization.
+```
+
+Isso mantém a macro-spec realmente macro.
+
+---
+
+# 10. O `SubscriptionClassification` merece atenção
+
+Você tem:
+
+```text
+SUBSCRIPTION
+INSTALLMENT
+UTILITY
+MEMBERSHIP
+INSURANCE
+```
+
+Eu adicionaria explicitamente:
+
+```text
+UNKNOWN
+```
+
+E possivelmente não usaria `UNKNOWN` como fallback automático.
+
+Temos uma distinção importante:
+
+```text
+DecisionUnavailable
+```
+
+≠
+
+```text
+UNKNOWN
+```
+
+Exemplo:
+
+### Ollama caiu
+
+```text
+DecisionUnavailable
+```
+
+### Modelo avaliou e não conseguiu determinar
+
+```text
+DecisionAnswer(UNKNOWN)
+```
+
+Esses dois estados têm semânticas diferentes.
+
+Isso está muito alinhado com a separação que fizemos na 000.8.1 entre `DecisionAnswer<T>` e `DecisionUnavailable<T>`.
+
+---
+
+# 11. Eu também mudaria o nome de `PILLAR 2`
+
+"Semantic Intelligence" pode induzir a ideia de que obrigatoriamente envolve LLM.
+
+Eu prefiro:
+
+### **PILLAR 2 — Semantic Classification & Decision Enrichment**
+
+Porque permite:
+
+```text
+Deterministic evaluator
+ONNX
+local classifier
+Ollama
+SLM
+future evaluator
+```
+
+Todos atrás de:
+
+```java
+DecisionEvaluator
+```
+
+Isso respeita exatamente a intenção provider-neutral da 000.8.1. A especificação define o SPI como provider-neutral e permite que diferentes implementações avaliem as mesmas perguntas sobre um snapshot imutável.
+
+---
+
+# 12. A árvore de pacotes está acoplando implementação demais
+
+Hoje:
+
+```text
+internal/decision
+    SubscriptionClassificationQuestion
+    OnnxSubscriptionEvaluator
+    OllamaSubscriptionEvaluator
+    SubscriptionDecisionComposer
+```
+
+Eu não colocaria `Onnx...` e `Ollama...` diretamente como partes arquiteturais da SPEC-003.
+
+Melhor:
+
+```text
+internal/
+├── engine/
+├── decision/
+│   ├── SubscriptionClassificationQuestion
+│   └── SubscriptionDecisionComposer
+├── evaluator/
+│   ├── Onnx...
+│   └── Ollama...
+```
+
+Mas mesmo isso pode ser melhor:
+
+```text
+intelligence
+├── api
+└── internal
+    ├── pattern
+    ├── decision
+    ├── forecast
+    ├── persistence
+    └── listener
+```
+
+E os adapters de provider poderiam viver numa infraestrutura própria.
+
+A ideia é:
+
+```text
+decision domain
+       ↓
+DecisionEvaluator SPI
+       ↓
+provider adapters
+```
+
+não:
+
+```text
+decision domain
+       ↓
+Ollama
+       ↓
+ONNX
+```
+
+---
+
+# 13. Falta um invariant de isolamento de falha
+
+Você tem:
+
+```text
+I-INTEL-006
+Graceful Semantic Degradation
+```
+
+Muito bom.
+
+Mas eu acrescentaria explicitamente:
+
+### `I-INTEL-007 — Semantic Evaluator Failure Isolation`
+
+Algo como:
+
+> Failure, timeout, malformed output, model loading failure, or provider unavailability MUST NOT prevent deterministic recurrence detection, persistence of the candidate, ledger processing, or other intelligence pipelines.
+
+Porque `DecisionUnavailable` resolve somente o **resultado semântico**.
+
+Precisamos garantir que a falha não escape para:
+
+```text
+candidate persistence
+event publication
+ledger
+goals
+```
+
+---
+
+# 14. Falta uma regra de idempotência
+
+Essa é, para mim, uma lacuna importante.
+
+Temos:
+
+```text
+Spring Modulith
++
+Event Publication Registry
++
+at-least-once
+```
+
+Logo:
+
+```text
+TransferCompletedEvent
+```
+
+pode ser entregue novamente.
+
+Portanto a 003 precisa declarar:
+
+### `I-INTEL-008 — Idempotent Event Processing`
+
+> Intelligence event consumers MUST be idempotent with respect to the canonical event identity.
+
+Isso está alinhado com a decisão já tomada em 000.12: eventos internos têm semântica **at-least-once**, não exactly-once, e listeners precisam ser idempotentes.
+
+Sem isso, podemos ter:
+
+```text
+event
+ ↓
+subscription detection
+ ↓
+subscription saved
+ ↓
+event redelivered
+ ↓
+second subscription
+```
+
+O que seria péssimo.
+
+---
+
+# 15. Falta uma regra de temporal truth
+
+Essa é especialmente importante para forecasting.
+
+Se estamos analisando uma transação em:
+
+```text
+2026-10-01
+```
+
+não podemos usar uma transação de:
+
+```text
+2026-10-10
+```
+
+para decidir se ela era recorrente em 01/10.
+
+Eu adicionaria:
+
+### `I-INTEL-009 — Temporal Truth / No Future Leakage`
+
+> Pattern detection and semantic evaluation for observation time `t` MUST use only evidence available at or before `t`.
+
+Isso também conversa muito bem com a arquitetura que já usamos em Fraud Intelligence.
+
+---
+
+# 16. Acceptance Criteria precisa ser corrigido
+
+O último item:
+
+> Full bi-directional equivalence and zero spec-drift
+
+não é um bom acceptance criterion para uma macro-spec.
+
+"Bi-directional equivalence" é particularmente estranho aqui.
+
+Eu substituiria por algo verificável:
+
+```text
+- [ ] SPEC-003.1 MUST requirements are green.
+- [ ] SPEC-003.2 MUST requirements are green.
+- [ ] Intelligence consumes internal Core events only through Modulith.
+- [ ] No NATS dependency exists for internal intelligence events.
+- [ ] Intelligence event consumers are idempotent.
+- [ ] Semantic evaluator failure produces DecisionUnavailable<T>.
+- [ ] Semantic evaluator failure does not interrupt deterministic detection.
+- [ ] Typed Decision Algebra boundary has zero domain dependency on ONNX/Ollama.
+- [ ] Modulith architecture verification passes.
+- [ ] No ledger mutation occurs from intelligence.
+```
+
+E **não marcaríamos nada como `[x]` agora**, porque isso é uma SPEC, não evidência de implementação.
+
+---
+
+# Minha versão da arquitetura final
+
+Eu deixaria o conceito central assim:
+
+```text
+                     LEDGER DOMAIN EVENTS
+                              │
+                              ▼
+                  ┌───────────────────────┐
+                  │ SPRING MODULITH       │
+                  │ Event Publication     │
+                  │ Registry              │
+                  └───────────┬───────────┘
+                              │
+                              ▼
+                 ┌─────────────────────────┐
+                 │ PILLAR 1                │
+                 │ DETERMINISTIC ENGINE    │
+                 │                         │
+                 │ cadence                 │
+                 │ cycles                  │
+                 │ variance                │
+                 │ confidence              │
+                 │ price spike             │
+                 └────────────┬────────────┘
+                              │
+                              ▼
+                   SubscriptionCandidate
+                              │
+                              ▼
+                 ┌─────────────────────────┐
+                 │ PILLAR 2                │
+                 │ SEMANTIC ENRICHMENT     │
+                 │                         │
+                 │ DecisionQuestion<T>     │
+                 └────────────┬────────────┘
+                              │
+                  ┌───────────┼────────────┐
+                  ▼           ▼            ▼
+               baseline      ONNX       Ollama
+                  │           │            │
+                  └───────────┼────────────┘
+                              ▼
+                    DecisionOutcome<T>
+                              │
+                     ┌────────┴────────┐
+                     │                 │
+              DecisionAnswer     DecisionUnavailable
+                     │                 │
+                     └────────┬────────┘
+                              ▼
+                  Deterministic Composer
+                              │
+                              ▼
+               Enriched Intelligence State
+                       │              │
+                       ▼              ▼
+                 SPEC-003.2        Phase 4
+                 Forecasting       Copilot
+```
+
+E a regra mais importante seria:
+
+> **Pillar 1 determines whether a recurring financial pattern exists. Pillar 2 enriches that deterministic fact with a typed semantic classification. Semantic evaluation is never authoritative for the existence of the recurrence and is never required for the deterministic intelligence pipeline to remain operational.**
+
+Isso deixa a arquitetura extremamente limpa.
+
+---
+
+## Minha avaliação da SPEC-003 atual
+
+| Área                          | Avaliação                             |
+| ----------------------------- | ------------------------------------- |
+| Conceito macro                | 🟢 Muito bom                          |
+| Separação 003 / 003.1 / 003.2 | 🟡 Precisa explicitar melhor          |
+| Deterministic engine          | 🟢 Correto                            |
+| Typed Decision Algebra        | 🟢 Correto                            |
+| ONNX/Ollama                   | 🟡 Não devem virar MUST               |
+| Graceful degradation          | 🟢 Correto                            |
+| Modulith                      | 🟢 Correto, pequeno ajuste de wording |
+| Bounded context               | 🟢 Correto                            |
+| Financial arithmetic          | 🟡 Ajustar scale/precision            |
+| Idempotência                  | 🔴 Falta invariant explícito          |
+| Temporal truth                | 🔴 Falta invariant explícito          |
+| Failure isolation             | 🟡 Precisa reforçar                   |
+| Package topology              | 🟡 Provider coupling excessivo        |
+| Acceptance                    | 🟡 Precisa tornar verificável         |
+
+### Veredito
+
+**Eu não reescreveria a SPEC-003 do zero.** A direção está correta.
+
+Eu faria uma **Rev.1 estrutural**, preservando os IDs existentes, mas acrescentando principalmente:
+
+```text
+I-INTEL-007  Semantic Failure Isolation
+I-INTEL-008  Idempotent Event Processing
+I-INTEL-009  Temporal Truth / No Future Leakage
+```
+
+e ajustaria:
+
+```text
+I-INTEL-003  monetary precision ≠ statistical scale 2
+I-INTEL-004  API/event boundary against ledger internals
+I-INTEL-002  Modulith/Event Registry wording
+Acceptance Criteria
+Pillar 2 terminology
+```
+
+**A decisão arquitetural principal eu manteria exatamente:**
+**003.1 determinístico é a fonte da verdade sobre recorrência; 000.8.1 fornece o contrato tipado para enriquecimento semântico; ONNX é o primeiro candidato de baixo custo/latência e Ollama é enriquecimento nearline; nenhum deles é necessário para a detecção continuar funcionando.**

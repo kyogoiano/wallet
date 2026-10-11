@@ -1,0 +1,511 @@
+Yes. I think these are **two very good upgrade tracks**, but I would treat them differently:
+
+1. **Dragonfly 2.0** → a platform-wide compatibility/performance migration.
+2. **Jevify/Jev evaluation** → an architecture experiment around the AI/fraud decision layer, probably primarily **SPEC-000.8**, with some opportunities in **000.7**.
+
+And there is an interesting interaction between them: the Dragonfly upgrade should happen first because it can change the performance characteristics of the hot-path feature store that 000.8 depends on.
+
+## 1. Dragonfly 1.40 → 2.0 is worth doing
+
+This is particularly timely because Dragonfly 2.0 was announced on **September 17, 2026**, just days ago. Dragonfly reports roughly **54% higher throughput, 35% lower average latency, and 30–40% lower memory usage** versus its earlier baseline, with substantial work in I/O, pipelining, data structures, TTL handling, and serialization. ([Dragonfly][1])
+
+The important thing for Wallet is that this isn't merely:
+
+```text
+docker image
+1.40 → 2.0
+```
+
+I agree with your idea:
+
+> **Use the upgrade as a codebase-wide audit opportunity.**
+
+I'd create something like:
+
+```text
+UPGRADE-000.9.DF20
+DragonflyDB 1.40 → 2.0
+```
+
+with scope:
+
+```text
+Dragonfly server
+        │
+        ├── dependency/client versions
+        ├── connection configuration
+        ├── Lettuce usage
+        ├── commands
+        ├── Lua scripts
+        ├── serialization
+        ├── TTL semantics
+        ├── pipelining
+        ├── transactions
+        ├── streams/pubsub if used
+        ├── ACL/security
+        ├── tests/Testcontainers
+        ├── Docker/Compose
+        └── benchmarks
+```
+
+### And I would explicitly forbid a blind upgrade
+
+The migration should have three gates:
+
+```text
+        1. Compatibility
+              ↓
+        2. Behavioral correctness
+              ↓
+        3. Performance regression/benefit
+```
+
+Because your Dragonfly usage isn't trivial. It's involved in:
+
+* velocity counters
+* fraud state
+* risk state
+* blocking/cache state
+* likely rate limiting
+* potentially other hot-path structures
+
+So a command that remains syntactically compatible can still have implications for latency, TTL behavior, memory utilization, or concurrency.
+
+Dragonfly 2.0 also expanded its API substantially and changed internals around TTLs, collections, serialization and pipelining. ([Dragonfly][1])
+
+### I'd make the migration produce an improvement inventory
+
+For example:
+
+```text
+DF20-AUDIT
+
+Finding                         Action
+------------------------------------------------
+Redundant GET + SET             → atomic operation?
+Multiple round trips            → pipeline?
+Lua script                      → verify 2.0 semantics
+TTL refresh pattern             → simplify?
+Per-request connection setup    → fix pooling
+Duplicate serialization         → eliminate
+Overly broad key scan           → redesign
+Non-tenant-scoped key           → security fix
+Unnecessary Dragonfly lookup    → local/cache optimization
+```
+
+That makes the upgrade much more valuable than simply changing a version number.
+
+---
+
+# 2. Jevify is actually very interesting for Wallet
+
+I searched for the name because there are several similarly named projects.
+
+If you mean **Jevify**, the project I found is an inference engine built around existing LLMs for **classification, yes/no decisions and rubric scoring**, rather than prose generation. Its key idea is particularly relevant to your fraud architecture:
+
+> don't ask an LLM to generate a JSON explanation when what you actually need is a structured decision.
+
+Jevify reports a local benchmark with 26.1× faster JSON generation than standard Qwen JSON generation and 100% schema validity in its 250-case development benchmark, but those numbers are explicitly **local development results, not universal guarantees**, and its probabilities are uncalibrated. ([GitHub][2])
+
+That distinction is very important for us.
+
+---
+
+# 3. I would put Jev primarily in SPEC-000.8
+
+Based on our existing architecture:
+
+```text
+000.7
+Behavioral intelligence / embeddings / investigation
+        │
+        ▼
+000.8
+Fusion / Micro-ML / decision layer
+        │
+        ▼
+Financial/Fraud decision
+```
+
+Jev/Jevify fits much more naturally into **000.8**.
+
+Why?
+
+Because 000.8 is fundamentally asking:
+
+> Given these already-computed signals, what decision should we make?
+
+That's exactly where a typed decision model can be interesting.
+
+For example, instead of:
+
+```text
+LLM
+ ↓
+"Based on the transaction, I think this looks suspicious because..."
+ ↓
+parse JSON
+ ↓
+hope the output is correct
+```
+
+we could have:
+
+```text
+Signals
+   │
+   ├── velocity
+   ├── graph risk
+   ├── propagated risk
+   ├── behavioral similarity
+   ├── amount anomaly
+   ├── device/network features
+   └── temporal features
+          │
+          ▼
+      Decision model
+          │
+          ▼
+     typed questions
+          │
+          ▼
+      structured result
+```
+
+That's much closer to the kind of workload Jevify is designed to optimize.
+
+---
+
+# 4. But I would NOT put an LLM/Jev directly in the financial hot path yet
+
+This is where I would preserve one of the strongest architectural decisions we've already made.
+
+Your financial path is:
+
+```text
+Request
+  ↓
+HMAC
+  ↓
+Edge
+  ↓
+NATS
+  ↓
+Core
+  ↓
+Fraud Gate
+  ↓
+Ledger transaction
+```
+
+I don't want:
+
+```text
+Core
+  ↓
+LLM
+  ↓
+hopefully returns decision
+  ↓
+Ledger
+```
+
+because now:
+
+* model availability affects financial availability
+* inference latency affects transaction latency
+* model changes affect financial behavior
+* probability calibration becomes critical
+* reproducibility becomes harder
+* operational complexity increases
+
+Instead, 000.8 should remain something like:
+
+```text
+                    ┌─────────────────────┐
+                    │ Deterministic rules │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │ Micro-ML / ONNX     │
+                    └──────────┬──────────┘
+                               │
+                    ┌──────────▼──────────┐
+                    │ Typed decision      │
+                    │ / fusion            │
+                    └──────────┬──────────┘
+                               │
+                         final risk
+```
+
+And **Jev/Jevify becomes an experimental candidate for the typed decision layer**, not a prerequisite for completing the financial engine.
+
+---
+
+# 5. Where 000.7 could benefit
+
+000.7 is actually interesting too, but differently.
+
+We already have:
+
+```text
+pgvector
+   +
+behavioral embeddings
+   +
+archetypes
+   +
+evidence
+   +
+investigation
+```
+
+Jevify could potentially help with **semantic judgments over retrieved evidence**.
+
+For example:
+
+```text
+Transaction
+     │
+     ▼
+Retrieve behavioral evidence
+     │
+     ├── similar transactions
+     ├── behavioral archetype
+     ├── graph relationships
+     └── historical evidence
+             │
+             ▼
+        typed questions
+             │
+       ┌─────┼─────┐
+       ▼     ▼     ▼
+     match anomaly related
+       │     │     │
+       └─────┼─────┘
+             ▼
+       structured result
+```
+
+That's a better fit than asking a generative model:
+
+> "Analyze this customer's behavior and explain whether it's suspicious."
+
+You can decompose it into explicit questions.
+
+That improves **correctness and testability**.
+
+---
+
+# 6. The really interesting part: Jev/Jevify + 000.8
+
+Suppose 000.8 has these signals:
+
+```text
+graphRisk          = 0.71
+propagatedRisk     = 0.43
+behavioralRisk     = 0.82
+velocityRisk       = 0.93
+amountAnomaly      = 0.64
+```
+
+A traditional fusion model could do:
+
+```text
+risk =
+    w1 * graphRisk +
+    w2 * propagatedRisk +
+    w3 * behavioralRisk +
+    w4 * velocityRisk +
+    w5 * amountAnomaly
+```
+
+That's deterministic and fast.
+
+But there are situations where we may want a semantic decision such as:
+
+```text
+Q1: Is the behavioral pattern materially inconsistent?
+Q2: Is there evidence of coordinated activity?
+Q3: Is the current event consistent with the user's historical archetype?
+Q4: Is the graph evidence independently meaningful?
+Q5: Is there sufficient evidence to escalate?
+```
+
+Then:
+
+```text
+             Evidence
+                │
+        ┌───────┴────────┐
+        │                │
+ deterministic       semantic
+ features            questions
+        │                │
+        └───────┬────────┘
+                ▼
+          Fusion Engine
+                │
+                ▼
+          risk decision
+```
+
+That's where I think your idea becomes genuinely interesting.
+
+---
+
+# 7. And there's an important correctness advantage
+
+The most interesting thing isn't necessarily the **26× performance claim**.
+
+It's the architectural property:
+
+**decision → typed primitive → deterministic composition**
+
+rather than:
+
+**prompt → generated prose → JSON parsing → interpretation**
+
+Jevify explicitly describes constructing JSON from model scores rather than generating JSON token-by-token, and its benchmark reports 100% schema validity for that tested dataset. But schema validity obviously doesn't mean decision correctness, and the project itself calls its probabilities uncalibrated. ([GitHub][2])
+
+For our architecture, that's exactly the distinction we care about.
+
+We could test:
+
+```text
+Question
+   ↓
+Expected answer
+   ↓
+Model answer
+   ↓
+accuracy
+   ↓
+calibration
+   ↓
+latency
+   ↓
+cost
+```
+
+instead of:
+
+```text
+"Does this response look reasonable?"
+```
+
+That's much more compatible with TDD/SDD.
+
+---
+
+# 8. I would therefore create TWO upgrade initiatives
+
+Not one giant task.
+
+### Upgrade A — `UPGRADE-DF-2.0`
+
+```text
+DragonflyDB 1.40 → 2.0
+
+Scope:
+  entire codebase
+
+Goals:
+  compatibility
+  correctness
+  performance
+  memory
+  security
+  simplify existing Dragonfly usage
+
+Output:
+  DF-2.0 compatibility report
+  improvement backlog
+  benchmark comparison
+  migrated implementation
+```
+
+Dragonfly itself reports significant improvements in throughput, latency and memory, so this has an immediate infrastructure/performance rationale. ([Dragonfly][1])
+
+### Upgrade B — `SPEC-000.8-JEV`
+
+I wouldn't even call it implementation initially.
+
+I'd make it:
+
+```text
+SPEC-000.8.x
+Typed AI Decision Evaluation
+```
+
+with a **Gate 0 research/benchmark phase**.
+
+The question isn't:
+
+> "Should Wallet use Jevify?"
+
+The question is:
+
+> **"Are there bounded decision workloads in 000.7/000.8 where typed LLM inference provides better latency/correctness/cost than our current approach?"**
+
+That's experimentally answerable.
+
+---
+
+## 9. And I'd add one very strong rule
+
+For the AI experiment:
+
+```text
+Jev/Jevify must beat the existing implementation
+on the dimensions that matter for the specific workload.
+```
+
+Not just latency.
+
+Measure:
+
+```text
+                    ┌──────────────┐
+                    │ Candidate    │
+                    └──────┬───────┘
+                           │
+          ┌────────────────┼────────────────┐
+          ▼                ▼                ▼
+       accuracy         latency           cost
+          │                │                │
+          └────────────────┼────────────────┘
+                           ▼
+                      calibration
+                           │
+                           ▼
+                     determinism
+                           │
+                           ▼
+                     failure modes
+```
+
+And the baseline should be our existing:
+
+```text
+deterministic rules
++
+ONNX micro-ML
++
+PostgreSQL/pgvector
++
+graph risk
++
+propagated risk
+```
+
+rather than comparing Jevify against a generic LLM.
+
+That would make this a **real architectural experiment**, not an AI technology insertion.
+
+---
+
+
+[1]: https://www.dragonflydb.io/blog/announcing-dragonfly-2-0?utm_source=chatgpt.com "Dragonfly 2.0: 54% more throughput, 40% less memory"
+[2]: https://github.com/Mintzs/jevify?utm_source=chatgpt.com "GitHub - Mintzs/jevify: An optimized inference engine to turn LLMs into Jev-like machines: optimized for quick, lightweight, and accurate decision-making, classification, and scoring · GitHub"
+[3]: https://github.com/bytecodealliance/javy?utm_source=chatgpt.com "GitHub - bytecodealliance/javy: JS to WebAssembly toolchain · GitHub"

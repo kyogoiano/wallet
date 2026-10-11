@@ -1,0 +1,673 @@
+Exactly. This is the **main limitation of the “same JVM” approach**. Spring Modulith solves *architectural coupling*, but it does **not** solve *runtime isolation*. That distinction is critical for 000.9.1.
+
+I would actually broaden the decision matrix to evaluate the options against four independent concerns:
+
+1. **Failure isolation** — can Edge die without Core dying?
+2. **Deployment isolation** — can Edge be upgraded without restarting Core?
+3. **Scaling isolation** — can Edge and Core have different replica counts/resources?
+4. **resource isolation** — can one consume CPU/heap/threads/connections and starve the other?
+
+### How the options behave
+
+| Architecture                          | Crash isolation | Independent deploy | Independent scaling | Resource isolation | Complexity |
+| ------------------------------------- | --------------- | ------------------ | ------------------- | ------------------ | ---------- |
+| Same JVM + packages                   | ❌               | ❌                  | ❌                   | ❌                  | ⭐          |
+| Same JVM + Spring Modulith            | ❌               | ❌                  | ❌                   | ❌                  | ⭐⭐         |
+| Same JVM + JPMS                       | ❌               | ❌                  | ❌                   | ⚠️                 | ⭐⭐⭐        |
+| Same JVM + OSGi                       | ⚠️              | ✅*                 | ⚠️                  | ⚠️                 | ⭐⭐⭐⭐       |
+| **Separate processes, same codebase** | **✅**           | **✅**              | **✅**               | **✅**              | ⭐⭐⭐        |
+| Separate containers/services          | **✅**           | **✅**              | **✅**               | **✅**              | ⭐⭐⭐        |
+| Full microservices                    | ✅               | ✅                  | ✅                   | ✅                  | ⭐⭐⭐⭐⭐      |
+
+`*` OSGi can dynamically update bundles, but that is not equivalent to the operational simplicity of independently deploying containers.
+
+---
+
+# 1. Same JVM + Spring Modulith
+
+This is excellent for **code architecture**, but not runtime architecture.
+
+You could have:
+
+```text
+┌──────────────────────────────────────────────┐
+│                 Wallet JVM                   │
+│                                              │
+│  ┌─────────────┐       ┌─────────────────┐  │
+│  │    EDGE     │───────│   WALLET CORE   │  │
+│  │             │       │                 │  │
+│  │ WebFlux     │       │ Ledger          │  │
+│  │ Rate limit  │       │ Fraud           │  │
+│  │ SSE         │       │ Accounts        │  │
+│  │ QUIC        │       │ PostgreSQL      │  │
+│  └─────────────┘       └─────────────────┘  │
+│                                              │
+└──────────────────────────────────────────────┘
+```
+
+Spring Modulith gives you something very valuable:
+
+```text
+EDGE
+  │
+  │ allowed contract
+  ▼
+WALLET-COMMAND-API
+  │
+  ▼
+WALLET-CORE
+```
+
+rather than:
+
+```text
+EDGE
+ ├── LedgerService
+ ├── FraudService
+ ├── AccountRepository
+ ├── JdbcTemplate
+ ├── PostgreSQL
+ ├── NATS
+ └── ... 😬
+```
+
+But if the Edge has:
+
+```text
+OutOfMemoryError
+```
+
+the JVM is gone.
+
+If Core has:
+
+```text
+GC storm
+```
+
+Edge suffers.
+
+If Core has a bad infinite loop:
+
+```text
+CPU = 100%
+```
+
+Edge suffers.
+
+If you deploy:
+
+```text
+wallet-core v4.2
+```
+
+you deploy the entire JVM.
+
+And if Edge needs:
+
+```text
+20 replicas
+```
+
+while Core needs:
+
+```text
+4 replicas
+```
+
+you can't do that.
+
+So **Spring Modulith is not a solution to those problems**.
+
+It is a solution to:
+
+> "How do I prevent my codebase from becoming a tangled monolith?"
+
+That's still extremely valuable.
+
+---
+
+# 2. JPMS
+
+JPMS improves the **compile/runtime dependency boundary**.
+
+You could get something like:
+
+```text
+module wallet.edge {
+    requires wallet.command.api;
+}
+
+module wallet.core {
+    requires wallet.command.api;
+}
+
+module wallet.command.api {
+    exports br.com.wallet.command.api;
+}
+```
+
+That's stronger than ordinary packages.
+
+But:
+
+```text
+Edge crash
+     ↓
+JVM crash
+     ↓
+Core crash
+```
+
+Still happens.
+
+And:
+
+```text
+Edge scale × 20
+Core scale × 4
+```
+
+is still impossible.
+
+So JPMS is primarily:
+
+> **stronger modularity, not process isolation.**
+
+---
+
+# 3. OSGi is interesting because it changes the equation
+
+This is where your original OSGi intuition becomes much more interesting.
+
+OSGi gives you actual **bundle lifecycle and classloader isolation**:
+
+```text
+JVM
+│
+├── Edge Bundle
+│
+├── Wallet Core Bundle
+│
+├── Fraud Bundle
+│
+└── ...
+```
+
+Bundles can theoretically be:
+
+```text
+START
+STOP
+UPDATE
+UNINSTALL
+INSTALL
+```
+
+independently.
+
+That's considerably closer to what you're describing.
+
+But there is an important caveat.
+
+### OSGi doesn't give you container-level resource isolation
+
+A broken bundle can still potentially:
+
+* consume CPU;
+* allocate too much memory;
+* create too many threads;
+* exhaust shared pools;
+* destabilize the JVM.
+
+So:
+
+```text
+OSGi
+```
+
+is stronger than packages/Modulith for **lifecycle isolation**, but substantially weaker than:
+
+```text
+separate processes
+```
+
+for **failure and resource isolation**.
+
+And operationally, OSGi introduces quite a bit of complexity.
+
+For your wallet, I wouldn't choose it unless you have a real requirement for things like:
+
+> dynamic module installation/update/versioning inside a running JVM.
+
+---
+
+# 4. Separate processes is the really interesting middle ground
+
+This is the architecture I think fits your project particularly well.
+
+You don't need to jump from:
+
+```text
+monolith
+```
+
+to:
+
+```text
+37 microservices
+```
+
+You can have:
+
+```text
+             ┌────────────────────┐
+             │    EDGE PROCESS    │
+             │                    │
+HTTP/3 ─────►│ WebFlux / Netty    │
+             │ Rate limiting      │
+             │ SSE                │
+             │ Journal            │
+             └─────────┬──────────┘
+                       │
+                       │ NATS
+                       ▼
+             ┌────────────────────┐
+             │   CORE PROCESS     │
+             │                    │
+             │ Ledger             │
+             │ Accounts           │
+             │ Fraud              │
+             │ PostgreSQL         │
+             └────────────────────┘
+```
+
+But both can still live in the **same repository**:
+
+```text
+wallet/
+│
+├── edge/
+│
+├── wallet-core/
+│
+├── wallet-command-api/
+│
+├── operation-status-api/
+│
+├── infrastructure/
+│
+└── ...
+```
+
+And potentially share a lot of code.
+
+This gives you the important property:
+
+### Edge crash
+
+```text
+EDGE 💥
+
+CORE
+  │
+  ├── continues processing
+  └── continues consuming durable commands
+```
+
+### Core crash
+
+```text
+CORE 💥
+
+EDGE
+  │
+  ├── remains available
+  ├── accepts commands
+  └── JetStream buffers them
+```
+
+That is **much more aligned with your existing 000.9 design**.
+
+---
+
+# 5. Scaling becomes fundamentally different
+
+This is probably the strongest argument for separation.
+
+Suppose you eventually have:
+
+```text
+             traffic
+               │
+        ┌──────┴──────┐
+        ▼             ▼
+      EDGE           EDGE
+        │             │
+        └──────┬──────┘
+               │
+              NATS
+               │
+       ┌───────┼───────┐
+       ▼       ▼       ▼
+     CORE    CORE    CORE
+```
+
+You might have:
+
+```text
+Edge:
+20 instances
+2 CPU
+512 MB
+
+Core:
+4 instances
+8 CPU
+8 GB
+```
+
+because Edge is primarily:
+
+```text
+I/O + networking + rate limiting + journaling
+```
+
+while Core is:
+
+```text
+CPU + PostgreSQL + fraud + business logic
+```
+
+That's a **real architectural difference**, not merely deployment preference.
+
+---
+
+# 6. And this changes how I would design 000.9.1
+
+I would actually make the specification explicitly target **process separability**, rather than merely "Spring Modulith".
+
+Something like:
+
+> **SPEC-000.9.1 — Edge/Core Process Boundary & Modular Runtime Architecture**
+
+Mantra:
+
+> **"Define Edge and Wallet Core as independently executable bounded runtimes with a stable command contract, while preserving a single-repository development model and optional same-JVM execution for tests and local development."**
+
+That is substantially stronger than:
+
+> "Make Edge and Core Spring Modulith modules."
+
+---
+
+# 7. Then Spring Modulith still has a role
+
+This is the subtle part.
+
+I wouldn't choose:
+
+**Spring Modulith OR process separation.**
+
+I'd use:
+
+**Spring Modulith + process separation.**
+
+For example:
+
+```text
+wallet/
+│
+├── contracts/
+│   └── wallet-command-api
+│
+├── edge/
+│   └── Spring Boot application
+│       └── Spring Modulith
+│
+├── core/
+│   └── Spring Boot application
+│       └── Spring Modulith
+│
+└── infrastructure/
+```
+
+Inside Edge:
+
+```text
+edge
+├── ingress
+├── rate-limit
+├── journal
+├── replay
+├── sse
+└── messaging
+```
+
+Inside Core:
+
+```text
+wallet-core
+├── transfer
+├── deposit
+├── withdrawal
+├── account
+├── ledger
+├── fraud
+└── ...
+```
+
+Spring Modulith enforces **internal boundaries**.
+
+The process boundary enforces **runtime boundaries**.
+
+---
+
+# 8. This gives us a very nice evolution path
+
+And this is where I think your architecture can become particularly strong.
+
+### Development
+
+You can still run:
+
+```text
+./gradlew bootRun
+```
+
+with both components locally if desired.
+
+Or:
+
+```text
+EdgeApplication
+CoreApplication
+```
+
+in the same development environment.
+
+### Integration
+
+Run:
+
+```text
+edge
+core
+nats
+postgres
+dragonfly
+```
+
+as separate containers.
+
+### Production
+
+```text
+              Load Balancer
+                    │
+          ┌─────────┼─────────┐
+          ▼         ▼         ▼
+       Edge-1    Edge-2    Edge-3
+          │         │         │
+          └──────NATS─────────┘
+                    │
+          ┌─────────┼─────────┐
+          ▼         ▼         ▼
+       Core-1    Core-2    Core-3
+```
+
+Now you have independent:
+
+* deployment
+* scaling
+* restart
+* resource limits
+* observability
+* rollout
+* rollback.
+
+And yet you're **not forced into microservice hell**.
+
+---
+
+# 9. One particularly important consequence: versioning
+
+Once we separate processes, the contract becomes extremely important.
+
+Imagine:
+
+```text
+Edge v5
+```
+
+and:
+
+```text
+Core v4
+```
+
+during a rolling deployment.
+
+Therefore:
+
+```text
+CommandEnvelope v1
+```
+
+must remain compatible.
+
+For example:
+
+```text
+Edge v5
+      │
+      │ CommandEnvelope v1
+      ▼
+Core v4
+```
+
+Then:
+
+```text
+Edge v5
+      │
+      │ CommandEnvelope v1
+      ▼
+Core v5
+```
+
+Only later:
+
+```text
+CommandEnvelope v2
+```
+
+can be introduced.
+
+That means **000.9.1 should probably define contract compatibility and evolution**, not just package boundaries.
+
+---
+
+# 10. Failure domains become explicit
+
+I would make this one of the core principles of 000.9.1:
+
+```text
+             FAILURE DOMAIN
+                  │
+        ┌─────────┴─────────┐
+        │                   │
+      EDGE                 CORE
+        │                   │
+   networking          financial logic
+   admission           ledger
+   journal             fraud
+   SSE                 persistence
+```
+
+A failure in one should not unnecessarily become a failure in the other.
+
+And NATS provides the durable temporal boundary:
+
+```text
+EDGE
+  │
+  │ durable acceptance
+  ▼
+NATS JetStream
+  │
+  │ durable command
+  ▼
+CORE
+```
+
+This is actually much more architecturally meaningful than simply moving classes into different packages.
+
+---
+
+## My recommendation now
+
+I'd revise our previous recommendation.
+
+Instead of:
+
+> **Spring Modulith first, maybe separate later**
+
+I'd make the target architecture:
+
+### **Spring Modulith for code boundaries + separate executable runtimes for operational boundaries.**
+
+With three deployment modes:
+
+```text
+MODE 1 — DEV
+┌───────────────────────┐
+│       JVM             │
+│ Edge + Core           │
+└───────────────────────┘
+
+
+MODE 2 — INTEGRATION
+┌─────────┐       ┌─────────┐
+│  Edge   │──────►│  Core   │
+│ process │ NATS  │ process │
+└─────────┘       └─────────┘
+
+
+MODE 3 — PRODUCTION
+┌─────┐ ┌─────┐ ┌─────┐
+│ E1  │ │ E2  │ │ E3  │
+└──┬──┘ └──┬──┘ └──┬──┘
+   └───────┼───────┘
+           NATS
+   ┌───────┼───────┐
+┌──┴──┐ ┌──┴──┐ ┌──┴──┐
+│ C1  │ │ C2  │ │ C3  │
+└─────┘ └─────┘ └─────┘
+```
+
+That gives us the **cheap/simple development experience of a modular monolith**, while preserving the **failure, scaling and deployment characteristics of independently operated services**.
+
+And importantly, I would **not call Edge and Core microservices yet**. They are two independently executable **runtimes/bounded applications in one product**, with NATS as their durable boundary. That leaves us free to split Core further only if real scaling or ownership pressure eventually justifies it.
+
+This, in my view, is a much stronger foundation for **SPEC-000.9.1** than an OSGi-centric design.

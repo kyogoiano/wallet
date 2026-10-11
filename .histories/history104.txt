@@ -1,0 +1,312 @@
+## Revisão arquitetural — PLAN-004.1 (History 103)
+
+A revisão evoluiu bem: o plano agora explicita a separação entre **identidade de transporte, agente e autorizador humano**, remove a ambiguidade sobre aprovação por `confirmed: true`, define limites monetários e idempotência e estabelece uma estratégia segura para perda de estado durante a elicitação.
+
+Minha recomendação, por enquanto, é **manter `Ready for Convergence Review`**. Ainda há alguns pontos que eu resolveria antes de aprovar o plano para geração das TASKS. Os mais importantes não são de organização do código, mas de contratos de segurança e compatibilidade com o protocolo MCP.
+
+### 1. O que ficou bem resolvido
+
+| Área                        | Avaliação                                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------------------------- |
+| Isolamento de `copilot.api` | Correto: o domínio não deve depender de Spring AI nem do protocolo MCP.                            |
+| Identidades distintas       | A separação entre principal de transporte, agente e autorizador humano é fundamental.              |
+| Fallback de elicitação      | Correto: sem capacidade compatível, a proposta permanece `PROPOSED`; não há execução automática.   |
+| Perda de correlação         | Boa decisão: perder o estado efêmero não recria a proposta nem prolonga seu TTL.                   |
+| Precisão monetária          | `String` → `BigDecimal`, sem passar por `double` ou `float`, evita erros de representação binária. |
+| Idempotência                | Chave obrigatória e conflito para payload divergente estão alinhados com o ciclo de propostas.     |
+| Rastreabilidade             | Cada requisito possui componente e alvo de verificação identificados.                              |
+
+Há, porém, uma distinção importante: **o plano descreve várias garantias, mas ainda precisa demonstrar que o protocolo e as APIs realmente permitem implementá-las dessa forma.**
+
+## 2. Pontos que ainda precisam de convergência
+
+### [MUST] 2.1. Confirmar a compatibilidade entre elicitação MCP e o transporte escolhido
+
+Este é o principal bloqueio técnico.
+
+A documentação do Spring AI diferencia o transporte **Streamable HTTP com sessão** do modo **Stateless**. O modo stateless não suporta mensagens iniciadas pelo servidor para o cliente, como elicitação. Portanto, se o objetivo é utilizar elicitação MCP nativa, o plano não pode deixar a configuração do transporte ambígua. ([Home][1])
+
+Além disso, a especificação MCP define uma interação específica: o servidor solicita a elicitação, o cliente apresenta a interação ao usuário e a resposta é devolvida pelo cliente. No modo URL, o aceite significa consentimento para iniciar a interação externa, **não a conclusão nem a autorização financeira**. ([GitHub][2])
+
+**Ajuste recomendado no PLAN:**
+
+* Declarar explicitamente que o transporte será `STREAMABLE`, e não `STATELESS`, caso a elicitação nativa faça parte do escopo.
+* Verificar no PLAN a versão exata do Spring AI compatível com o baseline Spring Boot `4.2.0-M2`.
+* Criar um teste de integração real que demonstre a sequência `tools/call → elicitation → resposta/resumption`.
+* Se a versão escolhida não suportar o fluxo necessário, registrar essa limitação e definir um fallback via Web/CLI autenticado, sem simular uma resposta MCP inexistente.
+
+A documentação consultada confirma a distinção entre os modos, mas ainda não comprova a compatibilidade exata da combinação de versões escolhida para este projeto.
+
+### [MUST] 2.2. A elicitação Form não pode ser confundida com autorização financeira
+
+O ADR-004.1.2/004.1.3 está conceitualmente correto ao separar as identidades. Entretanto, a implementação descrita em:
+
+> `human clicks accept → gateway verifies human → approveProposal()`
+
+ainda deixa uma pergunta decisiva: **de onde vêm as credenciais verificáveis do humano?**
+
+O `accept` chega pelo cliente MCP. Por si só, não demonstra que o titular da conta autenticou-se diretamente perante o Wallet Service. O principal autenticado na requisição HTTP pode representar um agente ou uma aplicação, e não o proprietário da conta.
+
+Sugiro estabelecer esta regra normativa:
+
+1. A resposta de elicitação é uma **resposta de interação**, nunca uma credencial de autorização.
+2. O gateway só pode chamar `approveProposal()` após verificar uma identidade humana por um mecanismo independente e confiável, vinculada ao titular autorizado da proposta.
+3. Se essa verificação não estiver disponível no fluxo Form, a resposta não aprova a proposta: o usuário deve concluir a autorização pela interface Web/CLI autenticada.
+4. A autorização deve validar também o tenant, o usuário autorizado, a proposta e seu estado atual.
+
+Isso mantém o princípio central do projeto: o agente pode solicitar uma proposta e conduzir a interação, mas não pode se transformar no autorizador financeiro.
+
+### [MUST] 2.3. Revisar o significado do token da URL de aprovação
+
+O plano combina duas propriedades:
+
+* token opaco, de uso único;
+* aprovação realizada por um fluxo externo autenticado.
+
+É necessário especificar que o token **não concede, isoladamente, acesso autorizado nem aprova a operação**.
+
+A especificação MCP para URL Elicitation proíbe URLs que funcionem como acesso pré-autenticado a recursos protegidos e exige verificar se a pessoa que conclui a interação é a mesma pessoa para quem ela foi iniciada. ([GitHub][2])
+
+Para evitar uma vulnerabilidade de *bearer link*, eu definiria o seguinte contrato:
+
+* O link utiliza HTTPS e contém apenas um identificador opaco de correlação, sem dados pessoais ou financeiros.
+* O token não substitui a autenticação humana.
+* A página exige autenticação e verifica se a identidade corresponde ao usuário autorizado para a proposta.
+* Abrir o link, visualizar a proposta ou consumir o token não aprova a operação.
+* A aprovação acontece somente por uma ação explícita autenticada, validada pelo `ProposalUseCase`.
+* O token possui expiração, uso único e proteção contra replay; sua invalidação não altera indevidamente o estado financeiro da proposta.
+
+**Importante:** o token de correlação do fluxo MCP e a autorização da proposta devem ser contratos distintos. Não os implemente como se fossem a mesma credencial.
+
+### [MUST] 2.4. Tornar explícito o comportamento em múltiplas instâncias
+
+O `McpInteractionTracker` é descrito como um mapa efêmero local. Isso é aceitável somente se a perda da correlação for tratada como um cenário esperado, e não como uma falha que possa levar à criação de uma segunda proposta ou à repetição de uma autorização.
+
+O ADR-004.1.4 já estabelece uma boa regra para perda de estado. Falta deixar explícito como ela funciona em um deployment com mais de uma instância.
+
+Eu acrescentaria:
+
+* Uma resposta de elicitação recebida em outra instância não pode ser associada a uma proposta apenas pelo `correlationId`.
+* A correlação precisa estar vinculada ao tenant, ao principal autenticado e à proposta original.
+* Se o estado local não existir ou a associação não puder ser comprovada, o fluxo deve falhar de forma segura e direcionar o usuário para a aprovação externa autenticada.
+* A recuperação não pode criar outra proposta, renovar o TTL ou executar novamente uma aprovação já concluída.
+* Os testes devem cobrir perda de estado, resposta duplicada e resposta recebida por outra instância.
+
+Não é necessário tornar o tracker durável só para recuperar uma interação. O fallback autenticado já oferece uma estratégia simples e segura, desde que seja implementado como parte do contrato.
+
+### [MUST] 2.5. Fechar o contrato de idempotência no nível das ferramentas MCP
+
+A regra de idempotência está bem encaminhada, mas eu a tornaria mais precisa antes de gerar as TASKS.
+
+Para uma mesma chave, o comportamento precisa ser determinístico mesmo quando há retries do agente, timeouts ou chamadas concorrentes:
+
+| Situação                                                      | Comportamento esperado                                                                      |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| Mesma chave e mesmo payload normalizado                       | Retornar a proposta existente.                                                              |
+| Mesma chave e payload divergente                              | Retornar conflito; não criar nem alterar a proposta original.                               |
+| Chave ausente ou inválida                                     | Rejeitar a chamada antes de criar a proposta.                                               |
+| Retry após timeout, sem saber se a primeira chamada persistiu | Reutilizar a mesma chave.                                                                   |
+| Duas chamadas concorrentes com a mesma chave                  | Uma única proposta persistida; a outra resolve para o resultado existente ou para conflito. |
+
+Há três detalhes que precisam ficar explícitos:
+
+1. **Escopo da chave:** alinhado à restrição `(tenant_id, idempotency_key)` de SPEC-004.
+2. **Payload canônico:** incluir o tipo da proposta e todos os parâmetros relevantes, com normalização determinística. Por exemplo, o valor monetário não deve gerar hashes diferentes só por variações de representação que o contrato considere equivalentes.
+3. **Responsabilidade do cliente:** um retry não pode gerar uma nova chave. Se o agente perder a resposta, deve recuperar o resultado da tentativa original.
+
+A resposta de duplicidade também precisa respeitar a semântica da interface: o MCP pode retornar um resultado de ferramenta contendo a proposta existente; isso não exige que o transporte HTTP utilize literalmente `200 OK` como contrato de negócio. Eu deixaria o código HTTP e o resultado MCP separados na especificação de implementação.
+
+### [SHOULD] 2.6. Evitar duplicar responsabilidades do protocolo MCP
+
+O pacote `model` inclui `McpToolResponse.java`, descrito como uma resposta JSON-RPC estruturada. Isso pode ser necessário para dados específicos da aplicação, mas há um risco de reimplementar manualmente envelopes que já são responsabilidade do Spring AI.
+
+Eu definiria a fronteira assim:
+
+* O Spring AI é responsável pelo envelope e pelo protocolo MCP/JSON-RPC.
+* A aplicação define os dados de domínio retornados pelas ferramentas.
+* Tipos de interação internos não devem ser apresentados como respostas oficiais do protocolo sem correspondência comprovada com a versão escolhida.
+* `input_required`, resumption e elicitação devem ser verificados com testes de integração, e não apenas por testes unitários que validam objetos inventados pelo projeto.
+
+Essa decisão reduz o acoplamento com detalhes de transporte e evita que os testes passem enquanto a comunicação real com um cliente MCP falha.
+
+### [SHOULD] 2.7. Completar a estratégia de testes de segurança
+
+A matriz atual cobre os principais componentes, mas alguns dos testes mais importantes precisam atravessar a fronteira HTTP e o protocolo real.
+
+Eu exigiria, no mínimo:
+
+| Cenário                                                 | Resultado obrigatório                                                          |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| Chamada MCP sem autenticação                            | Rejeitada antes da execução de ferramentas.                                    |
+| Tentativa de sobrescrever tenant por parâmetro          | Ignorada ou rejeitada; identidade vem do contexto confiável.                   |
+| Agente envia `accept` sem identidade humana verificável | Proposta não aprovada.                                                         |
+| Usuário autenticado, mas não autorizado para a proposta | Aprovação negada, sem execução financeira.                                     |
+| URL aberta por outro usuário                            | Não permite visualizar informações protegidas nem aprovar a proposta original. |
+| Token de URL reutilizado ou expirado                    | Rejeitado.                                                                     |
+| Resposta de elicitação duplicada ou atrasada            | Não gera segunda aprovação ou execução.                                        |
+| Proposta expirada durante a interação                   | Não pode ser aprovada com base em estado desatualizado.                        |
+| Perda do tracker ou resposta em outra instância         | Fallback seguro para Web/CLI.                                                  |
+| Repetição de uma chamada de proposta                    | Preserva a identidade da proposta conforme a chave de idempotência.            |
+| Cliente não suporta elicitação                          | Proposta permanece pendente; não ocorre aprovação automática.                  |
+| Fluxo MCP real de elicitação e retomada                 | Compatível com o transporte e a versão efetivamente selecionados.              |
+
+Os testes unitários dos componentes continuam úteis, mas não substituem essa verificação de integração.
+
+## 3. Ajustes menores de arquitetura e rastreabilidade
+
+### 3.1. Dependência de `core::api`
+
+A justificativa para `core::api` agora está explícita: `TenantContextMissingException` e `OperationOrigin.AGENT`.
+
+Isso é melhor que uma dependência genérica sem consumidor identificado. Ainda assim, eu verificaria se ambos realmente pertencem à API pública de `core` ou se são conceitos que deveriam ser expostos por contratos mais específicos.
+
+O critério não deve ser simplesmente remover a dependência, mas garantir que o módulo MCP não precise importar implementações internas ou acoplar-se a um módulo central genérico por conveniência.
+
+### 3.2. Contratos de leitura e nomes das APIs
+
+O plano agora usa:
+
+* `ledger.api.BalanceUseCase`
+* `intelligence.api.CashflowQueryUseCase`
+* `intelligence.api.SubscriptionQueryUseCase`
+* `goals.api.GoalStrategyUseCase`
+
+A justificativa de dependências está coerente com o diagrama. Entretanto, como o histórico do projeto contém nomes diferentes para alguns desses contratos, eu verificaria os nomes e assinaturas reais no código antes de considerar o plano convergido.
+
+Em particular, confirme que:
+
+* os contratos existem nos respectivos módulos;
+* os métodos e parâmetros correspondem aos casos de uso desejados;
+* as leituras respeitam o tenant autenticado;
+* o MCP depende das interfaces públicas, não de serviços concretos.
+
+Não recomendo criar interfaces novas apenas para fazer os nomes do plano coincidirem com o código. Se houver divergência, atualize o plano ou justifique a alteração contratual.
+
+### 3.3. Precisão monetária
+
+A expressão regular e o intervalo definidos são um avanço:
+
+`^[0-9]+\.[0-9]{2}$`
+
+com faixa de `0.01` a `100000000.00`.
+
+Antes de implementar, falta garantir que a validação de domínio não dependa exclusivamente da validação de entrada do MCP. O `ProposalUseCase` deve continuar protegido contra valores inválidos mesmo quando chamado por outro adaptador.
+
+Também vale validar os limites após a conversão para `BigDecimal`, rejeitando valores fora da faixa, e definir o tratamento de entradas malformadas. A camada MCP não deve ser a única barreira de integridade financeira.
+
+### 3.4. Invariantes e testes
+
+O plano já inclui `I-MCP-005`, `I-MCP-006` e `I-MCP-007`. Confirme que essas invariantes também constam na SPEC-004.1 revisada e que as definições são idênticas nas duas fontes.
+
+A rastreabilidade só estará completa se cada invariante tiver um teste que realmente prove seu comportamento. Por exemplo, `testAgentCannotApprove()` precisa comprovar que a proposta continua não aprovada — e não apenas que determinado método lançou uma exceção.
+
+---
+
+## 4. Ordem recomendada para o fechamento
+
+Eu pediria ao Antigravity para resolver os pontos abaixo **antes de produzir TASKS-004.1**:
+
+| Prioridade   | Ação                                                                                         |
+| ------------ | -------------------------------------------------------------------------------------------- |
+| **MUST 1**   | Confirmar compatibilidade entre Spring Boot, Spring AI, Streamable HTTP e elicitação nativa. |
+| **MUST 2**   | Formalizar a autorização humana independente da resposta MCP `accept`.                       |
+| **MUST 3**   | Definir o token de URL como correlação, nunca como credencial suficiente de aprovação.       |
+| **MUST 4**   | Especificar o comportamento seguro do tracker em perda de estado e múltiplas instâncias.     |
+| **MUST 5**   | Fechar a idempotência das ferramentas, incluindo concorrência e normalização do payload.     |
+| **MUST 6**   | Adicionar testes de integração reais para protocolo, autenticação, autorização e retomada.   |
+| **SHOULD 7** | Confirmar os contratos públicos existentes e a necessidade de `core::api`.                   |
+| **SHOULD 8** | Evitar duplicar tipos de protocolo que já são responsabilidade do Spring AI.                 |
+
+## 5. Prompt sugerido para o Antigravity
+
+Você pode usar o texto abaixo para conduzir a próxima revisão sem autorizar uma implementação prematura:
+
+Revise `SPEC-004.1` e `PLAN-004.1` em conjunto, com foco exclusivo na convergência arquitetural antes da criação de `TASKS-004.1`.
+
+**Não implemente código e não gere TASKS nesta etapa.**
+
+Preserve as decisões já estabelecidas e faça apenas as alterações necessárias para eliminar ambiguidades, contradições e riscos de segurança.
+
+### MUST — 1. Compatibilidade do protocolo
+
+* Verifique a compatibilidade exata entre Spring Boot `4.2.0-M2`, a versão do Spring AI selecionada e o transporte MCP Streamable HTTP.
+* Determine se a elicitação nativa e o fluxo de retomada necessários são suportados pela configuração escolhida.
+* Não confunda `STREAMABLE` com `STATELESS`.
+* Registre a evidência técnica e os testes de integração necessários.
+* Se não houver suporte comprovado, defina um fallback Web/CLI autenticado, sem simular respostas de protocolo.
+
+### MUST — 2. Autorização humana
+
+* Trate a resposta MCP `accept` como dado de interação, nunca como prova de identidade ou autorização financeira.
+* Exija identidade humana verificada por mecanismo independente e confiável antes de chamar `approveProposal()`.
+* Vincule a autorização ao usuário autorizado, tenant, proposta e estado atual.
+* Se o fluxo não conseguir comprovar a identidade humana, mantenha a proposta pendente e encaminhe o usuário para o fluxo Web/CLI autenticado.
+* Adicione testes que provem que um agente não pode autorizar uma proposta em nome do titular.
+
+### MUST — 3. URL Elicitation e tokens
+
+* Separe o token de correlação da credencial de autorização.
+* Exija HTTPS, autenticação humana e verificação de que o usuário que iniciou o fluxo é o mesmo usuário autorizado que o conclui.
+* Defina expiração, uso único e proteção contra replay.
+* Abrir a URL, consumir o token ou visualizar a proposta nunca deve aprová-la.
+* Adicione testes de token expirado, reutilizado e acessado por usuário diferente.
+
+### MUST — 4. Correlação e recuperação
+
+* Defina o comportamento em múltiplas instâncias, perda de estado, resposta duplicada e resposta atrasada.
+* Vincule a correlação à identidade autenticada, tenant e proposta original.
+* Se a correlação não puder ser validada, falhe de forma segura e use o fluxo externo de aprovação.
+* Não recrie propostas, não estenda TTL e não repita autorizações em decorrência de recuperação.
+* Preserve o estado financeiro autoritativo em `SPEC-004`.
+
+### MUST — 5. Idempotência
+
+* Defina o escopo da chave, o payload canônico e a normalização dos valores relevantes.
+* Mesma chave e mesmo payload devem recuperar a proposta existente.
+* Mesma chave e payload divergente devem resultar em conflito.
+* Chamadas concorrentes devem produzir no máximo uma proposta para a chave.
+* Retries devem reutilizar a chave original.
+* Mantenha o comportamento alinhado à restrição `(tenant_id, idempotency_key)` de `SPEC-004`.
+
+### MUST — 6. Testes e rastreabilidade
+
+* Adicione testes de integração reais para o protocolo MCP, autenticação, autorização, elicitação, retomada e fallback.
+* Confirme que as invariantes `I-MCP-005`, `I-MCP-006` e `I-MCP-007` constam na SPEC e no PLAN com definições idênticas.
+* Mantenha rastreabilidade explícita entre requisitos, invariantes, decisões arquiteturais e testes.
+* Não marque testes como implementados ou aprovados sem execução e evidência real.
+
+### SHOULD — 7. Limites dos módulos
+
+* Confirme a existência e as assinaturas dos contratos públicos de `ledger::api`, `intelligence::api`, `goals::api` e `savings::api`.
+* Justifique o uso de `core::api` pelos contratos concretamente consumidos.
+* Não introduza dependências de implementações internas nem contratos fictícios.
+* Evite duplicar tipos de protocolo JSON-RPC/MCP já fornecidos pelo Spring AI.
+
+### Critério de saída
+
+Entregue:
+
+1. Lista das divergências encontradas entre SPEC e PLAN.
+2. Alterações realizadas em cada documento, com justificativa.
+3. Riscos ainda não resolvidos e evidências necessárias.
+4. Matriz de rastreabilidade atualizada.
+5. Recomendação explícita: `Ready for Convergence Review` ou `Ready for Tasks`.
+
+Não declare o plano pronto para TASKS enquanto qualquer MUST permanecer sem resolução ou sem uma decisão arquitetural explícita.
+
+## Veredito
+
+O plano está **muito próximo de uma boa base para implementação**, mas eu não o promoveria ainda para `Ready for Tasks`.
+
+O bloqueio principal é garantir que a arquitetura de elicitação corresponda ao protocolo MCP real e que nenhuma resposta do agente — mesmo por meio de uma interação aparentemente confirmada — seja suficiente para autorizar uma movimentação financeira.
+
+Resolvidos esses pontos, o próximo passo é gerar TASKS com os contratos reais, testes de integração e critérios de aceite verificáveis. Isso preserva a separação que você estabeleceu entre **interação MCP, autorização humana e execução financeira**.
+
+[1]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html?utm_source=chatgpt.com "MCP Server Boot Starter :: Spring AI Reference"
+[2]: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx?utm_source=chatgpt.com "modelcontextprotocol/docs/specification/2026-07-28/client/elicitation.mdx at main · modelcontextprotocol/modelcontextprotocol · GitHub"
+
+
+([Home][1])([GitHub][2])([GitHub][2])
+
+[1]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html?utm_source=chatgpt.com "MCP Server Boot Starter :: Spring AI Reference"
+[2]: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx?utm_source=chatgpt.com "modelcontextprotocol/docs/specification/2026-07-28/client/elicitation.mdx at main · modelcontextprotocol/modelcontextprotocol · GitHub"

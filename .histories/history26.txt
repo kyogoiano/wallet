@@ -1,0 +1,915 @@
+Sim — **conceitualmente, a SPEC-000.7 está muito boa e está bem mais madura que a versão inicial**. A separação entre inteligência determinística e LLM ficou particularmente correta.
+
+Mas eu faria uma **próxima evolução arquitetural** antes de congelá-la para implementação. Existem alguns pontos que eu ajustaria.
+
+---
+
+# Minha avaliação geral
+
+## 🟢 O que está muito correto
+
+A arquitetura agora separa claramente:
+
+```text
+SPEC-000.5
+Graph topology
+        ↓
+SPEC-000.6
+Temporal propagation
+        ↓
+SPEC-000.7
+Behavioral similarity + investigation intelligence
+        ↓
+SPEC-000.8
+Signal fusion / final decision
+```
+
+E, principalmente:
+
+```text
+Deterministic Engine
+        │
+        ├── Calculates risk
+        ├── Classifies risk
+        └── Produces evidence
+                 │
+                 ▼
+              Local SLM
+                 │
+                 └── Explains evidence
+```
+
+Essa é a decisão mais importante da SPEC:
+
+> **The LLM is not a fraud engine. It is an evidence synthesizer.**
+
+Eu manteria isso como princípio central.
+
+---
+
+# ⚠️ Evolução 1 — O problema com `final_risk`
+
+Existe uma pequena inconsistência arquitetural.
+
+A SPEC-000.7 diz:
+
+```text
+Risk classification is deterministic
+```
+
+mas usa:
+
+```text
+R_final
+```
+
+para classificação:
+
+```text
+CRITICAL >= 0.90
+HIGH     >= 0.75
+MEDIUM   >= 0.50
+LOW
+```
+
+Porém a SPEC-000.6 explicitamente diz:
+
+> It MUST NOT calculate or mutate final_risk.
+
+E você já definiu que:
+
+```text
+SPEC-000.8
+```
+
+será responsável pela **Signal Fusion**.
+
+Portanto, eu mudaria a responsabilidade da SPEC-000.7.
+
+## SPEC-000.7 não deveria depender obrigatoriamente de `final_risk`
+
+Ela deveria aceitar dois modos:
+
+### Mode A — Pre-Fusion Investigation
+
+Quando SPEC-000.8 ainda não calculou:
+
+```text
+direct_risk
+graph_risk
+propagated_risk
+behavioral_risk
+```
+
+A investigação pode produzir:
+
+```text
+InvestigationSeverity
+```
+
+baseada em evidências individuais.
+
+### Mode B — Post-Fusion Investigation
+
+Quando `final_risk` existe:
+
+```text
+final_risk
+        ↓
+Deterministic classification
+        ↓
+Investigation dossier
+```
+
+Eu introduziria algo assim:
+
+```java
+public record FraudRiskSnapshot(
+    double directRisk,
+    double graphRisk,
+    double propagatedRisk,
+    double behavioralRisk,
+    Optional<Double> finalRisk
+) {}
+```
+
+E:
+
+```java
+public enum RiskClassificationSource {
+    SIGNAL_FUSION,
+    EVIDENCE_POLICY
+}
+```
+
+Isso evita acoplamento temporal entre `.7` e `.8`.
+
+---
+
+# ⚠️ Evolução 2 — Eu revisaria os 16 features
+
+Os 16 features são bons, mas há um problema conceitual:
+
+alguns deles parecem **features comportamentais**, enquanto outros são claramente **graph/topology features**.
+
+Por exemplo:
+
+```text
+fan_out_ratio
+fan_in_ratio
+rapid_drain_count
+unique_counterparties
+```
+
+Esses são parcialmente derivados da topologia.
+
+Enquanto:
+
+```text
+failed_auth_count
+device_switch_count
+nocturnal_ratio
+amount_std_dev
+```
+
+são mais comportamentais.
+
+Eu evitaria misturar tudo silenciosamente.
+
+---
+
+# Minha recomendação: Feature Groups
+
+Em vez de pensar apenas:
+
+```text
+vector[16]
+```
+
+eu documentaria:
+
+```text
+BehavioralFeatureVector v1
+```
+
+como:
+
+```text
+[ Transactional Behavior ]
+d1  tx_frequency
+d2  avg_amount
+d3  amount_std_dev
+d4  velocity_spike_1h
+d5  nocturnal_ratio
+
+[ Counterparty Behavior ]
+d6  unique_counterparties
+d7  new_counterparties_7d
+
+[ Flow Behavior ]
+d8  rapid_drain_count
+d9  fan_out_ratio
+d10 fan_in_ratio
+
+[ Geographic / Context ]
+d11 intl_tx_count
+
+[ Authentication / Device ]
+d12 failed_auth_count
+d13 device_switch_count
+
+[ Statistical Anomaly ]
+d14 out_of_pattern_ratio
+
+[ Dispute History ]
+d15 dispute_count
+
+[ Volume ]
+d16 total_amount_volume
+```
+
+Isso será extremamente útil quando vocês chegarem à SPEC-000.8.
+
+Porque aí o Signal Fusion Engine pode saber:
+
+```text
+Graph risk ≠ Behavioral risk
+```
+
+mesmo que alguns sinais estejam relacionados.
+
+---
+
+# ⚠️ Evolução 3 — `L2 Normalization` pode esconder magnitude
+
+Esse é, tecnicamente, o ponto que eu mais revisaria.
+
+Você está fazendo:
+
+```text
+raw features
+      ↓
+Min-Max normalization
+      ↓
+L2 normalization
+      ↓
+vector
+```
+
+O problema:
+
+Dois usuários:
+
+### User A
+
+```text
+[0.9, 0.8, 0.7, 0.8, ...]
+```
+
+### User B
+
+```text
+[0.09, 0.08, 0.07, 0.08, ...]
+```
+
+Depois de L2 normalization, eles podem ficar **muito semelhantes direcionalmente**.
+
+Ou seja:
+
+> L2 normalization intentionally removes magnitude.
+
+Isso é ótimo para:
+
+```text
+behavioral shape
+```
+
+mas ruim se magnitude também é informação de fraude.
+
+---
+
+## Minha recomendação
+
+Manter:
+
+```text
+vector(16)
+```
+
+L2-normalized para **archetype similarity**.
+
+Mas preservar também métricas de magnitude.
+
+Por exemplo:
+
+```sql
+CREATE TABLE fraud_entity_features (
+    entity_id UUID PRIMARY KEY,
+
+    feature_version INT NOT NULL,
+
+    behavioral_vector vector(16) NOT NULL,
+
+    feature_magnitude DOUBLE PRECISION NOT NULL,
+
+    transaction_count BIGINT,
+    transaction_volume NUMERIC(19,4),
+
+    updated_at TIMESTAMPTZ NOT NULL
+);
+```
+
+Assim:
+
+```text
+Vector
+=
+behavioral pattern shape
+
+Magnitude
+=
+behavioral intensity
+```
+
+Isso é muito mais robusto.
+
+---
+
+# ⚠️ Evolução 4 — HNSW provavelmente é overkill inicialmente
+
+Aqui eu faria uma consideração prática.
+
+Você possui:
+
+```text
+fraud_entity_features
+```
+
+e:
+
+```text
+fraud_archetype_centroids
+```
+
+Mas quantos archetypes teremos?
+
+Provavelmente:
+
+```text
+3
+5
+10
+20
+```
+
+Exemplo:
+
+```text
+MONEY_MULE_RAPID_DRAIN
+SMURFING
+ACCOUNT_TAKEOVER
+SYNTHETIC_IDENTITY
+FRIENDLY_FRAUD
+...
+```
+
+Para comparar um vetor contra 5 ou 10 centroides:
+
+> **não precisamos de HNSW.**
+
+Podemos simplesmente fazer:
+
+```java
+for (Archetype centroid : archetypes) {
+    similarity = dot(entityVector, centroid);
+}
+```
+
+Isso é:
+
+```text
+O(number_of_archetypes)
+```
+
+e com 10 archetypes é praticamente gratuito.
+
+---
+
+## Onde HNSW faz sentido?
+
+Se você quiser:
+
+```text
+Find the 100 entities most similar to entity X
+```
+
+ou:
+
+```text
+Find nearest suspicious behavioral neighbors
+```
+
+Aí sim:
+
+```sql
+HNSW
+```
+
+é excelente.
+
+---
+
+## Minha sugestão
+
+Separar dois casos:
+
+### Archetype matching
+
+```text
+Exact centroid comparison
+```
+
+Sem depender de ANN.
+
+### Entity similarity search
+
+```text
+pgvector HNSW
+```
+
+Quando necessário.
+
+Então eu mudaria:
+
+```text
+REQ-VEC-001
+```
+
+para deixar HNSW como:
+
+> Optional optimization for entity-to-entity similarity search.
+
+Não como requisito obrigatório para archetype scoring.
+
+---
+
+# ⚠️ Evolução 5 — `P95 < 300ms` para SLM precisa ser melhor definido
+
+Este requisito:
+
+```text
+P95 < 300ms
+```
+
+é perigoso sem especificar hardware.
+
+Porque:
+
+```text
+Llama 3.2 3B
+```
+
+em CPU:
+
+```text
+❌ provavelmente não
+```
+
+em GPU:
+
+```text
+✅ possível
+```
+
+em GPU pequena:
+
+```text
+⚠️ depende
+```
+
+E:
+
+```text
+Qwen 3B / 4B
+```
+
+também depende muito de:
+
+```text
+quantization
+context length
+output tokens
+GPU
+batching
+runtime
+```
+
+---
+
+## Eu mudaria o Benchmark Gate
+
+De:
+
+```text
+P95 < 300ms
+```
+
+Para:
+
+```text
+P95 time-to-first-token < X
+P95 structured response completion < Y
+```
+
+Por exemplo:
+
+```yaml
+benchmark:
+  balanced:
+    hardware-profile: reference-gpu
+    max-input-tokens: 4096
+    max-output-tokens: 512
+
+    p95:
+      time-to-first-token: 150ms
+      total-response: 1000ms
+```
+
+Ou separar:
+
+```text
+Interactive investigation:
+P95 < 1s
+
+Async dossier generation:
+P95 < 5s
+```
+
+Isso é mais realista.
+
+---
+
+# 🔥 Evolução 6 — O LLM precisa de um `Claim Grounding Validator`
+
+Esse é o ponto que eu considero **obrigatório**.
+
+Você já escreveu:
+
+> Every factual assertion must be traceable to evidence.
+
+Excelente.
+
+Mas precisamos transformar isso em arquitetura concreta.
+
+Eu criaria:
+
+```java
+ClaimGroundingValidator
+```
+
+Fluxo:
+
+```text
+LLM JSON
+     │
+     ▼
+JSON Schema Validation
+     │
+     ▼
+Claim Reference Validation
+     │
+     ├── GRAPH-001 exists?
+     ├── TEMPORAL-014 exists?
+     └── ARCHETYPE-003 exists?
+     │
+     ▼
+Semantic Claim Policy
+     │
+     ▼
+Accepted Narrative
+```
+
+---
+
+## Exemplo
+
+LLM retorna:
+
+```json
+{
+  "claim": "Account shares a device with 4 accounts",
+  "evidenceReferences": ["GRAPH-001"]
+}
+```
+
+Validator:
+
+```text
+GRAPH-001 exists
+```
+
+Mas ainda existe outro problema:
+
+O LLM poderia escrever:
+
+```text
+"Account shares a device with 40 accounts"
+```
+
+referenciando:
+
+```text
+GRAPH-001
+```
+
+A referência existe, mas o conteúdo foi alterado.
+
+Portanto eu faria duas camadas.
+
+### Level 1 — Reference validation
+
+```text
+Evidence ID exists.
+```
+
+### Level 2 — Claim constraint
+
+O prompt/context deveria fornecer **atomic evidence facts**, por exemplo:
+
+```json
+{
+  "id": "GRAPH-001",
+  "fact": {
+    "relationship": "SHARED_DEVICE",
+    "sharedAccounts": 4
+  }
+}
+```
+
+Idealmente o LLM não deveria inventar números.
+
+---
+
+# Minha recomendação: Evidence Language
+
+Em vez de passar apenas texto:
+
+```json
+"description": "Shared device with 4 other accounts"
+```
+
+Eu usaria:
+
+```json
+{
+  "id": "GRAPH-001",
+  "type": "SHARED_DEVICE_CLUSTER",
+  "subject": "MASK_USER_TARGET",
+  "facts": {
+    "sharedAccountCount": 4,
+    "windowHours": 24
+  }
+}
+```
+
+Isso torna validação programática muito mais forte.
+
+---
+
+# 🚨 Evolução 7 — `recommendedActions` não deveriam ser livres
+
+Hoje o LLM pode retornar:
+
+```json
+"recommendedActions": [
+  "MANUAL_REVIEW",
+  "FREEZE_OUTGOING_TRANSFERS"
+]
+```
+
+Mesmo que você diga que o LLM não decide.
+
+Ainda existe um problema:
+
+> `FREEZE_OUTGOING_TRANSFERS` é uma recomendação operacional sensível.
+
+Eu faria isso ser controlado deterministicamente.
+
+Por exemplo:
+
+```java
+public enum RecommendedAction {
+    MANUAL_REVIEW,
+    REQUEST_ADDITIONAL_VERIFICATION,
+    INCREASE_MONITORING,
+    TEMPORARY_OUTGOING_RESTRICTION,
+    ESCALATE_TO_COMPLIANCE
+}
+```
+
+Mas melhor ainda:
+
+```text
+Evidence
+     ↓
+Deterministic Action Policy
+     ↓
+Allowed Actions
+     ↓
+LLM explains rationale
+```
+
+Então o LLM não cria ações.
+
+Ele apenas pode selecionar ou explicar:
+
+```text
+AllowedActions
+```
+
+---
+
+# 🧠 Sobre o modelo: eu atualizaria a estratégia
+
+Você perguntou anteriormente sobre:
+
+```text
+Llama 3.2
+```
+
+e modelos menores.
+
+Para essa SPEC, eu **não escolheria um modelo como arquitetura principal**.
+
+A arquitetura correta é exatamente:
+
+```java
+LocalInferenceClient
+```
+
+Mas eu adicionaria:
+
+```java
+InferenceModelProfile
+```
+
+e um benchmark registry.
+
+Algo como:
+
+```text
+efficient
+    ↓
+1B–3B
+
+balanced
+    ↓
+3B–7B
+
+quality
+    ↓
+7B–14B
+```
+
+Não amarraria:
+
+```text
+balanced = Llama 3.2 3B
+```
+
+Porque o benchmark provavelmente vai decidir isso.
+
+---
+
+# Minha arquitetura recomendada
+
+```text
+                     ┌────────────────────┐
+                     │ SPEC-000.5         │
+                     │ Graph Intelligence │
+                     └─────────┬──────────┘
+                               │
+                     ┌─────────▼──────────┐
+                     │ SPEC-000.6         │
+                     │ Risk Propagation   │
+                     └─────────┬──────────┘
+                               │
+                     ┌─────────▼──────────┐
+                     │ Feature Extraction │
+                     │                    │
+                     │ 16-D Vector        │
+                     │ + Magnitude        │
+                     └─────────┬──────────┘
+                               │
+               ┌───────────────▼──────────────┐
+               │ Archetype Matcher             │
+               │ Exact Dot Product             │
+               │                              │
+               │ behavioral_risk               │
+               └───────────────┬──────────────┘
+                               │
+               ┌───────────────▼──────────────┐
+               │ Evidence Builder              │
+               │                              │
+               │ GRAPH facts                   │
+               │ TEMPORAL facts                │
+               │ ARCHETYPE facts               │
+               │ BEHAVIOR facts                │
+               └───────────────┬──────────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │ Action Policy        │
+                    │ Deterministic        │
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │ LocalInferenceClient │
+                    │                     │
+                    │ Narrative only       │
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │ ClaimGrounding       │
+                    │ Validator            │
+                    └──────────┬───────────┘
+                               │
+                    ┌──────────▼───────────┐
+                    │ Investigation Dossier│
+                    └──────────────────────┘
+```
+
+---
+
+# Minha recomendação para a SPEC-000.7
+
+Eu faria uma **v2 final** com estas mudanças:
+
+### Adicionar
+
+```text
+REQ-VEC-008
+Feature magnitude preservation
+```
+
+### Adicionar
+
+```text
+REQ-VEC-009
+Claim grounding validator
+```
+
+### Adicionar
+
+```text
+REQ-VEC-010
+Deterministic action policy
+```
+
+### Revisar
+
+```text
+REQ-VEC-001
+```
+
+HNSW → opcional para entity similarity search.
+
+### Revisar
+
+```text
+REQ-VEC-003
+```
+
+Archetype matching → exact dot-product, não ANN.
+
+### Revisar
+
+```text
+REQ-VEC-007
+```
+
+Benchmark com:
+
+```text
+hardware profile
+TTFT
+total latency
+JSON validity
+claim grounding validity
+```
+
+---
+
+## Veredito
+
+**Eu diria que a SPEC-000.7 está em ~90–95% do design ideal.**
+
+A base arquitetural está muito boa. As principais evoluções seriam:
+
+1. 🟢 preservar magnitude além do vetor normalizado;
+2. 🟢 separar exact archetype matching de HNSW similarity search;
+3. 🟢 criar `ClaimGroundingValidator` formal;
+4. 🟢 tornar ações determinísticas;
+5. 🟢 desacoplar classificação de `final_risk` até a SPEC-000.8;
+6. 🟢 tornar o benchmark de modelos hardware-aware.
+
+Depois dessas alterações, eu considero que ela estaria **pronta para gerar o PLAN-000.7 e TASKS-000.7 em TDD order**, no mesmo nível de qualidade que construímos para a **SPEC-000.6**.

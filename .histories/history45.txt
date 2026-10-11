@@ -1,0 +1,681 @@
+Yes — and this is actually a **very interesting extension** of the architecture we're discussing. The vCluster idea makes the "reusable on-prem appliance" model much more attractive.
+
+One clarification first: the page you linked is specifically the **SUSE Virtualization `rancher-vcluster` add-on**. In the current documentation it is marked **experimental** and runs Rancher itself inside a nested K3s/vCluster environment on the underlying SUSE Virtualization cluster. ([SUSE Documentation][1])
+
+But the broader **vCluster pattern** is what matters architecturally.
+
+## 1. It gives us another layer of isolation
+
+Instead of:
+
+```text
+Physical / VM hosts
+        │
+        ▼
+     RKE2
+        │
+        ├── Wallet
+        ├── Customer A
+        ├── Customer B
+        └── Customer C
+```
+
+we can have:
+
+```text
+Physical / VM infrastructure
+            │
+            ▼
+      Kubernetes host
+            │
+      ┌─────┴─────┐
+      │           │
+   vCluster A   vCluster B
+      │           │
+    Wallet      Wallet
+```
+
+Each customer/application environment gets something that **looks like a Kubernetes cluster** to the tenant/operator, without requiring a complete physical Kubernetes control plane underneath.
+
+That's potentially excellent for the "Wallet as an appliance/platform" idea.
+
+---
+
+# 2. But I would distinguish three different technologies
+
+This is important because they're easy to conflate.
+
+### RKE2
+
+The actual Kubernetes distribution:
+
+```text
+Bare metal / VM
+       ↓
+      RKE2
+       ↓
+ Kubernetes
+```
+
+RKE2 is fully conformant Kubernetes, uses containerd rather than Docker, and can run standalone or under Rancher management. ([SUSE Integration][2])
+
+### Rancher
+
+Management plane:
+
+```text
+              Rancher
+                 │
+       ┌─────────┼─────────┐
+       ▼         ▼         ▼
+     RKE2      GKE       other K8s
+```
+
+Rancher can provision Kubernetes on bare metal, on-prem VMs, and infrastructure-provider VMs. ([SUSE Documentation][3])
+
+### vCluster
+
+Virtual Kubernetes control plane:
+
+```text
+Physical K8s
+     │
+     ├── vCluster A
+     ├── vCluster B
+     └── vCluster C
+```
+
+So vCluster isn't really an alternative to RKE2.
+
+It's **another abstraction layer above Kubernetes**.
+
+---
+
+# 3. And that can produce a very interesting Wallet appliance
+
+Imagine we ship:
+
+```text
+WALLET PLATFORM
+──────────────────────────────
+
+Helm
+├── wallet-edge
+├── wallet-core
+├── NATS
+├── Dragonfly
+├── PostgreSQL
+└── observability
+```
+
+Then a customer gets:
+
+```text
+Customer Infrastructure
+        │
+        ▼
+    RKE2 cluster
+        │
+        ▼
+    vCluster
+        │
+        ▼
+   Wallet Platform
+```
+
+From the customer's perspective:
+
+```text
+kubectl
+helm
+namespaces
+secrets
+services
+deployments
+pods
+```
+
+all work normally.
+
+But underneath, you're not necessarily giving every customer their own physical Kubernetes control plane.
+
+---
+
+# 4. This becomes particularly compelling for multi-tenant deployments
+
+Suppose a bank has:
+
+```text
+Production
+DR
+Development
+Testing
+```
+
+We could have:
+
+```text
+                    RKE2
+                     │
+       ┌─────────────┼─────────────┐
+       │             │             │
+       ▼             ▼             ▼
+   vCluster       vCluster      vCluster
+      PROD          DR          DEV/QA
+       │             │             │
+    Wallet        Wallet        Wallet
+```
+
+And potentially:
+
+```text
+PROD
+├── Edge × 6
+├── Core × 4
+├── NATS × 3
+├── PostgreSQL HA
+└── Dragonfly
+
+DEV
+├── Edge × 1
+├── Core × 1
+├── NATS × 1
+└── PostgreSQL
+```
+
+Same application architecture, radically different resource profile.
+
+---
+
+# 5. But I would NOT put vCluster into 000.9.1 as a requirement
+
+This is important.
+
+I think we'd make a mistake if we write:
+
+> "Wallet requires RKE2 + Rancher + vCluster."
+
+That would destroy much of the portability we're trying to create.
+
+Instead:
+
+### 000.9.1 should define a **Runtime Contract**
+
+Something like:
+
+```text
+Wallet Runtime Contract
+│
+├── Container image
+├── Kubernetes-compatible deployment
+├── Service discovery
+├── persistent storage SPI
+├── secret injection
+├── health/readiness
+├── resource limits
+├── horizontal scaling
+├── graceful termination
+└── observability
+```
+
+Then deployment profiles implement that contract.
+
+---
+
+# 6. Profile 1 — Bare containers
+
+The absolute minimum:
+
+```text
+Docker / Podman
+     │
+     ├── wallet-edge
+     ├── wallet-core
+     ├── nats
+     ├── dragonfly
+     └── postgres
+```
+
+This could be useful for:
+
+* development;
+* demos;
+* small installations;
+* CI;
+* single-node appliances.
+
+No Kubernetes required.
+
+---
+
+# 7. Profile 2 — Native Kubernetes
+
+```text
+Kubernetes
+   │
+   ├── Edge Deployment
+   ├── Core Deployment
+   ├── NATS StatefulSet
+   ├── Dragonfly
+   └── PostgreSQL
+```
+
+Works with:
+
+* RKE2
+* GKE
+* EKS
+* AKS
+* OpenShift
+* etc.
+
+This is probably our **reference deployment model**.
+
+---
+
+# 8. Profile 3 — Rancher/RKE2
+
+For on-prem:
+
+```text
+              Rancher
+                 │
+                 ▼
+               RKE2
+                 │
+       ┌─────────┴─────────┐
+       │                   │
+   system workloads    Wallet
+                           │
+                 ┌─────────┼─────────┐
+                 ▼         ▼         ▼
+               Edge      Core      workers
+```
+
+This is probably our **preferred appliance profile**.
+
+RKE2 is also particularly interesting for a financial application because its defaults and configuration are oriented toward hardened Kubernetes deployments and CIS benchmarks. ([SUSE Documentation][4])
+
+---
+
+# 9. Profile 4 — RKE2 + Rancher + vCluster
+
+Now we get the more advanced model:
+
+```text
+               Rancher
+                  │
+                  ▼
+                RKE2
+                  │
+       ┌──────────┼──────────┐
+       ▼          ▼          ▼
+   vCluster A  vCluster B  vCluster C
+       │          │          │
+     Wallet     Wallet     Wallet
+```
+
+This becomes interesting when the infrastructure provider wants to operate **multiple isolated Wallet environments**.
+
+For example:
+
+```text
+                    Bank cluster
+                         │
+                    RKE2/Rancher
+                         │
+       ┌─────────────────┼─────────────────┐
+       │                 │                 │
+       ▼                 ▼                 ▼
+     Bank A            Bank B            Bank C
+   vCluster           vCluster          vCluster
+       │                 │                 │
+    Wallet              Wallet            Wallet
+```
+
+That's potentially a strong **private-cloud/SaaS appliance** model.
+
+---
+
+# 10. There is another SUSE technology worth considering
+
+Since you're looking at SUSE Virtualization, I'd also keep the distinction between:
+
+```text
+SUSE Virtualization
+```
+
+and:
+
+```text
+RKE2
+```
+
+in our architecture.
+
+SUSE Virtualization can provide the virtualization layer, while RKE2 provides Kubernetes on top.
+
+So a completely on-prem deployment could eventually look like:
+
+```text
+             Physical servers
+                    │
+                    ▼
+          SUSE Virtualization
+                    │
+             ┌──────┴──────┐
+             │             │
+          VM / node      VM / node
+             │             │
+             └──────┬──────┘
+                    ▼
+                  RKE2
+                    │
+                 Rancher
+                    │
+                 Wallet
+```
+
+That gives you a fairly complete private-cloud stack.
+
+---
+
+# 11. But there is a cost question
+
+This is where I'd be careful.
+
+If the customer has **one Wallet installation**, doing:
+
+```text
+SUSE Virtualization
+      +
+RKE2
+      +
+Rancher
+      +
+vCluster
+      +
+Wallet
+```
+
+could be architectural overkill.
+
+For one customer:
+
+```text
+3 VMs
+  ↓
+RKE2
+  ↓
+Wallet
+```
+
+might be vastly better.
+
+The stack should grow only when the operational problem justifies it.
+
+---
+
+# 12. I'd therefore define deployment tiers
+
+This fits your cost-conscious philosophy much better.
+
+### Tier 0 — Developer
+
+```text
+Docker Compose
+```
+
+Everything local.
+
+### Tier 1 — Small appliance
+
+```text
+3 VMs
+RKE2
+Wallet
+```
+
+No Rancher required if the customer doesn't need centralized management.
+
+### Tier 2 — Enterprise on-prem
+
+```text
+Rancher
+  ↓
+RKE2
+  ↓
+Wallet
+```
+
+Now centralized lifecycle/cluster management makes sense.
+
+### Tier 3 — Private cloud / multi-tenant
+
+```text
+Rancher
+   ↓
+RKE2
+   ↓
+vClusters
+   ├── Wallet A
+   ├── Wallet B
+   └── Wallet C
+```
+
+### Tier 4 — Public cloud
+
+```text
+GKE
+   ↓
+Wallet
+```
+
+or:
+
+```text
+GKE
+   ↓
+vCluster
+   ↓
+Wallet
+```
+
+only when there's a concrete isolation/tenant requirement.
+
+---
+
+# 13. And this changes something important in our application design
+
+We should make **pod/container awareness completely external**.
+
+For example, Core shouldn't know:
+
+```text
+"I am Core-3."
+```
+
+It should know:
+
+```text
+instanceId = UUID
+```
+
+and that's it.
+
+NATS handles distribution.
+
+Likewise Edge shouldn't know:
+
+```text
+Core-1
+Core-2
+Core-3
+```
+
+It simply knows:
+
+```text
+NATS
+  ↓
+commands.wallet.*
+```
+
+This is what makes the same container image work everywhere.
+
+---
+
+# 14. NATS becomes the scaling fabric
+
+This is one of the nicest consequences.
+
+Suppose:
+
+```text
+Edge × 20
+Core × 8
+```
+
+The topology is still:
+
+```text
+                Edge
+           ×20 instances
+                 │
+                 ▼
+             JetStream
+                 │
+                 ▼
+             Core
+           ×8 instances
+```
+
+Core consumers form the competing-consumer pool for the appropriate subject/consumer configuration.
+
+So we don't need service discovery logic in Java.
+
+Kubernetes/Rancher can kill:
+
+```text
+Core-4
+```
+
+and replace it.
+
+NATS continues.
+
+That is exactly the kind of **failure containment** we were looking for in the previous discussion.
+
+---
+
+# 15. One thing I'd change in our previous design
+
+Earlier we discussed:
+
+> same JVM in development, separate JVMs in production.
+
+I'd now make that more explicit:
+
+```text
+APPLICATION ARCHITECTURE
+        │
+        ▼
+Edge / Core
+        │
+        ├───────────────┐
+        ▼               ▼
+ same-JVM            separate
+ development         processes
+                        │
+                        ▼
+                   containers
+                        │
+              ┌─────────┼─────────┐
+              ▼         ▼         ▼
+             K8s       RKE2      CF
+                         │
+                      Rancher
+                         │
+                     vCluster
+```
+
+Every layer is optional.
+
+That is a **very strong architecture**.
+
+---
+
+## My recommendation for SPEC-000.9.1
+
+I'd now make the spec considerably more ambitious than just "Edge/Core separation".
+
+### `SPEC-000.9.1 — Edge/Core Runtime Separation & Portable Container Platform`
+
+with five pillars:
+
+**P1 — Process isolation**
+
+Edge and Core MUST be independently executable.
+
+**P2 — Container portability**
+
+Both MUST be distributable as OCI-compatible container images.
+
+**P3 — Kubernetes neutrality**
+
+Neither application may depend on Kubernetes APIs or a specific Kubernetes distribution.
+
+**P4 — Deployment profiles**
+
+The reference deployment MUST support:
+
+```text
+Docker/Podman
+Kubernetes
+RKE2
+GKE
+```
+
+and MAY support:
+
+```text
+Cloud Foundry
+Rancher/vCluster
+```
+
+**P5 — Stateful infrastructure separation**
+
+NATS JetStream, PostgreSQL and Dragonfly are infrastructure services, not part of Edge/Core process lifecycle.
+
+Then we can create a separate:
+
+> **SPEC-000.9.2 — Wallet Kubernetes & Appliance Deployment Profiles**
+
+where we actually define:
+
+```text
+Helm
+Kustomize
+RKE2
+Rancher
+vCluster
+GKE
+storage classes
+PodDisruptionBudgets
+HPA
+topology spread
+anti-affinity
+resource requests/limits
+rolling upgrades
+backup
+DR
+```
+
+That separation is important. **000.9.1 should define the runtime contract; 000.9.2 should define how we exploit Kubernetes/RKE2/Rancher/vCluster.**
+
+And I think the vCluster possibility strengthens rather than weakens the case for keeping that abstraction: the Wallet should simply be a portable workload that can run directly on Kubernetes, inside RKE2, or inside a virtual cluster without knowing which one is underneath. ([SUSE Documentation][1])
+
+[1]: https://documentation.suse.com/cloudnative/virtualization/v1.8/en/add-ons/rancher-vcluster.html "Rancher vCluster (Experimental) | SUSE® Virtualization v1.8 (Latest)"
+[2]: https://integration.suse.com/cloudnative/rke2/latest/en/introduction.html?utm_source=chatgpt.com "Introduction | RKE2 Latest"
+[3]: https://documentation.suse.com/en-us/cloudnative/rancher-srfa/latest/en/cluster-deployment/launch-kubernetes-with-rancher.html?utm_source=chatgpt.com "Launching Kubernetes with SUSE Rancher for AWS | SUSE® Rancher for AWS Latest"
+[4]: https://documentation.suse.com/cloudnative/rke2/?utm_source=chatgpt.com "SUSE Rancher Prime: RKE2 (RKE2)"

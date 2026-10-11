@@ -1,0 +1,641 @@
+Sim. Esta revisão ficou **bem mais madura** e, em termos de arquitetura, eu considero que a direção está correta. Eu faria apenas alguns ajustes antes de declarar a `SPEC-003 Rev.1` pronta para implementação.
+
+O ponto mais importante é que agora a 003 está corretamente funcionando como **macro/module foundation**, enquanto 003.1 e 003.2 ficam responsáveis pelas capacidades concretas.
+
+## 1. Veredito geral
+
+Eu classificaria assim:
+
+| Área                          | Estado                    |
+| ----------------------------- | ------------------------- |
+| Macro-scope 003               | 🟢                        |
+| Separação 003 / 003.1 / 003.2 | 🟢                        |
+| Deterministic → Semantic      | 🟢 Excelente              |
+| Typed Decision Algebra        | 🟢                        |
+| Graceful degradation          | 🟢                        |
+| Modulith/Event Registry       | 🟢                        |
+| Ledger isolation              | 🟢                        |
+| Idempotência                  | 🟡 Pequeno ajuste         |
+| Temporal truth                | 🟢                        |
+| Precision policy              | 🟢 Muito melhor           |
+| Module dependencies           | 🔴 Precisa corrigir       |
+| Phase 3.0 scope               | 🟡 Pequena inconsistência |
+| Acceptance criteria           | 🟢                        |
+| Package topology              | 🟢                        |
+
+Há **um problema que eu considero MUST corrigir**: `REQ-INTEL-001`.
+
+---
+
+# 2. `REQ-INTEL-001` está permissivo demais
+
+Hoje:
+
+```text
+allowed dependencies:
+ledger::api,
+core::api,
+core,
+goals::api
+```
+
+O problema é:
+
+```text
+core
+```
+
+Isso potencialmente permite que Intelligence dependa de **qualquer coisa exposta pelo módulo Core**, inclusive APIs que deveriam estar fora dessa fronteira.
+
+Isso contradiz parcialmente o próprio:
+
+> `I-INTEL-004`: MUST NOT depend on ledger internal persistence entities, repositories, transaction managers, or internal services.
+
+E, principalmente, a intenção de transformar Intelligence em bounded context isolado.
+
+Eu mudaria para algo mais restritivo:
+
+```text
+REQ-INTEL-001 [MUST]:
+
+Define br.com.wallet.intelligence as a Spring Modulith module
+with dependencies restricted to stable public contracts:
+
+- ledger::api
+- core::api
+- goals::api
+
+No dependency on the root `core` module is permitted unless
+the referenced type is explicitly exposed through an approved
+public API package.
+```
+
+Ou, melhor ainda, **removeria `core` completamente**, se a implementação real não precisar dele.
+
+### Minha preferência
+
+```text
+allowedDependencies = {
+    "ledger::api",
+    "core::api",
+    "goals::api"
+}
+```
+
+Isso deixa a arquitetura muito mais forte.
+
+---
+
+# 3. `I-INTEL-008`: escolher `eventId` ou `operationId`
+
+Aqui temos uma pequena inconsistência:
+
+> canonical event identity (`operationId` / `eventId`)
+
+Mas o requisito seguinte diz:
+
+> deduplication based on `operationId`
+
+Isso precisa ser resolvido.
+
+Pelas decisões da `SPEC-000.12`, nós já estabelecemos uma distinção importante:
+
+```text
+eventId     = identidade do evento
+operationId = identidade da operação financeira
+```
+
+Portanto eu **não chamaria os dois de canonical event identity**.
+
+Eu faria:
+
+```text
+I-INTEL-008 — Idempotent Event Processing
+
+Intelligence event consumers MUST be idempotent with respect
+to the canonical `eventId`.
+
+Where domain semantics require command-level deduplication,
+`operationId` MAY additionally be used as a business identity.
+```
+
+Isso segue melhor a arquitetura que já definimos para eventos Modulith.
+
+### E isso muda o REQ-INTEL-004
+
+Hoje:
+
+```text
+canonical event deduplication based on operationId
+```
+
+Eu mudaria para:
+
+```text
+REQ-INTEL-004 [MUST]:
+Implement idempotent event processing based on canonical `eventId`.
+Where recurrence/subscription semantics require financial-operation
+deduplication, `operationId` MUST be included in the domain identity
+used by the relevant projection.
+```
+
+Isso é muito mais correto.
+
+---
+
+# 4. Cuidado com "guarantee idempotent listener execution"
+
+A frase:
+
+> guarantee idempotent listener execution under at-least-once redelivery
+
+é forte demais.
+
+Idempotência não significa que o listener será executado apenas uma vez.
+
+O modelo é:
+
+```text
+event delivered
+      ↓
+listener executes
+      ↓
+persist
+      ↓
+event delivered again
+      ↓
+listener executes again
+      ↓
+same eventId detected
+      ↓
+no duplicate side effect
+```
+
+Então eu usaria:
+
+> **guarantee idempotent side effects under at-least-once redelivery**
+
+Isso é tecnicamente mais preciso.
+
+---
+
+# 5. `I-INTEL-003` ficou muito melhor
+
+A correção de:
+
+```text
+monetary scale = 2
+```
+
+versus:
+
+```text
+statistical intermediate precision
+```
+
+foi excelente.
+
+Mas eu faria uma pequena melhoria:
+
+> `minimum 6 decimal places intermediate precision`
+
+Isso ainda pode ser interpretado como "o cálculo tem exatamente 6 casas".
+
+Eu escreveria:
+
+```text
+Statistical calculations MUST use BigDecimal with sufficient
+declared intermediate precision and MUST NOT use binary floating
+point. Rounding MUST occur only at explicitly defined persistence,
+API, or comparison boundaries.
+```
+
+E, se vocês realmente quiserem uma política de 6 casas, aí sim:
+
+```text
+minimum 6 decimal places
+```
+
+como parâmetro explícito da política.
+
+Porque para CV/confidence podemos querer mais precisão internamente.
+
+---
+
+# 6. `I-INTEL-005` está correto, mas falta ONNX
+
+Hoje:
+
+```text
+{LLM, SLM, Ollama, SpringAI}
+```
+
+Isso está correto para **generative/remote semantic inference**, mas o próprio histórico da arquitetura diz que ONNX pode participar do hot path de Fraud.
+
+Portanto não devemos criar uma regra dizendo implicitamente:
+
+> ONNX é proibido no synchronous path.
+
+Não é.
+
+A regra correta é:
+
+```text
+Generative models, remote LLM APIs and SLM inference engines
+MUST NEVER execute on the financial transaction write path.
+```
+
+Isso permite:
+
+```text
+Fraud hot path
+    ↓
+ONNX
+```
+
+sem violar 003.
+
+E, separadamente:
+
+```text
+Intelligence semantic evaluator
+    ↓
+ONNX
+```
+
+continua sendo nearline.
+
+Ou seja: **o problema não é a tecnologia; é o caminho arquitetural em que ela é usada.**
+
+---
+
+# 7. `I-INTEL-006` deveria mencionar RuleEvaluator
+
+A arquitetura agora introduziu:
+
+```text
+RuleEvaluator
+OnnxSubscriptionEvaluator
+OllamaSubscriptionEvaluator
+```
+
+Isso foi uma ótima melhoria.
+
+Mas então:
+
+> "When semantic evaluators (ONNX/Ollama) are unavailable..."
+
+deveria ser:
+
+```text
+When an optional semantic evaluator is unavailable...
+```
+
+Porque o `RuleSubscriptionEvaluator` pode continuar disponível.
+
+Mais importante ainda: talvez tenhamos:
+
+```text
+RuleEvaluator
+      ↓
+DecisionAnswer(SUBSCRIPTION)
+```
+
+e:
+
+```text
+ONNX/Ollama
+      ↓
+DecisionAnswer(...)
+```
+
+Nesse caso, `DecisionUnavailable` só representa indisponibilidade de **um evaluator**, não necessariamente indisponibilidade do **semantic classification capability**.
+
+Isso combina muito melhor com o provider-neutral SPI da 000.8.1, que foi desenhado justamente para permitir diferentes evaluators.
+
+---
+
+# 8. Mas existe uma questão importante sobre o `RuleSubscriptionEvaluator`
+
+Eu manteria o `RuleSubscriptionEvaluator` como **optional semantic enrichment**, mas não deixaria ele virar uma segunda versão do Pattern Engine.
+
+Precisamos preservar:
+
+```text
+Pillar 1
+"Existe uma recorrência?"
+```
+
+versus:
+
+```text
+Pillar 2
+"O que é essa recorrência?"
+```
+
+O RuleEvaluator poderia fazer algo simples como:
+
+```text
+merchant = "Netflix"
+    → SUBSCRIPTION
+```
+
+ou:
+
+```text
+merchant/category known
+    → UTILITY
+```
+
+Mas ele **não deve reimplementar**:
+
+* cadence
+* CV
+* cycle detection
+* price spike
+* lifecycle
+
+Isso continua exclusivamente em 003.1.
+
+---
+
+# 9. Pillar 3 está correto, mas eu faria uma distinção de ownership
+
+O desenho mostra:
+
+```text
+Pillar 3: Forecasting & Goals Sync
+```
+
+e isso está bom.
+
+Mas na macro-spec eu deixaria explícito:
+
+> Pillar 3 is structurally owned by `SPEC-003.2`; SPEC-003 only defines the module boundary and integration contract.
+
+Porque senão o Antigravity pode começar a implementar:
+
+```text
+CashflowForecaster
+```
+
+durante a implementação da 003 foundation.
+
+Isso quebraria o ótimo slicing que vocês acabaram de introduzir.
+
+---
+
+# 10. A topology está muito melhor
+
+Esta versão:
+
+```text
+internal/
+    listener
+    persistence
+    decision
+    evaluator
+    service
+```
+
+é mais limpa.
+
+Mas eu faria uma alteração:
+
+```text
+internal/
+├── listener
+├── persistence
+├── decision
+├── evaluator
+└── service
+```
+
+está correto **para scaffolding**, mas não necessariamente deve virar a arquitetura definitiva de 003.1/003.2.
+
+Por exemplo, 003.1 provavelmente vai precisar de:
+
+```text
+internal.pattern
+```
+
+ou:
+
+```text
+internal.subscription
+```
+
+Então eu adicionaria uma nota:
+
+> The package topology establishes module boundaries only; capability-specific internal packages are owned by SPEC-003.1 and SPEC-003.2.
+
+Isso evita que a árvore da 003 seja interpretada como estrutura definitiva.
+
+---
+
+# 11. Há um pequeno problema no `REQ-INTEL-006`
+
+Você diz:
+
+> schema migration baseline ... `subscriptions` table DDL
+
+Mas a SPEC é agora explicitamente:
+
+> **Phase 3.0 — Module Scaffolding & Macro Architecture**
+
+Se 003.1 é quem realmente possui `subscriptions`, eu questionaria colocar a tabela concreta aqui.
+
+Há duas alternativas.
+
+### Opção A — minha preferência
+
+003 cria apenas o baseline/schema ownership:
+
+```text
+REQ-INTEL-006 [MUST]:
+Establish the PostgreSQL schema ownership and migration
+conventions for the intelligence module. Capability-specific
+tables are defined by SPEC-003.1 and SPEC-003.2.
+```
+
+E:
+
+```text
+SPEC-003.1 → subscriptions
+SPEC-003.2 → cashflow forecasts
+```
+
+### Opção B
+
+Manter `subscriptions` na 003 como foundation.
+
+Mas isso contradiz um pouco a intenção de separar macro architecture das atomic slices.
+
+**Eu escolheria A.**
+
+---
+
+# 12. `CashflowForecastDao` também está adiantado demais
+
+Na topology:
+
+```text
+SubscriptionDao
+CashflowForecastDao
+```
+
+mas 003.2 é justamente quem deveria definir forecasting.
+
+Para Phase 3.0 eu prefiro:
+
+```text
+persistence/
+    IntelligenceProjectionRepository
+```
+
+ou simplesmente não definir repositories concretos ainda.
+
+Da mesma forma:
+
+```text
+CashflowForecastUseCase
+CashflowForecast.java
+```
+
+estão antecipando 003.2.
+
+Se a meta da 003 é realmente **module foundation**, eu removeria esses artefatos da topology e deixaria a 003.2 adicioná-los.
+
+---
+
+# 13. Acceptance Criteria ficou muito bom
+
+Esta parte melhorou bastante:
+
+> `Semantic evaluator failure produces DecisionUnavailable<T> without failing candidate persistence`
+
+Excelente.
+
+E também:
+
+> `SPEC-003.1 and SPEC-003.2 capability slices cleanly extend this module foundation without breaking changes.`
+
+É exatamente o tipo de acceptance que uma macro-spec deveria ter.
+
+Eu só adicionaria:
+
+```text
+- [ ] No dependency from `intelligence` to `ledger` implementation
+  packages, persistence entities, repositories, or transaction managers.
+```
+
+porque esse é um dos boundaries fundamentais.
+
+---
+
+# 14. Eu faria mais uma correção importante no título do Pillar 2
+
+Hoje:
+
+> `PILLAR 2: SEMANTIC CLASSIFICATION`
+
+Eu usaria:
+
+> **PILLAR 2: SEMANTIC CLASSIFICATION & DECISION ENRICHMENT**
+
+Porque não queremos que a arquitetura fique presa a classificação.
+
+No futuro pode existir:
+
+```text
+SubscriptionClassification
+CommitmentConfidence
+CancellationLikelihood
+PriceChangeInterpretation
+MerchantNormalization
+```
+
+Tudo usando a mesma Decision Algebra.
+
+Isso também casa melhor com a natureza provider-neutral da `SPEC-000.8.1`. A especificação foi desenhada para perguntas tipadas e evaluators independentes, não para uma única classificação.
+
+---
+
+# 15. Minha lista final de mudanças
+
+Eu considero a SPEC praticamente **Ready**, mas faria estes ajustes:
+
+### 🔴 MUST
+
+**1. Remover `core` de `allowedDependencies`**, salvo se houver uma API pública explicitamente aprovada.
+
+**2. Corrigir `eventId` vs `operationId`:**
+
+```text
+eventId = event identity
+operationId = financial operation identity
+```
+
+**3. Alterar "idempotent listener execution" para "idempotent side effects".**
+
+**4. Não colocar `subscriptions` como schema ownership da macro 003**, se 003.1 será dona da tabela.
+
+**5. Remover `CashflowForecastDao`/forecast-specific topology da foundation**, deixando 003.2 ser dona.
+
+---
+
+### 🟡 SHOULD
+
+**6. Ajustar `I-INTEL-006` para "optional semantic evaluator".**
+
+**7. Explicitar que `RuleEvaluator` não pode reimplementar a detecção determinística de 003.1.**
+
+**8. Clarificar que a topology é apenas module foundation.**
+
+**9. Refinar precision policy para "minimum declared intermediate precision".**
+
+**10. Adicionar explicitamente no acceptance o zero acesso a persistence internals do Ledger.**
+
+---
+
+# 16. Depois desses ajustes, eu consideraria a arquitetura assim
+
+```text
+SPEC-003
+│
+├── Module Foundation
+│   ├── Modulith boundary
+│   ├── event ingestion
+│   ├── idempotency
+│   ├── analytical contracts
+│   └── isolation/security invariants
+│
+├── SPEC-003.1
+│   └── Deterministic Recurrence Engine
+│       ├── cadence
+│       ├── cycles
+│       ├── variance
+│       ├── confidence
+│       ├── lifecycle
+│       └── price spike
+│
+├── Semantic Decision Layer
+│   └── SPEC-000.8.1
+│       ├── DecisionQuestion<T>
+│       ├── Rule evaluator
+│       ├── ONNX evaluator
+│       ├── Ollama evaluator
+│       ├── DecisionComposer
+│       └── DecisionUnavailable<T>
+│
+└── SPEC-003.2
+    └── Cashflow Forecasting
+        ├── L7/L14/L30
+        ├── liquidity
+        ├── commitments
+        └── Goals CashflowProfile
+```
+
+**Essa, para mim, é a versão arquiteturalmente correta.**
+
+A grande evolução desta revisão foi transformar a 003 de uma "feature de subscriptions" em aquilo que ela realmente deve ser: **o bounded context/foundation de Intelligence**, com 003.1 e 003.2 como capabilities especializadas e `000.8.1` como uma infraestrutura semântica reutilizável, sem permitir que AI/ML assuma autoridade sobre a detecção financeira determinística.

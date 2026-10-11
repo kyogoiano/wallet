@@ -1,17 +1,17 @@
 package br.com.wallet.integration.outbox.publisher;
 
-import br.com.wallet.domain.event.DomainEventType;
-import br.com.wallet.infrasctructure.messaging.publisher.EventPublisher;
+import br.com.wallet.ledger.api.event.DomainEventType;
+import br.com.wallet.ledger.api.event.EventPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.context.annotation.Primary;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
+import java.util.UUID;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Component
-@Primary
+@Profile({"test", "fail"})
 public class FailingEventPublisher implements EventPublisher {
     private static final Logger log = LoggerFactory.getLogger(FailingEventPublisher.class);
 
@@ -22,7 +22,7 @@ public class FailingEventPublisher implements EventPublisher {
     }
 
     @Override
-    public void publish(DomainEventType eventType, String payload) throws IOException {
+    public void publish(DomainEventType eventType, String payload, UUID aggregateId) {
 
         if (failCount.getAndDecrement() > 0) {
             throw new RuntimeException("Simulated failure");

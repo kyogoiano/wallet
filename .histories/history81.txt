@@ -1,0 +1,478 @@
+Sim — e esse detalhe muda bastante a forma como eu fecharia o **000.12**. Eu não trataria Spring Modulith como simplesmente “substituto do NATS”. Na verdade, temos **dois problemas diferentes**: transporte entre processos e durabilidade/reprocessamento de eventos dentro do Core.
+
+Hoje o **2.2.0-M2** é de fato a referência de desenvolvimento da documentação 2.2; a própria documentação informa que ainda está em desenvolvimento. O 2.2 M1 também trouxe a evolução para Spring Boot 4.2 M1 / Framework 7.1 M1. ([Home][1])
+
+### O ponto mais importante
+
+Eu manteria:
+
+```text
+                    PROCESSO EDGE
+                         │
+                         │ NATS
+                         ▼
+              ┌─────────────────────┐
+              │    WALLET CORE       │
+              │   Modular Monolith   │
+              │                     │
+              │ Ledger              │
+              │ Fraud              │
+              │ Savings            │
+              │ Withdraw           │
+              │ Deposit            │
+              └─────────────────────┘
+```
+
+E **não**:
+
+```text
+Edge → NATS → Core → NATS → Fraud
+                  ↘ NATS → Savings
+```
+
+O NATS continua sendo a **fronteira de processo**.
+
+Dentro do Core:
+
+```text
+Transfer
+   │
+   │ ApplicationEvent
+   ▼
+Spring Modulith
+   ├── FraudGraphListener
+   ├── SavingsListener
+   ├── ...
+   │
+   └── Event Publication Registry
+             │
+             ▼
+        PostgreSQL
+```
+
+Isso é exatamente onde o recurso de durabilidade do Modulith fica interessante.
+
+---
+
+# E se o listener falhar?
+
+Aqui está justamente a parte que eu acho que devemos aproveitar do Modulith.
+
+O Event Publication Registry registra a publicação **dentro da transação de negócio** e mantém o registro enquanto o listener não completar com sucesso. Se o listener falhar, a publicação permanece incompleta e pode ser republicada posteriormente. ([Home][2])
+
+Desde o Modulith 2.0 existe inclusive um lifecycle mais rico para distinguir publicação pendente, em processamento, concluída etc., permitindo recuperação após crash sem simplesmente assumir que tudo que estava em processamento falhou. ([Home][3])
+
+Então podemos ter:
+
+```text
+Transaction
+────────────────────────────────────────────
+
+Ledger update
+     +
+publish(TransferCompletedEvent)
+     +
+Event Publication Registry
+     │
+     └── PostgreSQL
+
+COMMIT
+```
+
+Depois:
+
+```text
+TransferCompletedEvent
+          │
+          ▼
+   FraudGraphListener
+          │
+       FALHA
+          │
+          ▼
+ publication permanece incomplete
+          │
+          ▼
+ retry / republish
+```
+
+Isso é **muito melhor para o Core** do que criar um NATS subject só para fazer o evento atravessar módulos que vivem no mesmo processo.
+
+---
+
+# Mas isso não substitui o NATS
+
+Esse é o ponto que eu colocaria explicitamente na arquitetura.
+
+### Spring Modulith
+
+Responsabilidade:
+
+> **durabilidade e entrega de eventos dentro do mesmo processo transacional.**
+
+### NATS
+
+Responsabilidade:
+
+> **transporte durável entre processos / sistemas independentes.**
+
+Então:
+
+| Comunicação               | Tecnologia         |
+| ------------------------- | ------------------ |
+| Edge → Core               | **NATS JetStream** |
+| Core → Edge               | **NATS JetStream** |
+| Core → sistema externo    | **Outbox/NATS**    |
+| Ledger → Fraud            | **Modulith**       |
+| Ledger → Savings          | **Modulith**       |
+| Fraud → outro módulo Core | **Modulith**       |
+| Processo A → Processo B   | **NATS**           |
+
+Isso deixa a arquitetura muito mais limpa.
+
+---
+
+# E o CQRS do artigo?
+
+O artigo que você trouxe é interessante, mas eu separaria duas coisas.
+
+Ele usa o Event Publication Registry para garantir que, depois do comando, o lado de leitura consiga receber/reprocessar o evento. O próprio exemplo configura persistência dos eventos e republicação após restart. ([Java && More][4])
+
+Mas **não precisamos adotar CQRS completo** para aproveitar essa capacidade.
+
+Podemos ter:
+
+```text
+              COMMAND
+                 │
+                 ▼
+             Ledger
+                 │
+          DB Transaction
+                 │
+       ┌─────────┴──────────┐
+       │                    │
+       ▼                    ▼
+ TransferCompleted      EventPublication
+       │                    │
+       │                    ▼
+       │                PostgreSQL
+       │
+       ├──────────────► Fraud
+       │
+       └──────────────► Savings
+```
+
+Isso é **event-driven modular monolith**, não necessariamente CQRS.
+
+CQRS pode entrar onde realmente houver benefício de separar modelos de escrita/leitura.
+
+---
+
+# E aqui aparece uma vantagem enorme para o nosso projeto
+
+Nós já temos PostgreSQL como **source of truth financeiro**.
+
+Então não precisamos introduzir:
+
+```text
+PostgreSQL Ledger
+       +
+PostgreSQL Event Store
+       +
+NATS
+       +
+Kafka
+       +
+...
+```
+
+Podemos usar o próprio PostgreSQL para:
+
+```text
+Financial state
+      +
+Event publication state
+```
+
+desde que a tabela do Modulith esteja na mesma unidade transacional adequada.
+
+A documentação inclusive prevê JDBC como implementação do Event Publication Registry e permite configurar o lifecycle das publicações: `UPDATE`, `DELETE` ou `ARCHIVE`. ([Home][2])
+
+Para nosso caso, eu tenderia inicialmente a:
+
+**`ARCHIVE`**
+
+porque temos um sistema financeiro e auditabilidade interessa.
+
+Mas isso precisa ser benchmarkado; não quero transformar `ARCHIVE` em requisito sem medir crescimento e impacto da tabela.
+
+---
+
+# Então o que fazemos em caso de falha?
+
+Eu dividiria em **4 cenários**.
+
+### 1. Listener falha
+
+```text
+Ledger COMMIT
+       │
+       ▼
+Modulith listener
+       │
+       X
+       │
+       ▼
+EVENT_PUBLICATION incomplete
+```
+
+→ retry/republication.
+
+O evento **não volta para o NATS**.
+
+---
+
+### 2. Core morre depois do COMMIT
+
+Exemplo:
+
+```text
+BEGIN
+  ledger update
+  publish event
+COMMIT
+       │
+       X Core crash
+```
+
+Quando o Core volta:
+
+```text
+EVENT_PUBLICATION
+       │
+       ▼
+incomplete
+       │
+       ▼
+republish
+       │
+       ▼
+listener
+```
+
+Essa é justamente uma das capacidades que o Event Publication Registry foi desenhado para resolver. ([Home][3])
+
+---
+
+### 3. Listener executou mas Core morreu antes de marcar completion
+
+Aqui temos o clássico:
+
+```text
+listener()
+   │
+   ├── side effect realizado
+   │
+   X crash
+   │
+   └── completion não registrada
+```
+
+Na recuperação:
+
+```text
+republish
+   │
+   ▼
+listener executa novamente
+```
+
+Portanto, **os listeners precisam ser idempotentes**.
+
+Isso é fundamental.
+
+Por exemplo:
+
+```text
+TransferCompletedEvent
+eventId = 7c...
+operationId = abc...
+```
+
+Fraud pode ter:
+
+```text
+fraud_projection
+UNIQUE(event_id)
+```
+
+ou alguma estratégia equivalente baseada na identidade da operação/evento.
+
+Não devemos assumir **exactly-once**.
+
+Devemos projetar:
+
+> **at-least-once + idempotent consumer**
+
+---
+
+# 4. E se o PostgreSQL estiver indisponível?
+
+Esse é o cenário interessante.
+
+Se o banco está indisponível:
+
+```text
+Ledger transaction
+      │
+      X
+```
+
+não existe commit financeiro.
+
+Logo:
+
+**não existe evento de negócio confirmado.**
+
+Não precisamos de NATS para “guardar” um evento que nem deveria ter sido publicado.
+
+Isso é uma consequência muito boa de colocar o Event Publication Registry na mesma transação.
+
+---
+
+# E isso conversa muito bem com nosso 000.11
+
+Aqui eu faria uma separação muito rígida.
+
+### 000.11
+
+Cuida de:
+
+```text
+EDGE
+  │
+  ▼
+NATS
+  │
+  ▼
+CORE COMMAND
+  │
+  ├── success
+  │
+  └── failure
+        │
+        ▼
+   durable reprocessing
+```
+
+Ou seja:
+
+**comando financeiro que atravessou a fronteira Edge → Core.**
+
+---
+
+### 000.12
+
+Cuida de:
+
+```text
+Core command
+     │
+     ▼
+Ledger transaction
+     │
+     ▼
+Modulith Event
+     │
+     ├── Fraud
+     ├── Savings
+     └── outros módulos
+```
+
+E a durabilidade dos listeners fica apoiada pelo **Event Publication Registry**.
+
+---
+
+# Isso também resolve uma ambiguidade que tínhamos no 000.12
+
+Eu mudaria a frase:
+
+> “DLQ/failure classification/retry governed strictly by 000.11”
+
+para algo mais preciso.
+
+Porque **000.11 não deveria governar retry de um `FraudGraphListener` interno**.
+
+O 000.11 governa:
+
+> **Edge → Core command reprocessing.**
+
+Enquanto o Modulith governa:
+
+> **Core intra-process event publication/recovery.**
+
+Então teremos dois mecanismos de recuperação, mas cada um em sua fronteira:
+
+```text
+                    WALLET
+
+        ┌────────── PROCESS ────────────┐
+
+EDGE                                  CORE
+ │                                      │
+ │ NATS                                 │ Modulith
+ │                                      │ Event Registry
+ ▼                                      ▼
+COMMAND ───────────────► USE CASE ───► EVENT
+ │                                      │
+ │                                      ├── Fraud
+ │                                      ├── Savings
+ │                                      └── ...
+ ▼
+000.11                                 Modulith
+Retry/Reprocess                        Retry/Recovery
+```
+
+Isso, na minha opinião, é **mais correto arquiteturalmente** do que tentar colocar tudo em uma DLQ.
+
+---
+
+## E tem uma coisa ainda melhor: acompanhar a evolução do 2.2
+
+Eu colocaria no projeto uma regra explícita:
+
+> **Spring Modulith 2.2.0-M2 é a baseline de desenvolvimento, mas a arquitetura não deve congelar a implementação do Event Publication Registry. Antes do release final do Wallet V4, devemos revalidar as capacidades de eventos, externalization, outbox e lifecycle contra a versão final 2.2.x.**
+
+Isso é especialmente importante porque a própria documentação atual já mostra evolução em **externalization** e integração com Outbox/Namastack. O Modulith suporta externalização de eventos e diferencia o modo `module-listener` de um `outbox` efetivo. ([Home][3])
+
+Eu **não adotaria automaticamente** essas features só porque existem. Primeiro vemos o que a final do 2.2 entregar.
+
+---
+
+### Minha decisão arquitetural hoje
+
+Eu fecharia assim:
+
+**NATS não será substituído.**
+
+**NATS = process boundary.**
+
+**Spring Modulith Event Publication Registry = intra-Core durable event delivery/recovery.**
+
+**PostgreSQL = financial source of truth + durable event-publication state.**
+
+**At-least-once + idempotent consumers = semântica.**
+
+**000.11 = Edge→Core command reliability.**
+
+**000.12 = Core modularization + Modulith events.**
+
+E deixaria uma cláusula no 000.12 para **reavaliar a implementação contra Spring Modulith 2.2.0 final antes do release**, principalmente Event Publication Registry, externalization e Outbox.
+
+Isso inclusive me faz querer fazer uma pequena correção no desenho do **000.12** que discutimos: o `dlq` realmente deve sair do bounded-context/module list, e devemos introduzir explicitamente o **Event Publication Registry como mecanismo de durabilidade dos eventos intra-Core**, sem transformá-lo em uma “nova DLQ”.
+
+[1]: https://docs.spring.io/spring-modulith/reference/2.2/index.html?utm_source=chatgpt.com "Spring Modulith :: Spring Modulith"
+[2]: https://docs.spring.io/spring-modulith/reference/2.0-SNAPSHOT/events.html?utm_source=chatgpt.com "Working with Application Events :: Spring Modulith"
+[3]: https://docs.spring.io/spring-modulith/reference/events.html?utm_source=chatgpt.com "Working with Application Events :: Spring Modulith"
+[4]: https://gaetanopiazzolla.github.io/java/design-patterns/springboot/2025/03/17/cqrs.html?utm_source=chatgpt.com "Implementing CQRS with Spring Modulith | Java && More"

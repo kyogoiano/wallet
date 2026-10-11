@@ -1,0 +1,211 @@
+Yes. Looking at the revised SPEC, I would **change this part**, but I would *not* replace GitHub Pages with Vercel.
+
+The bigger opportunity is to simplify the architecture by **removing GitHub Pages entirely for Helm distribution**.
+
+Your new SPEC has effectively created three separate concerns:
+
+1. **OCI images** → GHCR
+2. **Helm charts** → GitHub Pages / `index.yaml`
+3. **Appliance deployment** → Portainer GitOps/webhook
+
+The first and third make sense. The second is now somewhat legacy/duplicated infrastructure. Your current requirement explicitly creates an `gh-pages` Helm repository in `REQ-TOP-017`.
+
+### I'd use GHCR for both images *and* Helm
+
+Modern Helm supports OCI registries natively since Helm 3.8, including `helm push`, `pull`, `install`, dependencies, and immutable digest references. ([Helm][1])
+
+So the pipeline becomes:
+
+```text
+GitHub
+   │
+   ├── GitHub Actions
+   │      │
+   │      ├── Build/Test
+   │      ├── wallet-edge → GHCR
+   │      ├── wallet-core → GHCR
+   │      └── wallet-platform Helm → GHCR OCI
+   │
+   └── Portainer
+          │
+          └── pulls Compose / image versions
+```
+
+For example:
+
+```bash
+helm package deploy/helm/wallet-platform
+
+helm push wallet-platform-4.0.0.tgz \
+  oci://ghcr.io/<owner>/helm
+```
+
+Then installation becomes:
+
+```bash
+helm install wallet-platform \
+  oci://ghcr.io/<owner>/helm/wallet-platform \
+  --version 4.0.0
+```
+
+And, importantly, Helm supports installing by immutable digest as well, which is useful for your appliance/security direction. ([Helm][1])
+
+GitHub's Container Registry already supports OCI artifacts and is designed around GitHub Actions/GITHUB_TOKEN workflows. ([GitHub Docs][2])
+
+## What about Vercel?
+
+I wouldn't use Vercel **for the Helm repository**.
+
+Vercel is attractive if you want something like:
+
+```text
+wallet-platform.dev
+├── Documentation
+├── Architecture
+├── Deployment guide
+├── API docs
+├── Helm documentation
+└── Appliance documentation
+```
+
+That's a different problem.
+
+So I'd separate:
+
+| Need                  | Technology I'd use                           |
+| --------------------- | -------------------------------------------- |
+| Source                | GitHub                                       |
+| CI/CD                 | GitHub Actions                               |
+| Docker/OCI images     | **GHCR**                                     |
+| Helm charts           | **GHCR OCI**                                 |
+| Plan B deployment     | Docker Compose + Portainer                   |
+| Kubernetes deployment | Helm                                         |
+| Documentation website | **Vercel / Cloudflare Pages / GitHub Pages** |
+| Runtime               | Edge + Core + NATS                           |
+| GitOps trigger        | Portainer                                    |
+
+This is actually **simpler than your current SPEC**.
+
+### The particularly nice part
+
+You eliminate:
+
+```text
+gh-pages branch
+       ↓
+helm-pages.yml
+       ↓
+index.yaml
+       ↓
+GitHub Pages HTTP server
+       ↓
+helm repo add
+```
+
+and replace it with:
+
+```text
+GitHub Actions
+       ↓
+GHCR OCI
+       ↓
+helm install oci://...
+```
+
+Helm itself now recommends considering OCI registries when creating a chart repository. ([Helm][3])
+
+---
+
+## I'd modify your SPEC like this
+
+Your current section:
+
+> **Pillar F: Automated Delivery, GitHub Pages Helm Repo & Portainer GitOps**
+
+should become something like:
+
+### `Pillar F: Automated OCI Delivery & Appliance GitOps`
+
+And:
+
+```text
+REQ-TOP-016 [MUST]
+GitHub Actions MUST build, test and publish wallet-edge and wallet-core
+OCI images to GHCR using immutable commit/version tags.
+
+REQ-TOP-017 [MUST]
+GitHub Actions MUST package and publish the wallet-platform Helm chart
+as an OCI artifact to GHCR.
+
+REQ-TOP-018 [MUST]
+Plan B MUST support automated appliance redeployment through Portainer
+Webhook and/or Git repository polling.
+
+REQ-TOP-019 [SHOULD]
+OCI images and Helm charts SHOULD be referenced by immutable version
+and/or digest in production deployments.
+```
+
+Then remove:
+
+```text
+helm-pages.yml
+gh-pages branch
+index.yaml
+GitHub Pages Helm repository
+```
+
+That would also clean up your current acceptance criteria:
+
+```text
+[x] GitHub Actions workflow publishes multi-stage OCI images to GHCR
+    and triggers Portainer continuous deployment.
+
+[x] GitHub Actions publishes the Helm chart as an OCI artifact to GHCR.
+```
+
+instead of:
+
+```text
+[x] GitHub Pages Helm Chart Repository workflow publishes packaged
+    charts and index.yaml.
+```
+
+Your current SPEC explicitly has both `REQ-TOP-016` and `REQ-TOP-017` around GHCR + GitHub Pages.
+
+---
+
+### One other thing I'd change
+
+There's a subtle conceptual issue with this line:
+
+> **Plan B appliance MUST support automated redeployment triggered via Portainer Webhook invocation from the CI/CD pipeline and/or Git repository polling.**
+
+I'd make **Git repository polling the fallback**, not an equal primary mechanism.
+
+For your appliance architecture I'd prefer:
+
+```text
+GitHub Actions
+    │
+    ├── build/test
+    ├── publish images → GHCR
+    ├── publish Helm → GHCR
+    │
+    └── Portainer webhook
+             │
+             ▼
+       Appliance
+             │
+             └── pull immutable image
+```
+
+The appliance doesn't need to host a Helm repository or become a sophisticated GitOps platform.
+
+That fits very well with your original goal of a **low-cost, appliance-grade deployment**: minimal moving pieces, no Kubernetes tax for Plan B, but still a clean upgrade path to Rancher/GKE.
+
+**So my recommendation is: don't move from GitHub Pages → Vercel. Move from GitHub Pages → GHCR OCI.** Use Vercel/Cloudflare Pages later only if you want a polished public documentation/product site.
+
+[1]: https://docs.helm.sh/docs/v3/topics/registries/?utm_source=chatgpt.com "Use OCI-based registries | Helm"
+[2]: https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry?utm_source=chatgpt.com "Working with the Container registry - GitHub Docs"
+[3]: https://docs.helm.sh/docs/topics/chart_repository/?utm_source=chatgpt.com "The Chart Repository Guide | Helm"

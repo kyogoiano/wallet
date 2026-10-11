@@ -1,0 +1,716 @@
+Sim. Comparando este `PLAN-003` com a Rev do `SPEC-003` que fechamos, **a direção está correta**, mas eu **não marcaria o PLAN como “Approved / Ready for Tasks” ainda**. Há alguns pontos de drift entre SPEC → PLAN, e dois deles são arquiteturalmente importantes.
+
+## Veredito
+
+**Status que eu daria agora: `REVIEW REQUIRED`**
+
+Eu classificaria assim:
+
+| Área                           | Estado                                     |
+| ------------------------------ | ------------------------------------------ |
+| Modulith boundary              | 🟢 correto                                 |
+| Event Publication Registry     | 🟢 correto                                 |
+| At-least-once / idempotência   | 🟢 quase correto                           |
+| Multi-tenancy                  | 🟢 conceito correto, mas há ID drift       |
+| Precision policy               | 🟢 correto                                 |
+| Hot-path airgap                | 🟢 correto                                 |
+| Schema ownership               | 🟢 melhoria correta                        |
+| Separation 003 / 003.1 / 003.2 | 🟡 ainda há vazamento                      |
+| Semantic Decision Layer        | 🟡 está entrando demais no 003.0           |
+| Traceability SPEC → PLAN       | 🔴 precisa corrigir                        |
+| Health/lifecycle component     | 🔴 mal posicionado                         |
+| Topology                       | 🔴 ainda mistura foundation com capability |
+
+Os principais problemas são estes.
+
+---
+
+# 1. 🔴 `I-INTEL-010` aparece no PLAN, mas não está na Rev do SPEC
+
+Este é o problema de traceability mais objetivo.
+
+O PLAN usa:
+
+```text
+I-INTEL-010
+```
+
+em:
+
+* ADR-003.3
+* `REQ-INTEL-005`
+* `REQ-INTEL-006`
+* traceability matrix
+
+Mas na Rev do SPEC que revisamos, os invariants estavam:
+
+```text
+I-INTEL-001
+...
+I-INTEL-009
+```
+
+Não havia `I-INTEL-010`.
+
+Então temos uma regra importante do nosso SDD:
+
+> **PLAN não pode criar um invariant que não existe no SPEC ratificado.**
+
+### Correção
+
+Se a intenção é manter a regra de multi-tenancy como invariant próprio, devemos promovê-la explicitamente no `SPEC-003`:
+
+```text
+I-INTEL-010 — Tenant Isolation
+
+All intelligence domain models, events, persistence keys and analytical
+state MUST be explicitly tenant-scoped. Cross-tenant aggregation,
+lookup or persistence MUST be impossible by construction.
+```
+
+Mas eu **não criaria isso no PLAN**.
+
+Alternativamente, se a Rev já considera essa regra coberta por `I-INTEL-004`, `I-SDD-007` e os contratos existentes, então o PLAN deve simplesmente remover `I-INTEL-010`.
+
+**Minha preferência:** adicionar `I-INTEL-010` ao SPEC, porque tenant isolation é importante demais para ficar implícito.
+
+---
+
+# 2. 🔴 O PLAN ainda mistura Phase 3.0 com SPEC-003.1
+
+Este trecho é o maior problema arquitetural:
+
+```text
+subgraph SemanticDecision["internal.decision & evaluator"]
+    DecisionQuestion["SubscriptionClassificationQuestion"]
+    DecisionComposer["SubscriptionDecisionComposer\n(SPEC-000.8.1 SPI)"]
+    RuleEvaluator["RuleSubscriptionEvaluator\n(Deterministic heuristics)"]
+end
+```
+
+E depois:
+
+```text
+RuleEvaluator["RuleSubscriptionEvaluator\n(Deterministic heuristics)"]
+```
+
+Isso conflita com a separação que fizemos no SPEC.
+
+O `RuleSubscriptionEvaluator` **não deveria ser parte da foundation 003.0**.
+
+Mais importante: ele não deve voltar a implementar recurrence detection.
+
+O princípio deveria ser:
+
+```text
+SPEC-003.1
+    deterministic recurrence engine
+             │
+             ▼
+       Subscription Candidate
+             │
+             ▼
+SPEC-000.8.1
+    semantic classification
+             │
+             ├── Rule evaluator
+             ├── ONNX evaluator
+             └── Ollama evaluator
+```
+
+Ou seja:
+
+### 003.0
+
+Define o **boundary** para que isso possa existir.
+
+### 003.1
+
+Cria o candidato determinístico:
+
+> "Isto parece uma recorrência."
+
+### 000.8.1
+
+Classifica/enriquece:
+
+> "Esta recorrência parece ser uma SUBSCRIPTION / UTILITY / INSURANCE..."
+
+Isso é exatamente a separação que queríamos.
+
+---
+
+# 3. 🔴 `Subscription` está no módulo foundation, mas é propriedade de 003.1
+
+O PLAN coloca:
+
+```text
+api/model/
+    Subscription.java
+    SubscriptionCadence.java
+    SubscriptionStatus.java
+    SubscriptionClassification.java
+```
+
+Mas pelo nosso desenho atual:
+
+### `Subscription`
+
+é claramente domínio de:
+
+```text
+SPEC-003.1 — Deterministic Recurrence Engine
+```
+
+O mesmo vale para:
+
+```text
+SubscriptionCadence
+SubscriptionStatus
+```
+
+E provavelmente:
+
+```text
+SubscriptionClassification
+```
+
+é contrato da camada semântica / 000.8.1, não do foundation 003.
+
+Portanto eu evitaria fazer o Phase 3.0 criar:
+
+```text
+br.com.wallet.intelligence.api.model.Subscription
+```
+
+porque isso transforma o foundation em dono do domínio de subscriptions.
+
+---
+
+# 4. 🔴 `InferredCashflowProfile` também está adiantado
+
+O mesmo acontece aqui:
+
+```text
+InferredCashflowProfile
+```
+
+Pelo SPEC revisado, isso pertence à integração de:
+
+```text
+SPEC-003.2
+    Forecasting
+        commitments
+        liquidity
+        L7/L14/L30
+        Goals CashflowProfile
+```
+
+Então 003.0 deveria apenas estabelecer o **boundary/API contract necessário para 003.2**, se houver necessidade.
+
+Não deveria implementar o modelo de forecast/profile agora.
+
+---
+
+# 5. 🟡 O `HealthService` não deveria estar no fluxo de eventos
+
+O diagrama mostra:
+
+```text
+EventListener
+    ↓
+IdempotencyGuard
+    ↓
+HealthService
+```
+
+Isso não faz muito sentido arquiteturalmente.
+
+`IntelligenceModuleHealthService` pode existir para:
+
+* readiness
+* liveness
+* configuration verification
+* registry health
+* observability
+
+Mas não deveria ser uma etapa do processamento:
+
+```text
+financial event
+    → idempotency
+    → health service
+```
+
+Isso mistura:
+
+**business processing**
+
+com
+
+**operational health**.
+
+Eu removeria a seta:
+
+```text
+IdempotencyGuard --> HealthService
+```
+
+E deixaria:
+
+```text
+IntelligenceModuleHealthService
+    └── observes module infrastructure
+```
+
+se realmente houver necessidade dele nesta fase.
+
+Na realidade, para Phase 3.0 eu provavelmente nem criaria esse service ainda, a menos que exista requisito concreto.
+
+---
+
+# 6. 🟡 Idempotency: `eventId + operationId` precisa ficar mais preciso
+
+O PLAN diz:
+
+> `Canonical Event Idempotency Guard (eventId + operationId)`
+
+Isso ainda pode induzir uma implementação errada.
+
+A regra que estabelecemos é:
+
+```text
+eventId = identity of the event
+operationId = identity of the financial operation
+```
+
+Logo:
+
+### Redelivery protection
+
+deve ser:
+
+```text
+eventId
+```
+
+### Business-level deduplication
+
+pode usar:
+
+```text
+operationId
+```
+
+dependendo da capacidade.
+
+Eu mudaria para:
+
+```text
+Canonical Event Idempotency Guard
+(eventId)
+```
+
+e documentaria:
+
+```text
+operationId MAY be used for domain-level deduplication
+where business semantics require it.
+```
+
+Isso evita alguém implementando uma chave:
+
+```text
+(eventId, operationId)
+```
+
+como se os dois fossem necessários para identificar o evento.
+
+---
+
+# 7. 🟡 O desenho do Registry está um pouco enganoso
+
+Temos:
+
+```text
+EvtTransfer
+    ↓
+EventRegistry
+    ↓
+DBRegistry
+```
+
+e:
+
+```text
+EventRegistry
+    -.-> EventListener
+```
+
+Conceitualmente está correto, mas eu mudaria a representação para deixar claro que:
+
+**Spring Modulith/Event Publication Registry é o mecanismo de durabilidade da publicação intra-Core.**
+
+Não queremos que alguém interprete:
+
+```text
+Ledger → Event → DBRegistry → Listener
+```
+
+como se `event_publication` fosse uma espécie de message queue intermediária.
+
+Eu faria algo como:
+
+```text
+Ledger transaction
+      │
+      ├── domain event publication
+      │
+      ▼
+Spring Modulith Event Publication Registry
+      │
+      │ PostgreSQL-backed durable publication state
+      ▼
+Intelligence @ApplicationModuleListener
+```
+
+Isso fica mais alinhado ao 000.12.
+
+---
+
+# 8. 🟡 `subscriptions` ainda aparece no banco da foundation
+
+O PLAN corretamente diz:
+
+> concrete table `subscriptions` is owned by SPEC-003.1
+
+Mas o diagrama continua mostrando:
+
+```text
+DBSubscriptions["subscriptions Table"]
+```
+
+dentro do PLAN-003.
+
+Isso gera uma pequena contradição:
+
+> "003 não possui essa tabela, mas o PLAN 003 desenha essa tabela como parte da arquitetura."
+
+Eu removeria completamente do diagrama de `PLAN-003`.
+
+O mesmo vale para:
+
+```text
+cashflow_forecasts
+```
+
+que nem deveria aparecer na foundation.
+
+O diagrama deveria terminar na interface/boundary:
+
+```text
+SPEC-003 Foundation
+       │
+       ├──────────────► SPEC-003.1
+       │
+       └──────────────► SPEC-003.2
+```
+
+---
+
+# 9. 🔴 A topology precisa ser reduzida
+
+Hoje temos:
+
+```text
+api.model
+    Subscription
+    SubscriptionCadence
+    SubscriptionStatus
+    SubscriptionClassification
+    InferredCashflowProfile
+```
+
+Isso transforma 003.0 em uma espécie de "domain model umbrella".
+
+Eu faria o Phase 3.0 muito menor:
+
+```text
+src/main/java/br/com/wallet/intelligence
+├── package-info.java
+│
+├── api
+│   └── event
+│       └── ...
+│
+└── internal
+    ├── listener
+    │   └── SpendingEventListener
+    │
+    └── service
+        └── ...
+```
+
+E somente adicionar contratos públicos quando realmente forem necessários para comunicação entre 003, 003.1 e 003.2.
+
+### 003.1 adiciona
+
+```text
+subscription/
+├── Subscription
+├── SubscriptionCadence
+├── SubscriptionStatus
+├── recurrence/
+├── persistence/
+└── ...
+```
+
+### 003.2 adiciona
+
+```text
+forecast/
+├── CashflowForecast
+├── InferredCashflowProfile
+├── liquidity/
+├── commitments/
+└── ...
+```
+
+### Semantic Decision Layer
+
+fica conceitualmente separado:
+
+```text
+SPEC-000.8.1
+```
+
+e 003.1/003.2 usam a API dele.
+
+---
+
+# 10. 🟡 Traceability matrix tem drift de requirements
+
+O PLAN apresenta:
+
+```text
+REQ-INTEL-008 [SHOULD]
+REQ-INTEL-009 [SHOULD]
+REQ-INTEL-010 [WON'T]
+REQ-INTEL-011 [WON'T]
+```
+
+Mas na Rev que fechamos, o desenho era:
+
+```text
+REQ-INTEL-008 [SHOULD]
+```
+
+e:
+
+```text
+REQ-INTEL-009 [WON'T]
+REQ-INTEL-010 [WON'T]
+```
+
+Portanto o PLAN parece ter uma versão intermediária do SPEC.
+
+Isso é exatamente o tipo de coisa que nosso processo SDD deveria impedir.
+
+### Regra
+
+```text
+SPEC = source of truth
+PLAN = decomposition
+TASKS = executable decomposition
+```
+
+Então o PLAN **não pode ter uma taxonomia de requirements diferente da Rev do SPEC**.
+
+---
+
+# 11. 🟢 Precision policy está boa
+
+Aqui eu não mudaria muito:
+
+```text
+Monetary:
+BigDecimal scale 2
+HALF_EVEN
+```
+
+e:
+
+```text
+Statistics:
+BigDecimal
+declared intermediate precision >= 6
+```
+
+Também está correta a decisão de:
+
+> rounding only at persistence, API, or comparison boundaries.
+
+Isso está alinhado com a revisão anterior.
+
+---
+
+# 12. 🟢 Hot-path airgap está melhor
+
+Esta parte ficou boa:
+
+```text
+Deps(SynchronousTxPath)
+    ∩ {LLM, SLM, Ollama, SpringAI}
+    = ∅
+```
+
+Especialmente porque **não proibiu ONNX globalmente**.
+
+Isso é importante devido ao nosso desenho anterior:
+
+```text
+Fraud hot path
+    Rules + ONNX + DragonflyRiskProfile
+```
+
+Enquanto aqui:
+
+```text
+Spending Intelligence
+    semantic evaluation
+    nearline/asynchronous
+```
+
+Portanto a distinção tecnológica está correta.
+
+---
+
+# 13. 🟢 ADR de schema ownership é uma boa correção
+
+Este:
+
+> `SPEC-003 establishes schema conventions ... concrete table subscriptions is owned by SPEC-003.1 ... cashflow_forecasts by SPEC-003.2`
+
+é exatamente a direção que eu esperaria.
+
+Só precisa ser refletido também no **package topology** e no **diagram**, não apenas no ADR.
+
+---
+
+# Minha proposta para o PLAN
+
+Eu faria uma Rev.1 do PLAN com uma regra extremamente simples:
+
+> **PLAN-003 implementa somente a infraestrutura arquitetural necessária para que 003.1 e 003.2 possam existir.**
+
+Então o Phase 3.0 teria:
+
+```text
+003.0
+│
+├── Modulith module boundary
+│
+├── Ledger event ingestion
+│   ├── TransferCompletedEvent
+│   └── WithdrawCompletedEvent
+│
+├── Event Publication Registry integration
+│
+├── eventId idempotent side effects
+│
+├── tenant isolation
+│
+├── precision conventions
+│
+├── hot-path / AI boundary
+│
+├── architecture tests
+│
+└── public integration contracts
+```
+
+E **não teria**:
+
+```text
+❌ recurrence algorithm
+❌ Subscription entity
+❌ SubscriptionCadence
+❌ SubscriptionStatus
+❌ subscriptions table
+❌ forecast engine
+❌ cashflow_forecasts
+❌ L7/L14/L30
+❌ RuleSubscriptionEvaluator implementation
+❌ Ollama implementation
+❌ ONNX implementation
+```
+
+O último ponto é importante: o PLAN pode definir a **integration seam** para `SPEC-000.8.1`, mas não precisa implementar a semantic layer inteira em Phase 3.0.
+
+---
+
+## Estrutura que eu considero correta
+
+```text
+SPEC-003
+│
+├── Phase 3.0 — Module Foundation
+│   │
+│   ├── Modulith boundary
+│   ├── Event Publication Registry
+│   ├── Event ingestion
+│   ├── eventId idempotency
+│   ├── tenant isolation
+│   ├── analytical contracts
+│   └── architecture verification
+│
+├── SPEC-003.1 — Deterministic Recurrence Engine
+│   │
+│   ├── Subscription
+│   ├── SubscriptionCadence
+│   ├── SubscriptionStatus
+│   ├── recurrence detection
+│   ├── cycle clustering
+│   ├── variance/CV
+│   ├── price spike
+│   └── subscriptions persistence
+│
+├── SPEC-000.8.1 — Semantic Decision Algebra
+│   │
+│   ├── DecisionQuestion<T>
+│   ├── DecisionAnswer<T>
+│   ├── DecisionUnavailable<T>
+│   ├── Rule evaluator
+│   ├── ONNX evaluator
+│   ├── Ollama evaluator
+│   └── DecisionComposer
+│
+└── SPEC-003.2 — Cashflow Forecasting
+    │
+    ├── L7
+    ├── L14
+    ├── L30
+    ├── liquidity
+    ├── commitments
+    ├── InferredCashflowProfile
+    ├── forecast persistence
+    └── Goals integration
+```
+
+### Em resumo
+
+**A arquitetura do PLAN está boa, mas o documento ainda carrega resíduos da versão anterior do SPEC.**
+
+Eu corrigiria obrigatoriamente antes dos TASKS:
+
+1. 🔴 resolver `I-INTEL-010`;
+2. 🔴 remover `RuleSubscriptionEvaluator` da implementação 003.0;
+3. 🔴 retirar `Subscription*` da foundation;
+4. 🔴 retirar `InferredCashflowProfile` da foundation;
+5. 🔴 alinhar `REQ-INTEL-008..011` exatamente com a Rev do SPEC;
+6. 🔴 remover `subscriptions` do diagrama do PLAN-003;
+7. 🟡 corrigir `eventId` vs `operationId`;
+8. 🟡 retirar `HealthService` do fluxo de processamento;
+9. 🟡 deixar claro que 003.0 **define boundaries**, enquanto 003.1/003.2 **implementam capabilities**.
+
+Depois dessas correções, eu consideraria o `PLAN-003` realmente **Ready for Tasks**. A estrutura geral está bastante madura; o problema agora não é arquitetura nova, é **garantir que o PLAN não reintroduza responsabilidades que acabamos de separar no SPEC**.

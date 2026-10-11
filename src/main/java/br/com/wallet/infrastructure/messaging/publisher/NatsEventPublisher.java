@@ -1,0 +1,76 @@
+package br.com.wallet.infrastructure.messaging.publisher;
+
+import br.com.wallet.ledger.api.event.DomainEventType;
+import br.com.wallet.ledger.api.event.EventPublisher;
+import br.com.wallet.ledger.api.exceptions.EventPublishException;
+import io.nats.client.Connection;
+import io.nats.client.PublishOptions;
+import io.nats.client.impl.Headers;
+import io.nats.client.impl.NatsMessage;
+import org.jspecify.annotations.NonNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.context.annotation.Profile;
+import org.springframework.stereotype.Component;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.util.UUID;
+
+@Component
+@Profile({"!in-memory", "!fail"})
+public class NatsEventPublisher implements EventPublisher, JetStreamConfig {
+
+    private final Logger log = LoggerFactory.getLogger(NatsEventPublisher.class);
+    private final Connection connection;
+    private final ObjectReader objectReader;
+    private final Clock clock;
+
+    public NatsEventPublisher(final Connection connection, final ObjectMapper objectMapper, final Clock clock) {
+        this.connection = connection;
+        this.objectReader = objectMapper.reader();
+        this.clock = clock;
+    }
+
+    @Override
+    public void publish(@NonNull final DomainEventType eventType, final @NonNull String payload, UUID aggregateId) throws IOException {
+        final var headers = new Headers();
+        headers.add("type", eventType.getClazz().getSimpleName());
+        headers.add("version", "v1"); // used for future extensions
+        headers.add("created_at", clock.instant().toString());
+
+        // Log event data for traceability
+        final var eventNode = objectReader.readTree(payload);
+        log.info("Publishing event data: {}", eventNode.toString());
+
+        final var natsMsgId = eventType.name() + "-" + aggregateId.toString();
+        headers.add("Nats-Msg-Id", natsMsgId); // dedup JetStream per event type and aggregate
+        final var message = NatsMessage.builder()
+                .subject(eventType.getSubject())
+                .headers(headers)
+                .data(payload.getBytes(StandardCharsets.UTF_8))
+                .build();
+
+        final var publishOptions = PublishOptions.builder()
+                .expectedStream("events")
+                .build();
+
+        try {
+            final var jetStream = connection.jetStream();
+            final var ack = jetStream.publish(message, publishOptions);
+            if (ack.isDuplicate()) {
+                log.warn("Event [{}] to subject [{}] was deduplicated by NATS (duplicate message ID: {})",
+                        eventType, eventType.getSubject(), natsMsgId);
+            } else {
+                log.debug("Published event [{}] to subject [{}], seqNo={}",
+                        eventType, eventType.getSubject(), ack.getSeqno());
+            }
+        } catch (Exception ex) {
+            log.error("Failed to publish event [{}] to NATS subject [{}]: {}", eventType, eventType.getSubject(), ex.getMessage());
+            throw new EventPublishException("Unable to publish event to NATS: " + eventType, ex);
+        }
+    }
+}

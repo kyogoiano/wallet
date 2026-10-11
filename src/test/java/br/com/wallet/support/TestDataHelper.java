@@ -1,8 +1,8 @@
 package br.com.wallet.support;
 
-import br.com.wallet.domain.LedgerEntry;
-import br.com.wallet.domain.LedgerType;
-import br.com.wallet.infrasctructure.outbox.OutboxStatus;
+import br.com.wallet.ledger.api.domain.LedgerEntry;
+import br.com.wallet.ledger.api.domain.LedgerType;
+import br.com.wallet.ledger.internal.outbox.OutboxStatus;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
@@ -155,7 +155,7 @@ public class TestDataHelper {
     public List<LedgerEntry> getLedgerEntries(UUID walletId) {
         return jdbc.query("""
             SELECT wallet_id, amount, type, operation_id, user_id,
-                   sequence, hash, previous_hash, created_at
+                   sequence, hash, previous_hash, created_at, tenant_id
             FROM ledger
             WHERE wallet_id = ?
             ORDER BY sequence ASC
@@ -168,7 +168,8 @@ public class TestDataHelper {
                 rs.getLong("sequence"),
                 rs.getString("hash"),
                 rs.getString("previous_hash"),
-                rs.getTimestamp("created_at").toInstant()
+                rs.getTimestamp("created_at").toInstant(),
+                rs.getString("tenant_id")
         ), walletId);
     }
 

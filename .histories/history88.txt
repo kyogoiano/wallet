@@ -1,0 +1,545 @@
+Agora sim, esta Rev está **bem mais alinhada** com a separação que definimos. O PLAN deixou de tentar implementar 003.1/003.2 e passou a ser realmente um **module foundation**.
+
+Eu ainda faria uma última rodada de correções antes de aceitar como `Ready for Tasks`. São poucas, mas algumas são importantes para manter a rastreabilidade do SDD.
+
+## Veredito
+
+**Arquitetura: 🟢 aprovada**
+
+**PLAN como documento SDD: 🟡 quase Ready**
+
+Eu faria **5 correções MUST** e algumas melhorias menores.
+
+---
+
+# 1. 🔴 MUST — `I-INTEL-010` precisa existir no SPEC
+
+Este continua sendo o principal ponto.
+
+O PLAN usa:
+
+```text
+I-INTEL-010 — Strict Multi-Tenant Partitioning
+```
+
+em vários lugares:
+
+* ADR-003.3
+* testes
+* traceability
+
+Se a Rev do `SPEC-003` que estamos usando realmente termina em `I-INTEL-009`, então isso é **SPEC → PLAN drift**.
+
+O PLAN não pode criar um invariant.
+
+### Minha recomendação
+
+
+# 2. 🔴 MUST — `REQ-INTEL-005` não parece estar sendo implementado pelo foundation
+
+Agora o PLAN diz:
+
+```text
+REQ-INTEL-005
+SpendingEventListener (tenantId enforcement)
+```
+
+Isso é razoável, **desde que o SPEC realmente diga que o listener é responsável por essa validação**.
+
+Mas há uma questão conceitual:
+
+```text
+Event
+  ↓
+SpendingEventListener
+  ↓
+tenant validation
+```
+
+não deve significar que o listener cria um `TenantContext` global/thread-local.
+
+O que queremos é:
+
+```text
+financial event
+      │
+      ├── eventId
+      ├── operationId
+      └── tenantId
+             │
+             ▼
+      validate tenant
+             │
+             ▼
+      pass immutable tenant-scoped event
+```
+
+Então eu mudaria:
+
+> `tenantId enforcement`
+
+para:
+
+> `tenantId validation and propagation`
+
+Isso é mais preciso.
+
+---
+
+# 3. 🔴 MUST — o diagrama ainda atribui responsabilidade semântica ao 003.1
+
+Este trecho:
+
+```text
+EventListener -.->|delegates to candidate ingestion| Slice31
+Slice31 -.->|semantic enrichment| Slice081
+Slice31 -.->|active subscriptions feed| Slice32
+```
+
+é conceitualmente plausível, mas está indo além do que o PLAN-003 deveria definir.
+
+Especialmente:
+
+```text
+Slice31 → Slice081
+```
+
+e
+
+```text
+Slice31 → Slice32
+```
+
+são decisões de integração futuras.
+
+O PLAN-003 deveria mostrar apenas:
+
+```text
+EventListener
+      │
+      ▼
+Intelligence Foundation
+      │
+      ├──────────► SPEC-003.1
+      │
+      └──────────► SPEC-003.2
+```
+
+E deixar os fluxos internos de 003.1/003.2 para os respectivos PLANs.
+
+### Eu substituiria:
+
+```text
+IdempotencyGuard -.->|delegates to candidate ingestion| Slice31
+Slice31 -.->|semantic enrichment| Slice081
+Slice31 -.->|active subscriptions feed| Slice32
+```
+
+por:
+
+```text
+IdempotencyGuard -.-> DownstreamCapabilities
+```
+
+ou simplesmente removeria essas setas.
+
+O objetivo do PLAN-003 é definir **extension points**, não fechar o desenho de 003.1/003.2.
+
+---
+
+# 4. 🔴 MUST — `REQ-INTEL-007` está fazendo duas coisas diferentes
+
+Hoje:
+
+```text
+REQ-INTEL-007
+NoInternalEventNatsDependencyTest,
+ZeroLedgerMutationTest
+```
+
+Isso mistura:
+
+1. transporte;
+2. mutação financeira.
+
+Se o SPEC define isso como um único requirement, tudo bem do ponto de vista de rastreabilidade.
+
+Mas no PLAN eu preferiria que o requirement fosse decomposto em duas verificações:
+
+```text
+REQ-INTEL-007
+├── NoInternalEventNatsDependencyTest
+└── ZeroLedgerMutationTest
+```
+
+E conceitualmente:
+
+```text
+I-INTEL-001 → Zero Ledger Mutation
+I-INTEL-002 → Modulith Event Ingestion
+```
+
+Isso facilita muito os TASKS.
+
+**Não crie novos REQ IDs.** Apenas decomponha a implementação/testes.
+
+---
+
+# 5. 🔴 MUST — o `DecisionUnavailable<T>` não deveria ser responsabilidade do Phase 3.0
+
+Aqui:
+
+```text
+ADR-003.5
+Failure Isolation:
+Semantic evaluator failures or timeouts produce DecisionUnavailable<T>
+```
+
+Isso é correto arquiteturalmente, mas há uma pequena sobreposição com `SPEC-000.8.1`.
+
+O 003 deveria dizer:
+
+> **Phase 3.0 MUST NOT depend on concrete semantic evaluator implementations.**
+
+E:
+
+> **When semantic decision integration is introduced by a downstream capability, the integration MUST preserve the `DecisionUnavailable<T>` semantics defined by SPEC-000.8.1.**
+
+Isso deixa claro:
+
+```text
+000.8.1
+    owns semantic algebra semantics
+
+003
+    respects those semantics
+
+003.1 / 003.2
+    consume them
+```
+
+Assim evitamos duplicação de ownership.
+
+---
+
+# 6. 🟢 A topology agora está correta
+
+Esta parte ficou excelente:
+
+```text
+br.com.wallet.intelligence
+├── package-info.java
+├── api
+│   └── event
+└── internal
+    └── listener
+        └── SpendingEventListener
+```
+
+E a nota:
+
+> Capability-specific domain models (...) and evaluators are owned by SPEC-003.1, SPEC-003.2, and SPEC-000.8.1.
+
+resolve exatamente o problema da versão anterior.
+
+Eu **não adicionaria mais classes à foundation** sem um requirement específico.
+
+---
+
+# 7. 🟢 Schema ownership agora está correto
+
+Também ficou bom:
+
+```text
+SPEC-003
+    schema conventions
+
+003.1
+    subscriptions
+
+003.2
+    cashflow_forecasts
+```
+
+Isso está muito melhor do que o PLAN anterior.
+
+Só faria uma pequena alteração semântica:
+
+> `docker/init/schema.sql` mandating `tenant_id...`
+
+Eu usaria:
+
+> `docker/init/schema.sql` **defines the foundation migration conventions for tenant-scoped intelligence persistence**
+
+Porque 003.0 não deveria parecer dono das migrations concretas de 003.1/003.2.
+
+---
+
+# 8. 🟢 `eventId` vs `operationId` ficou correto
+
+Agora temos:
+
+```text
+eventId:
+Canonical identifier of the published domain event
+```
+
+e:
+
+```text
+operationId:
+Financial operation identifier ... for business-level deduplication
+```
+
+Isso está exatamente na direção que queríamos.
+
+Eu só mudaria:
+
+> `Listeners verify canonical event state before processing`
+
+porque "canonical event state" não está definido.
+
+Melhor:
+
+```text
+Listeners MUST ensure that side effects are idempotent for a given
+eventId under at-least-once redelivery.
+```
+
+É mais implementável e não inventa um conceito adicional.
+
+---
+
+# 9. 🟡 Atenção: "eventIdempotencyGuard" não necessariamente precisa existir como classe
+
+O PLAN mostra:
+
+```text
+IdempotencyGuard["Canonical Event Idempotency Guard\n(eventId)"]
+```
+
+Eu não criaria um componente/classe obrigatório só porque apareceu no diagrama.
+
+Com Spring Modulith Event Publication Registry, a responsabilidade pode acabar sendo implementada como:
+
+```text
+listener
+   ↓
+domain/application idempotency mechanism
+   ↓
+side effect
+```
+
+O requisito é:
+
+> **idempotent side effects**
+
+não:
+
+> **must have a class named IdempotencyGuard**.
+
+No PLAN eu escreveria:
+
+```text
+EventListener
+    └── eventId-based idempotent side-effect handling
+```
+
+e deixaria a forma concreta para TASKS.
+
+Isso é mais fiel ao princípio:
+
+> PLAN define architecture; TASKS define implementation.
+
+---
+
+# 10. 🟢 Multi-tenancy está muito melhor
+
+Esta parte:
+
+```text
+Every domain contract, event, and database table
+...
+tenant_id VARCHAR(64) NOT NULL
+```
+
+é forte e coerente.
+
+Também gostei deste comportamento:
+
+```text
+Events missing a valid tenantId
+→ TenantContextMissingException
+```
+
+Só acrescentaria uma coisa:
+
+**não devemos depender apenas de exception para garantir isolamento.**
+
+O teste precisa demonstrar:
+
+```text
+tenant-A event
+      ↓
+tenant-A state
+
+tenant-B event
+      ↓
+tenant-B state
+```
+
+e nunca:
+
+```text
+tenant-A → tenant-B
+```
+
+O teste que você já colocou cobre isso bem.
+
+---
+
+# 11. 🟢 Test strategy está boa
+
+As cinco linhas principais estão corretas:
+
+### Modulith boundary
+
+```text
+positive
+negative
+invariant breach
+```
+
+### NATS
+
+Excelente teste:
+
+> NATS broker offline → in-process events continue delivering.
+
+Isso demonstra que NATS não é dependência da comunicação interna.
+
+### Tenant isolation
+
+Bom.
+
+### Idempotency
+
+Bom.
+
+### Zero ledger mutation
+
+Bom.
+
+Eu apenas faria uma alteração:
+
+```text
+Ledger verification proves append-only hash chain unaffected
+```
+
+isso é um teste relativamente caro e específico.
+
+Para Phase 3.0, o MUST essencial é:
+
+```text
+no INSERT/UPDATE/DELETE against ledger-owned persistence
+```
+
+A verificação criptográfica da hash chain pode permanecer como uma **strong integration verification**, mas não precisa necessariamente ser o único critério de `ZeroLedgerMutationTest`.
+
+---
+
+# 12. 🟡 `I-STREAM-008` merece conferência
+
+O traceability tem:
+
+```text
+REQ-INTEL-001
+→ I-STREAM-008
+```
+
+Eu conferiria no SPEC/000.12 se `I-STREAM-008` é realmente o invariant que queremos associar ao Modulith module boundary.
+
+Não digo para alterar agora — apenas **não aceitaria esse vínculo automaticamente sem conferir o texto do 000.12**.
+
+É exatamente o tipo de cross-spec reference que pode criar drift silencioso.
+
+---
+
+# 13. Minha versão final do fluxo
+
+Eu deixaria o PLAN conceitualmente assim:
+
+```text
+                    WALLET CORE
+                         │
+              ┌──────────┴──────────┐
+              │                     │
+          Ledger                  Modulith
+              │                  Registry
+              │                     │
+              └──── Domain Event ───┘
+                         │
+                         ▼
+              ┌──────────────────────┐
+              │ Intelligence 3.0    │
+              │ Module Foundation   │
+              ├──────────────────────┤
+              │ tenant validation   │
+              │ eventId idempotency │
+              │ async listener      │
+              │ architecture guard │
+              └──────────┬───────────┘
+                         │
+              ┌──────────┴───────────┐
+              ▼                      ▼
+        SPEC-003.1              SPEC-003.2
+     Recurrence Engine       Forecasting Engine
+              │
+              ▼
+        SPEC-000.8.1
+       Semantic Decision
+          Algebra
+```
+
+Com uma ressalva importante: as setas entre **003.1 ↔ 000.8.1 ↔ 003.2** devem ser definidas pelos respectivos PLANs, não por este PLAN-003.
+
+---
+
+# Conclusão
+
+Esta revisão **resolveu praticamente todos os problemas estruturais da versão anterior**.
+
+### O que está agora correto
+
+* ✅ 003 é foundation, não capability.
+* ✅ 003.1 é dono da recurrence/subscription.
+* ✅ 003.2 é dono de forecasting.
+* ✅ 000.8.1 é dono dos evaluators/algebra.
+* ✅ nenhuma tabela concreta de capability pertence ao 003.0.
+* ✅ nenhum evaluator concreto pertence ao 003.0.
+* ✅ `eventId` e `operationId` estão semanticamente separados.
+* ✅ `core` root não é dependência permitida.
+* ✅ NATS está fora da comunicação interna.
+* ✅ Registry é o mecanismo de durabilidade/recovery.
+* ✅ tenant isolation está explícito.
+* ✅ precision policy está coerente.
+* ✅ hot-path airgap está correto.
+* ✅ topology agora representa foundation.
+
+### Antes de `Ready for Tasks`, eu exigiria apenas:
+
+**MUST-1:** alinhar `I-INTEL-010` com o SPEC.
+
+**MUST-2:** remover do diagrama as setas que especificam o comportamento interno de 003.1/003.2/000.8.1.
+
+**MUST-3:** tornar `REQ-INTEL-007` explicitamente decomponível em seus dois testes, sem criar novos IDs.
+
+**MUST-4:** deixar `DecisionUnavailable<T>` como semântica pertencente ao 000.8.1, apenas preservada pelo integration seam do 003.
+
+**MUST-5:** trocar `canonical event state` por uma regra concreta de **idempotent side effects keyed by `eventId`**.
+
+Depois desses cinco ajustes, eu consideraria:
+
+> **PLAN-003 — Approved / Ready for Tasks**
+
+e aí faz sentido partir para o `TASKS-003`, começando **exclusivamente pelos `[MUST]` da foundation**, sem antecipar nada de 003.1, 003.2 ou dos evaluators do 000.8.1.

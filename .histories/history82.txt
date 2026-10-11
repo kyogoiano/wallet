@@ -1,0 +1,552 @@
+Sim. Revendo a **Rev. 4** com as últimas decisões que acabamos de tomar, eu diria que ela está **conceitualmente muito melhor**, mas ainda faria alguns ajustes antes de considerá-la READY.
+
+A mudança principal — e correta — é que o 000.12 agora está realmente isolado no **intra-Core**, enquanto o 000.11 fica responsável pelo **Edge → Core command path**. Isso está explicitamente declarado no escopo e no histórico.
+
+## 1. O que está correto
+
+A divisão agora ficou muito clara:
+
+```text
+                 wallet-edge
+                     │
+                   NATS
+                     │
+                     ▼
+             CoreCommandConsumer
+                  000.11
+                     │
+                     ▼
+              Ledger / Use Case
+                     │
+              DB Transaction
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+          ▼                     ▼
+     Modulith Event        Outbox Event
+          │                     │
+          ▼                     ▼
+   Fraud / Savings          NATS
+                            external
+```
+
+Isso está alinhado com a regra arquitetural:
+
+> mesmo JVM → Modulith
+> processo diferente → NATS
+
+E a Rev. 4 já explicita isso muito bem.
+
+Também gostei particularmente de a especificação ter eliminado a antiga ambiguidade entre **DLQ de comando** e **eventos internos**.
+
+---
+
+# 2. A principal coisa que eu mudaria: “automagically”
+
+Na linha 35 temos:
+
+> “Durability and crash recovery are handled automatically ("automagically") by Spring Modulith's Event Publication Registry”
+
+Eu tiraria **“automagically”**.
+
+Não porque esteja conceitualmente errado, mas porque em uma SPEC de arquitetura isso cria uma promessa excessiva.
+
+O Registry oferece o mecanismo de persistência/publicação pendente, mas nós ainda somos responsáveis por:
+
+* configurar corretamente o JDBC starter;
+* schema;
+* transaction boundary;
+* listener semantics;
+* idempotência;
+* eventual republication/recovery;
+* observabilidade;
+* política de retenção/limpeza;
+* validar o comportamento da versão final 2.2.x.
+
+A própria SPEC já reconhece isso quando diz que a configuração é o principal deliverable.
+
+Eu escreveria:
+
+> **Durability and crash recovery are provided by Spring Modulith's Event Publication Registry, backed by PostgreSQL, with publication state registered within the business transaction. Recovery semantics MUST be explicitly verified through integration tests.**
+
+Muito mais defensável.
+
+---
+
+# 3. Segundo ponto: “automated startup re-dispatch”
+
+A linha 36 diz:
+
+> “persisting uncompleted events directly in PostgreSQL for automated startup re-dispatch.”
+
+Aqui eu seria igualmente cuidadoso.
+
+Não colocaria **startup re-dispatch** como uma propriedade arquitetural sem especificar exatamente o mecanismo e a versão.
+
+Melhor:
+
+> “persisting incomplete publications in PostgreSQL so they remain recoverable and eligible for republication according to Spring Modulith's Event Publication Registry lifecycle.”
+
+Isso é mais robusto para a transição **2.2 M2 → 2.2 GA**.
+
+E combina perfeitamente com `I-STREAM-006`, que já determina essa revalidação antes do release final.
+
+---
+
+# 4. O maior problema técnico que ainda vejo: o Outbox
+
+O diagrama atual mostra:
+
+```text
+Ledger Transaction
+       │
+       ├── ApplicationEventPublisher
+       │
+       └── Outbox Table
+```
+
+e depois:
+
+```text
+Event Publication Registry
+        │
+        ▼
+   Modulith Event Bus
+        │
+ Fraud / Savings
+
+Outbox
+   │
+   ▼
+NATS
+```
+
+Isso pode estar correto, **mas precisamos deixar explícito que são dois mecanismos distintos para dois destinos distintos**.
+
+Hoje o texto já diz isso, mas o desenho pode induzir alguém a pensar:
+
+> “Por que o mesmo evento está sendo persistido duas vezes?”
+
+Eu acrescentaria uma frase arquitetural:
+
+> **The Modulith Event Publication Registry and the external Outbox are independent durability mechanisms serving different delivery boundaries. The former guarantees intra-Core event publication; the latter guarantees external process/system egress.**
+
+Isso é importante porque estamos deliberadamente mantendo:
+
+```text
+event_publication
+```
+
+e
+
+```text
+outbox
+```
+
+no mesmo PostgreSQL, mas com responsabilidades diferentes.
+
+---
+
+# 5. Eu manteria o Outbox — não tentaria substituí-lo pelo Modulith
+
+Isso é consequência direta da decisão que acabamos de tomar.
+
+O Modulith Registry resolve:
+
+```text
+Core module A
+      ↓
+Core module B
+```
+
+O Outbox resolve:
+
+```text
+Core
+ ↓
+external process/system
+```
+
+Portanto:
+
+```text
+                    PostgreSQL
+                 ┌───────────────┐
+                 │               │
+                 ▼               ▼
+        event_publication      outbox
+                 │               │
+                 ▼               ▼
+             Modulith          Relay
+                 │               │
+           Core modules         NATS
+                                 │
+                                 ▼
+                           External systems
+```
+
+Isso é uma arquitetura muito mais coerente do que tentar transformar o Modulith em broker.
+
+---
+
+# 6. `I-STREAM-003` precisa de um pequeno refinamento
+
+Hoje:
+
+> listeners MUST be idempotent based on operation/event identity (`operation_id` / `event_id`)
+
+Isso está correto em espírito.
+
+Mas eu não colocaria:
+
+```text
+operation_id / event_id
+```
+
+como se ambos fossem intercambiáveis.
+
+Cada evento precisa ter uma identidade própria.
+
+Eu faria:
+
+> Internal listeners MUST be idempotent based on the canonical identity of the event being consumed. Where the domain semantics require command-level deduplication, `operation_id` MAY additionally be used.
+
+Porque:
+
+```text
+operationId
+```
+
+identifica a operação financeira.
+
+Enquanto:
+
+```text
+eventId
+```
+
+identifica uma ocorrência de evento.
+
+Um `TransferCompletedEvent` deveria poder ser identificado independentemente da operação que o originou.
+
+---
+
+# 7. E precisamos adicionar explicitamente “at-least-once”
+
+A linha 92 fala em:
+
+> safely handling at-least-once deliveries
+
+Ótimo.
+
+Mas eu transformaria isso em uma regra arquitetural:
+
+### `I-STREAM-003`
+
+> **Delivery semantics are at-least-once. Exactly-once processing MUST NOT be assumed.**
+
+Isso evita que alguém futuramente escreva um listener presumindo:
+
+```text
+event received == event processed exactly once
+```
+
+O modelo correto é:
+
+```text
+Event
+  │
+  ├── process
+  │
+  └── crash before completion
+          │
+          ▼
+       replay
+          │
+          ▼
+      process again
+```
+
+Por isso a idempotência é **MUST**, não otimização.
+
+---
+
+# 8. `I-STREAM-001` está quase perfeito
+
+Esse é provavelmente o melhor invariant da revisão:
+
+> Domain events emitted within Wallet Core MUST be delivered ... through Spring Modulith ... and MUST NOT be routed through external NATS...
+
+
+
+Eu só faria uma distinção importante:
+
+### Não dizer que *todo* evento Core precisa ser durável.
+
+Porque existe diferença entre:
+
+```text
+domain event
+```
+
+e:
+
+```text
+integration/external event
+```
+
+O que queremos é:
+
+```text
+Internal Core domain event
+       ↓
+Modulith Event Publication Registry
+```
+
+Enquanto:
+
+```text
+External integration event
+       ↓
+Outbox
+       ↓
+NATS
+```
+
+Isso já está implícito na spec, mas vale tornar explícito.
+
+---
+
+# 9. O `I-STREAM-006` está excelente e eu manteria
+
+Essa foi uma das mudanças mais importantes:
+
+> Spring Modulith 2.2.0-M2 is the development baseline... revalidate ... against Spring Modulith 2.2.x GA
+
+
+
+Eu só acrescentaria **Boot compatibility**.
+
+Algo como:
+
+> Spring Modulith 2.2.x GA and its compatible Spring Boot baseline MUST be revalidated before final Wallet V4 release.
+
+Porque o nosso risco não é apenas:
+
+```text
+Modulith M2 → GA
+```
+
+mas:
+
+```text
+Spring Boot
+     +
+Spring Framework
+     +
+Spring Modulith
+     +
+JDBC infrastructure
+```
+
+Precisamos validar o conjunto.
+
+---
+
+# 10. Eu mudaria o nome de `Event Publication Registry` para deixar a responsabilidade explícita
+
+Não precisa mudar a API, obviamente.
+
+Mas conceitualmente:
+
+```text
+Event Publication Registry
+```
+
+não é uma DLQ.
+
+E isso é extremamente importante para nossa arquitetura.
+
+Eu colocaria uma regra explícita:
+
+### `I-STREAM-007` — No Internal Event DLQ
+
+> The Spring Modulith Event Publication Registry is the authoritative recovery mechanism for intra-Core event publication. No NATS-based internal event DLQ or competing retry mechanism SHALL be introduced by this specification.
+
+Isso reforça a decisão da linha 36 e do `REQ-STRM-008`.
+
+---
+
+# 11. O `REQ-STRM-008` está correto, mas eu mudaria a palavra “replay”
+
+Atualmente:
+
+> event durability and replay are governed exclusively by the PostgreSQL Event Publication Registry.
+
+Eu diria:
+
+> event durability and **republication/recovery** are governed exclusively...
+
+Porque “replay” pode sugerir uma operação operacional semelhante ao:
+
+```text
+DLQ replay
+```
+
+que pertence ao 000.11.
+
+Aqui queremos:
+
+```text
+failed publication
+       ↓
+incomplete publication
+       ↓
+republication
+```
+
+Não:
+
+```text
+operator
+   ↓
+DLQ
+   ↓
+replay command
+```
+
+Essa distinção é importante para não reintroduzir a semântica do 000.11 no 000.12.
+
+---
+
+# 12. Um ponto que está faltando: falha permanente
+
+Temos:
+
+```text
+listener falhou
+     ↓
+publication incomplete
+     ↓
+retry
+```
+
+Mas precisamos decidir o que acontece se:
+
+```text
+FraudGraphListener
+      ↓
+falha permanentemente
+      ↓
+?
+```
+
+Não precisamos necessariamente criar uma DLQ.
+
+Mas a arquitetura precisa definir **observability + operational recovery**.
+
+Eu colocaria no 000.12 algo como:
+
+> Persistent listener failures MUST remain observable as incomplete event publications and MUST expose sufficient metadata for operational diagnosis. Automatic retry policy and terminal handling MUST follow the Spring Modulith-supported publication lifecycle; this specification MUST NOT introduce a second internal DLQ.
+
+Isso mantém o escopo limpo.
+
+---
+
+# 13. A topologia pode ficar ainda melhor
+
+Eu faria o desenho conceitualmente assim:
+
+```text
+                  EDGE
+                   │
+                 NATS
+                   │
+                   ▼
+          CoreCommandConsumer
+                 000.11
+                   │
+                   ▼
+             Ledger Use Case
+                   │
+             ┌─────┴─────┐
+             │ PostgreSQL│
+             │ TX        │
+             └─────┬─────┘
+                   │
+             Domain Event
+                   │
+                   ▼
+       Spring Modulith Publisher
+                   │
+          ┌────────┴────────┐
+          │                 │
+          ▼                 ▼
+       Fraud             Savings
+          │                 │
+          └────────┬────────┘
+                   │
+                   ▼
+          Event Publication
+              Registry
+                   │
+                   ▼
+              PostgreSQL
+
+
+     EXTERNAL EGRESS — SEPARATE PATH
+
+      Domain/Integration Event
+                 │
+                 ▼
+              Outbox
+                 │
+                 ▼
+           Outbox Relay
+                 │
+                 ▼
+               NATS
+                 │
+                 ▼
+         External consumers
+```
+
+A única questão que eu verificaria no código é **a ordem exata entre publicação do evento, Registry e listener**, porque o diagrama atual sugere uma arquitetura lógica, não necessariamente a sequência interna real do framework.
+
+---
+
+# 14. Minha classificação da Rev. 4
+
+| Área                                  | Status       |
+| ------------------------------------- | ------------ |
+| Boundary 000.11 / 000.12              | 🟢 Excelente |
+| Modulith como transporte intra-Core   | 🟢           |
+| NATS como process boundary            | 🟢           |
+| PostgreSQL Event Publication Registry | 🟢           |
+| Remoção de internal DLQ               | 🟢           |
+| Outbox para external egress           | 🟢           |
+| At-least-once + idempotência          | 🟢           |
+| Version evolution 2.2 M2 → GA         | 🟢           |
+| Precisão da linguagem sobre recovery  | 🟡           |
+| Distinção Registry vs Outbox          | 🟡           |
+| Identity `eventId` vs `operationId`   | 🟡           |
+| Permanent listener failure            | 🟡           |
+| Operational recovery/observability    | 🟡           |
+
+### Veredito
+
+**Não mudaria a arquitetura.**
+
+Eu faria apenas uma **Rev. 5 de endurecimento semântico**, principalmente para não prometer mais do que o Spring Modulith realmente garante:
+
+1. remover “automagically”;
+2. trocar “startup re-dispatch” por recovery/republication suportada pelo Registry;
+3. formalizar **at-least-once / no exactly-once**;
+4. separar claramente `eventId` de `operationId`;
+5. declarar Registry ≠ DLQ;
+6. declarar Registry ≠ Outbox;
+7. explicitar o tratamento operacional de listener que permanece falhando;
+8. fortalecer a cláusula de compatibilidade **Modulith 2.2.x + Spring Boot**;
+9. manter `REQ-STRM-008`, mas usar **republication/recovery** em vez de “replay”.
+
+Com essas mudanças, eu consideraria o **SPEC-000.12 Rev. 5** pronto para entrar em **PLAN/TASKS**, sem ampliar o escopo.

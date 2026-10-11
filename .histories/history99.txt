@@ -1,0 +1,703 @@
+Sim. E aqui o **PLAN-004 já incorporou quase todos os pontos que levantamos na revisão da SPEC**. A arquitetura ficou significativamente mais madura: atomic claim, tripla identidade, creation idempotency, separação de falha de negócio/técnica e 404 cross-tenant já aparecem no plano.
+
+Mas eu **não deixaria o PLAN como “Approved / Ready for Tasks” ainda**. Encontrei alguns pontos que precisam ser corrigidos antes de gerar o TASKS-004.
+
+## 1. Primeiro: há uma inconsistência importante no state machine
+
+O ADR diz:
+
+```text
+PROPOSED
+EXECUTED
+REJECTED
+EXPIRED
+INVALIDATED
+```
+
+mas o `atomic claim` faz:
+
+```sql
+SET status = 'EXECUTING'
+```
+
+e o DDL inclui:
+
+```text
+PROPOSED
+EXECUTING
+EXECUTED
+REJECTED
+EXPIRED
+INVALIDATED
+```
+
+
+
+Isso não é necessariamente errado — **na verdade eu acho `EXECUTING` útil** — mas agora precisamos formalizar que ele faz parte do lifecycle.
+
+Eu mudaria o modelo para:
+
+```text
+             ┌──────────────┐
+             │   PROPOSED   │
+             └──────┬───────┘
+                    │
+          ┌─────────┼─────────┐
+          │         │         │
+          ▼         ▼         ▼
+      REJECTED   EXPIRED  INVALIDATED
+
+                    │
+                 atomic claim
+                    │
+                    ▼
+              ┌───────────┐
+              │ EXECUTING │
+              └─────┬─────┘
+                    │
+                    ▼
+                EXECUTED
+```
+
+E deixar uma coisa explícita:
+
+> `EXECUTING` is an internal execution state and MUST NOT be interpreted as financial success.
+
+Isso é particularmente importante para crash/restart.
+
+---
+
+# 2. O maior problema restante: `EXECUTING` + crash
+
+O plano diz:
+
+> Apenas a requisição que atualizou 1 linha obtém a posse para despachar.
+
+
+
+Agora imagine:
+
+```text
+POST approve
+   ↓
+PROPOSED → EXECUTING
+   ↓
+process crashes
+   ↓
+ledger call never happens
+```
+
+A proposta fica:
+
+```text
+EXECUTING
+```
+
+para sempre.
+
+Ou:
+
+```text
+ledger mutation happens
+   ↓
+process crashes
+   ↓
+EXECUTED update never happens
+```
+
+Agora temos o cenário oposto:
+
+```text
+financial mutation = YES
+proposal = EXECUTING
+```
+
+Esse é o problema clássico de **distributed transaction boundary**.
+
+E isso precisa ser resolvido no PLAN, não no TASKS.
+
+### Minha recomendação
+
+Adicionar explicitamente:
+
+```text
+Execution recovery / reconciliation
+```
+
+com algo como:
+
+```text
+EXECUTING + stale execution lease
+        ↓
+recovery
+        ↓
+retry same executionOperationId
+```
+
+Mas precisamos de uma propriedade crítica:
+
+**o downstream precisa ser idempotente pelo `executionOperationId`.**
+
+Isso já está previsto pelo plano.
+
+Então podemos fazer:
+
+```text
+EXECUTING
+    |
+    | lease expires
+    v
+retry executionOperationId
+    |
+    +---- already executed downstream
+    |          ↓
+    |       EXECUTED
+    |
+    +---- not executed
+               ↓
+          execute once
+```
+
+Eu adicionaria:
+
+```text
+execution_claimed_at
+execution_lease_until
+```
+
+ou uma estratégia equivalente.
+
+**Não precisa necessariamente ser um novo estado.**
+
+---
+
+# 3. `approvalRequestId` está correto, mas o PLAN mistura TraceContext com identidade da operação
+
+O trecho:
+
+> `approvalRequestId`: Identificador correlacionado da requisição HTTP (`TraceContext.operationId`).
+
+Eu mudaria.
+
+`TraceContext.operationId` é potencialmente um conceito de observabilidade/request correlation.
+
+Ele não deveria ser tratado como identidade semântica do approval.
+
+Melhor:
+
+```text
+proposalId
+    = identity of proposal
+
+executionOperationId
+    = identity of financial execution
+
+approvalRequestId
+    = identity of approval attempt
+```
+
+E:
+
+```text
+traceId
+    = observability correlation
+```
+
+São quatro conceitos diferentes.
+
+Não precisamos necessariamente persistir todos.
+
+Mas **não devemos semanticamente igualar `approvalRequestId` a `TraceContext.operationId`**.
+
+---
+
+# 4. Creation idempotency está excelente — mas há um detalhe
+
+O plano define:
+
+```text
+UNIQUE (tenant_id, idempotency_key)
+```
+
+
+
+Isso está correto.
+
+Mas eu adicionaria a regra:
+
+> Reuse of the same idempotency key with materially different proposal payload MUST be rejected.
+
+Porque hoje:
+
+```text
+request A
+idempotencyKey = abc
+amount = 100
+
+request B
+idempotencyKey = abc
+amount = 900
+```
+
+não pode simplesmente retornar a primeira proposta silenciosamente.
+
+Precisamos:
+
+```text
+same key + same canonical request
+    → existing proposal
+
+same key + different request
+    → 409 IdempotencyConflict
+```
+
+Isso deveria estar no ADR-004.3.
+
+---
+
+# 5. O `createdBy` ainda está incompleto
+
+O plano agora coloca:
+
+```java
+CreateProposalCommand(
+    walletId,
+    type,
+    parametersJson,
+    idempotencyKey,
+    createdBy
+)
+```
+
+
+
+Mas ainda precisamos aplicar a decisão da SPEC:
+
+**quem fornece `createdBy`?**
+
+Eu não permitiria que o cliente simplesmente enviasse:
+
+```json
+{
+  "createdBy": "john"
+}
+```
+
+porque isso recria o problema de identidade.
+
+Eu faria:
+
+```java
+CreateProposalCommand(
+    walletId,
+    type,
+    parametersJson,
+    idempotencyKey
+)
+```
+
+e o `ProposalService` obtém:
+
+```text
+AuthenticatedPrincipal
+        ↓
+createdBy
+tenantId
+```
+
+A mesma coisa vale para:
+
+```java
+ApproveProposalCommand(... approvedBy)
+```
+
+O `approvedBy` deveria ser derivado do `SecurityContext`, não do payload.
+
+---
+
+# 6. Há um pequeno problema no boundary do módulo
+
+O package-info diz:
+
+```text
+allowedDependencies = {
+    "ledger::api",
+    "savings::api",
+    "goals::api",
+    "core"
+}
+```
+
+
+
+Eu questionaria o `"core"`.
+
+Pelas decisões anteriores de Modulith, o princípio era:
+
+> comunicação entre módulos através de public APIs / NamedInterfaces.
+
+Então, se o Copilot precisa de algo de Core, precisamos identificar **qual API exatamente**.
+
+Eu evitaria:
+
+```text
+copilot → core
+```
+
+genérico.
+
+Preferiria:
+
+```text
+copilot → ledger::api
+copilot → savings::api
+copilot → goals::api
+```
+
+e, se realmente precisar de algo do Core:
+
+```text
+core::api
+```
+
+ou uma NamedInterface específica.
+
+**Eu colocaria isso como MUST FIX antes do TASKS.**
+
+---
+
+# 7. O plano está assumindo `JdbcClient` — isso pode ser prematuro
+
+O trecho:
+
+```text
+ProposalDao (JdbcClient)
+```
+
+e:
+
+```text
+ProposalDao.java (JdbcClient, constraints, atomic update)
+```
+
+
+
+Não vejo problema técnico.
+
+Mas pela nossa disciplina de SPEC → PLAN, isso é uma **decisão de implementação**.
+
+Se o projeto já está padronizado em `JdbcClient`, pode permanecer.
+
+Caso contrário, eu escreveria:
+
+```text
+ProposalDao
+  → Spring JDBC abstraction
+```
+
+e fecharia `JdbcClient` em TASKS/implementation.
+
+Não é bloqueador.
+
+---
+
+# 8. O DDL está bom, mas faltam duas coisas
+
+### 8.1 `EXECUTING` recovery
+
+Como discutido acima, precisamos de:
+
+```sql
+execution_claimed_at
+execution_lease_until
+```
+
+ou equivalente.
+
+### 8.2 Proposal snapshot integrity
+
+Eu consideraria adicionar:
+
+```text
+parameters_hash
+```
+
+Não necessariamente para segurança criptográfica — o JSONB já é persistido — mas para garantir/auditar:
+
+```text
+proposal snapshot
+       ↓
+canonical representation
+       ↓
+hash
+```
+
+Porém isso é **opcional**.
+
+Não transformaria isso em MUST agora.
+
+---
+
+# 9. A seção 5 tem um pequeno problema de atomicidade
+
+Hoje:
+
+```text
+UPDATE ... claim
+
+se zero:
+    SELECT estado
+
+se expired:
+    UPDATE EXPIRED
+```
+
+
+
+Isso abre uma race conceitual entre:
+
+```text
+request A
+request B
+```
+
+especialmente na transição:
+
+```text
+PROPOSED → EXPIRED
+```
+
+Eu preferiria uma operação determinística:
+
+```text
+UPDATE ...
+WHERE status = PROPOSED
+  AND expires_at >= now
+```
+
+e, quando `0 rows`:
+
+```text
+SELECT current state
+```
+
+Depois:
+
+* `EXECUTED` → cached response;
+* `EXECUTING` → execution-in-progress;
+* `EXPIRED` → expired;
+* `PROPOSED + expired` → atomic transition to expired;
+* missing/cross-tenant → 404.
+
+Isso também precisa tratar `EXECUTING`.
+
+---
+
+# 10. O PLAN resolveu o `200 vs 202`, mas eu faria uma pequena mudança
+
+A seção:
+
+> Semântica Síncrona (Padrão V4)
+
+é uma decisão boa **se os downstream use cases forem realmente síncronos**.
+
+Mas eu não colocaria o `202` como se fosse algo que o serviço já suporta.
+
+Porque a própria arquitetura atual diz que isso depende de futura mudança do downstream.
+
+Eu escreveria:
+
+```text
+V4 execution is synchronous.
+
+An asynchronous execution model is explicitly out of scope
+for PLAN-004 and requires a future architectural revision.
+```
+
+Isso é mais limpo.
+
+---
+
+# 11. O traceability matrix tem um erro de associação
+
+Veja:
+
+```text
+REQ-COPILOT-006
+→ Synchronous TTL validation
+→ ProposalServiceTest
+```
+
+
+
+Mas na SPEC:
+
+```text
+REQ-COPILOT-006
+```
+
+é **a REST API completa**, enquanto:
+
+```text
+REQ-COPILOT-005
+```
+
+é TTL.
+
+Então a matriz deveria ser:
+
+```text
+REQ-COPILOT-005
+→ TTL gate
+→ ProposalServiceTest
+
+REQ-COPILOT-006
+→ REST endpoints
+→ ProposalControllerTest
+
+REQ-COPILOT-007
+→ execution idempotency
+→ concurrent approval IT
+
+REQ-COPILOT-008
+→ preconditions
+→ DownstreamBridgeTest / integration
+```
+
+Hoje a rastreabilidade está um pouco deslocada.
+
+---
+
+# 12. A matriz ainda não cobre as novas invariants
+
+O PLAN introduziu:
+
+```text
+I-AI-008
+I-AI-009
+I-AI-010
+```
+
+mas o traceability termina basicamente nos `REQ-COPILOT-*`.
+
+Eu adicionaria uma matriz explícita:
+
+| Invariant | Verification                        |
+| --------- | ----------------------------------- |
+| I-AI-004  | Cross-tenant 404                    |
+| I-AI-005  | TTL boundary + expiration race      |
+| I-AI-006  | duplicate approval                  |
+| I-AI-008  | concurrent claim                    |
+| I-AI-009  | downstream owns financial rules     |
+| I-AI-010  | technical failure remains retryable |
+
+Isso deixa o PLAN muito mais auditável.
+
+---
+
+# 13. Sweeper: eu manteria, mas ele não pode ser autoridade de TTL
+
+O plano coloca:
+
+```text
+ProposalTtlSweeper
+```
+
+
+
+Perfeito.
+
+Mas precisamos preservar a distinção:
+
+```text
+Sweeper
+    = housekeeping
+
+Approval TTL check
+    = authoritative
+```
+
+Ou seja:
+
+```text
+proposal expired
+sweeper hasn't run yet
+        ↓
+approve
+        ↓
+MUST fail
+```
+
+O próprio PLAN já diz isso indiretamente, mas eu tornaria uma regra explícita.
+
+---
+
+# 14. Meu veredito
+
+Comparando com a SPEC revisada:
+
+### 🟢 Já resolvido no PLAN
+
+* atomic claim;
+* execution identity;
+* approval identity;
+* creation idempotency;
+* business vs technical failure;
+* cross-tenant 404;
+* downstream ownership;
+* JSONB snapshot;
+* concurrent approval test;
+* synchronous execution decision.
+
+Isso mostra que o PLAN absorveu muito bem a revisão da SPEC.
+
+### 🟡 Ainda precisa fechar
+
+1. **`EXECUTING` lifecycle formal.**
+2. **Crash recovery / stale execution claim.**
+3. **Idempotency-key payload mismatch.**
+4. **`createdBy` / `approvedBy` derivados do authenticated principal.**
+5. **Remover `"core"` genérico do Modulith dependency boundary.**
+6. **Corrigir traceability matrix.**
+7. **Adicionar invariants → tests.**
+8. **Definir claramente que sweeper não é TTL authority.**
+
+### 🔴 O ponto realmente crítico
+
+É este:
+
+```text
+PROPOSED
+   ↓ atomic claim
+EXECUTING
+   ↓
+??? crash ???
+```
+
+Enquanto isso não estiver especificado, **eu não aprovaria o PLAN para TASKS**, porque o estado `EXECUTING` cria uma nova máquina de recuperação que a versão anterior da SPEC não tinha.
+
+---
+
+## Ordem que eu usaria agora
+
+Eu faria:
+
+```text
+SPEC-004
+   ↓
+[correções finais]
+   ↓
+PLAN-004
+   ↓
+[correções acima]
+   ↓
+TASKS-004
+   ↓
+implementation
+   ↓
+tests
+   ↓
+SUMMARY-004
+```
+
+E **não mexeria ainda no `TASKS-004`**. Primeiro precisamos fechar esses oito pontos no PLAN, principalmente o **recovery de `EXECUTING`** e a semântica de identidade.

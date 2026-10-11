@@ -1,0 +1,287 @@
+## Revisão da SPEC-004.1 — MCP Gateway & Human Interaction
+
+Minha avaliação é que a divisão entre `SPEC-004` e `SPEC-004.1` está conceitualmente correta: a primeira especificação controla o ciclo de vida e a execução das propostas financeiras; a segunda expõe capacidades por MCP, gerencia a interação com o cliente e mantém a camada de protocolo isolada do domínio.
+
+Entretanto, **eu manteria a SPEC-004.1 em Draft até resolver alguns contratos importantes**. O maior risco está na fronteira entre o protocolo MCP, a confirmação humana e a identidade autenticada — especialmente porque uma proposta financeira pode continuar existindo mesmo depois que uma interação MCP é interrompida.
+
+Vou separar os problemas que decorrem diretamente do documento das recomendações de arquitetura que precisam ser ratificadas antes de gerar PLAN e TASKS.
+
+### 1. Pontos críticos de arquitetura
+
+#### 1.1 A negociação de capabilities não está suficientemente definida
+
+A `REQ-MCP-005` exige que o gateway inspecione o handshake do cliente e identifique se ele oferece suporte à elicitação.
+
+A especificação, porém, não define claramente:
+
+* Qual capability indica suporte a Form Elicitation;
+* Qual capability indica suporte a URL Elicitation;
+* Como o servidor se comporta se o cliente suportar apenas uma modalidade;
+* O que acontece quando o cliente não declara a capability ou fornece uma declaração inválida;
+* Se o resultado da negociação é armazenado por sessão ou avaliado para cada interação.
+
+Isso importa porque **não se deve presumir que suporte a uma modalidade de elicitação implica suporte à outra**.
+
+Minha recomendação é tratar cada capacidade separadamente e definir um fallback explícito para cada combinação. A ausência de suporte deve resultar em uma proposta pendente de autorização externa, nunca em execução automática.
+
+#### 1.2 O contrato `input_required` não está suficientemente vinculado ao protocolo MCP
+
+A seção 6.2 apresenta:
+
+```json
+{
+  "type": "input_required",
+  "proposalId": "e1000000-0000-0000-0000-000000000001",
+  "message": "Transfer R$ 50.00 from Wallet A to Wallet B?",
+  "schema": {
+    "type": "object",
+    "properties": {
+      "confirmed": { "type": "boolean" }
+    },
+    "required": ["confirmed"]
+  }
+}
+```
+
+Esse objeto é um exemplo de contrato de interação, mas a especificação não esclarece se ele representa:
+
+* Uma mensagem interna do gateway;
+* Um resultado de ferramenta;
+* Uma abstração da aplicação;
+* Ou uma resposta protocolar específica do MCP.
+
+Essa distinção é essencial. O gateway não deve presumir que pode introduzir um formato de resposta arbitrário e ainda assim manter compatibilidade com clientes MCP.
+
+**Recomendação:** documentar separadamente o contrato interno da aplicação e a representação protocolar efetivamente utilizada pelo transporte MCP. O PLAN deve verificar a compatibilidade com a versão concreta do Spring AI escolhida, sem inventar APIs ou formatos.
+
+#### 1.3 A resposta de elicitação não pode ser confundida automaticamente com autorização financeira
+
+Este é o ponto de segurança mais importante da especificação.
+
+A `REQ-MCP-006` prevê `confirm_proposal` por Form Elicitation. Já a `SPEC-004` exige autorização humana explícita e identidade autenticada para registrar a aprovação.
+
+Esses dois contratos precisam estar conectados sem pressupor que qualquer resposta `confirmed: true` seja suficiente para autorizar uma transação.
+
+A especificação do MCP define ações de elicitação como `accept`, `decline` e `cancel`. Também estabelece que o cliente deve apresentar a interação de maneira que o usuário compreenda o que está sendo solicitado e possa aceitar, recusar ou cancelar. Isso não substitui, por si só, a autenticação e a autorização do domínio financeiro. ([github.com][1])
+
+Eu definiria o seguinte fluxo:
+
+1. O agente solicita a criação de uma proposta.
+2. O gateway cria a proposta por meio de `copilot::api`.
+3. O gateway solicita confirmação humana, se o cliente oferecer uma modalidade compatível.
+4. A resposta da elicitação é validada e associada à interação e à proposta corretas.
+5. A aprovação financeira só é registrada pelo mecanismo autorizado de `SPEC-004`, com a identidade humana validada conforme o modelo de segurança do sistema.
+6. Se a confirmação não puder ser autenticada e associada ao usuário autorizado, a proposta permanece `PROPOSED`.
+
+Isso evita que uma resposta forjada, reutilizada ou enviada pelo agente seja tratada como autorização humana.
+
+**Decisão a ratificar:** a elicitação pode iniciar ou transportar a interação de confirmação, mas não deve contornar o contrato de autorização de `SPEC-004`.
+
+#### 1.4 O estado da interação precisa sobreviver à desconexão sem prolongar a autorização
+
+A `I-MCP-004` já estabelece a separação entre o estado de interação MCP e o estado financeiro da proposta. A seção 8.2 reforça que uma desconexão ou timeout durante MRTR não altera a validade da proposta.
+
+Falta, porém, definir o comportamento de retomada.
+
+Sugiro estabelecer estes princípios:
+
+* O estado de uma interação pode ser reconstruído ou recuperado sem recriar a proposta.
+* Uma resposta recebida posteriormente precisa ser associada à interação original e à identidade autenticada correspondente.
+* A repetição de uma resposta não pode gerar uma segunda aprovação nem uma segunda execução financeira.
+* O timeout da interação não renova o TTL da proposta.
+* A retomada de uma interação não pode reverter estados terminais da proposta.
+
+O MCP atual documenta fluxos de elicitação com novas requisições e tratamento de respostas posteriores; no modo URL, a confirmação de abertura da URL não significa que o fluxo externo tenha sido concluído. O servidor precisa verificar o estado real da interação antes de prosseguir. ([GitHub][1])
+
+Isso é especialmente relevante para o nosso desenho: **o estado da conversa não pode ser a fonte de verdade da autorização financeira**.
+
+---
+
+### 2. Segurança do transporte e isolamento multi-tenant
+
+#### 2.1 Autenticação não pode depender apenas do contexto fornecido pelo cliente MCP
+
+A `REQ-MCP-004` exige a propagação de `tenantId` e `userId` autenticados. A matriz de impacto também determina que o gateway ignore `X-Tenant-Id`.
+
+A direção está correta, mas eu acrescentaria critérios explícitos:
+
+* Identidade e tenant devem derivar do contexto de segurança validado pelo servidor.
+* Argumentos das ferramentas não podem substituir o tenant ou o principal autenticado.
+* O gateway não deve aceitar identidade declarada pelo agente como prova de identidade humana.
+* Consultas e propostas precisam respeitar os limites de tenant e de acesso ao recurso.
+* Ausência de contexto autenticado deve impedir tanto consultas protegidas quanto criação de propostas.
+
+Há também um risco de configuração importante: a documentação do Spring AI alerta que os endpoints HTTP do MCP não impõem autenticação e autorização por conta própria. É necessário configurar uma fronteira de segurança antes de expor o servidor na rede. ([Home][2])
+
+**Recomendação:** incluir autenticação e autorização do endpoint MCP como requisito obrigatório, não apenas a propagação do contexto após a autenticação.
+
+#### 2.2 O modelo de transporte precisa distinguir modo stateful e stateless
+
+A `REQ-MCP-001` especifica Streamable HTTP com WebFlux, enquanto a `REQ-MCP-007` menciona MRTR sem manter streams abertos.
+
+Esses requisitos não são necessariamente contraditórios, mas o contrato precisa ser mais preciso. O Spring AI documenta modalidades Streamable HTTP e Stateless Streamable HTTP para servidores WebFlux. ([Home][3])
+
+Sugiro que a SPEC determine:
+
+* Se o servidor utilizará Streamable HTTP stateful ou stateless;
+* Como o contexto de autenticação é recuperado em cada requisição;
+* Como as interações pendentes são correlacionadas;
+* Onde reside o estado durável necessário à retomada;
+* Como são tratados timeouts e desconexões sem bloquear recursos financeiros.
+
+O ponto central é não confundir **transporte stateless** com **interação sem estado persistente**. Uma aplicação pode utilizar transporte stateless e ainda manter estado de interação em armazenamento próprio, desde que esse estado seja protegido e não se torne a fonte de verdade da proposta.
+
+### 3. Há uma questão de compatibilidade entre MRTR, elicitação e o baseline tecnológico
+
+A SPEC registra o histórico de compatibilidade com Spring Boot `4.2.0-M2`, mas ainda não fixa a versão concreta do Spring AI nem comprova que os recursos necessários estão disponíveis nessa combinação.
+
+A documentação atual do Spring AI descreve APIs para consultar capabilities e realizar elicitação, mas também documenta uma diferença importante: **servidores MCP stateless não oferecem operações bidirecionais de elicitação**. Além disso, os parâmetros de contexto disponíveis variam conforme o modo de operação. ([Home][4])
+
+Há uma segunda questão: o documento usa o termo MRTR e apresenta `input_required` como contrato de interação. A revisão atual do protocolo MCP documenta esse fluxo como um resultado específico de requisição que pode ser retomada com novas informações. Portanto, precisamos verificar a implementação concreta, em vez de assumir que a elicitação tradicional e o MRTR são intercambiáveis. ([MCP TypeScript SDK][5])
+
+**Recomendação para a SPEC:** estabelecer os requisitos comportamentais agora e deixar a seleção exata das versões e APIs para o PLAN, que deverá verificar a compatibilidade real antes de fixar as dependências.
+
+Não escolheria antecipadamente o modo stateless se a implementação depender de elicitação bidirecional tradicional. Tampouco assumiria que o uso de Streamable HTTP, por si só, garante suporte a MRTR.
+
+---
+
+## 4. Contratos das ferramentas: ajustes necessários
+
+### 4.1 Ferramentas de leitura
+
+O catálogo proposto contém:
+
+* `wallet_get_balance(walletId)`
+* `wallet_get_cashflow_projections(walletId)`
+* `wallet_get_active_subscriptions(walletId)`
+* `wallet_simulate_goal_strategy(goalId, targetAmount, targetDate)`
+
+O conjunto é coerente com o escopo, mas os contratos não especificam os limites de autorização para cada recurso.
+
+A ferramenta não pode considerar um UUID válido como evidência de acesso. Antes de consultar o domínio, precisa verificar o vínculo do recurso com o tenant autenticado e aplicar as regras de acesso pertinentes.
+
+Também recomendo que a SPEC esclareça que as ferramentas são somente leitura: uma simulação não deve persistir uma alteração de meta, criar uma transferência ou produzir outro efeito financeiro.
+
+### 4.2 Ferramentas de proposta
+
+As três ferramentas de mutação propostas estão alinhadas à separação de responsabilidades:
+
+* `copilot_propose_savings_rule`
+* `copilot_propose_goal_adjustment`
+* `copilot_propose_transfer`
+
+O gateway deve delegar a criação para `copilot::api`, sem escrever diretamente no banco ou implementar regras financeiras próprias.
+
+Entretanto, o schema da transferência precisa de dois ajustes importantes.
+
+**Primeiro: idempotência.** O exemplo inclui `idempotencyKey`, mas não a torna obrigatória. A `SPEC-004` já define idempotência na criação da proposta. A SPEC-004.1 precisa esclarecer se a chave é obrigatória na chamada MCP ou gerada pelo gateway com garantias de estabilidade nas tentativas repetidas.
+
+Não basta gerar uma nova chave a cada chamada: uma repetição da mesma solicitação poderia criar outra proposta.
+
+**Segundo: precisão monetária.** O schema usa `number` para `amount`. Como o domínio financeiro trabalha com valores monetários de precisão definida, o contrato precisa explicitar a normalização, a escala e a rejeição de valores inválidos antes de chamar `copilot::api`. O gateway não deve converter silenciosamente valores que alterem o significado financeiro da solicitação.
+
+### 4.3 Erros de ferramentas e exposição de dados
+
+A SPEC precisa definir como são representados os seguintes casos:
+
+* Parâmetros inválidos;
+* Recurso inexistente ou inacessível;
+* Falha de autenticação;
+* Falha temporária de um módulo downstream;
+* Conflito de idempotência;
+* Proposta criada com sucesso, mas sem suporte à interação solicitada.
+
+O cliente MCP não deve receber detalhes internos de exceções, consultas ou estrutura do banco. Mensagens de erro devem preservar o contrato público e não revelar a existência de recursos de outro tenant.
+
+---
+
+## 5. Elicitação por URL: precisa de um contrato de segurança próprio
+
+A `REQ-MCP-008` prevê URL Elicitation para fluxos sensíveis. A intenção é válida, mas a SPEC ainda não define o ciclo de vida da URL.
+
+O protocolo MCP estabelece que URLs de elicitação não devem conter dados pessoais ou credenciais do usuário e não devem conceder acesso protegido apenas por serem conhecidas. Também exige que o cliente obtenha consentimento antes de abrir a URL. ([GitHub][1])
+
+Para este projeto, eu acrescentaria os seguintes requisitos:
+
+* A URL de aprovação deve utilizar HTTPS fora do ambiente de desenvolvimento.
+* O acesso deve ser vinculado à identidade autenticada e à proposta correspondente.
+* O token de acesso, se houver, deve ser opaco, limitado em escopo e ter validade controlada.
+* A URL não deve incluir tenant, dados financeiros sensíveis ou credenciais em parâmetros legíveis.
+* Abrir a URL não significa aprovar a proposta.
+* Uma URL expirada ou já utilizada não deve permitir uma segunda aprovação.
+* O fluxo externo deve consultar o estado autoritativo da proposta em `SPEC-004`.
+
+O endpoint de aprovação e suas regras financeiras continuam pertencendo à camada de domínio; o gateway fornece apenas o mecanismo de interação.
+
+---
+
+## 6. Matriz de invariantes e testes
+
+A tríade de testes é um bom ponto de partida, mas os testes atuais não cobrem todos os comportamentos obrigatórios descritos no documento.
+
+Eu acrescentaria os seguintes cenários à matriz:
+
+| Requisito                    | Teste positivo                             | Teste de limite                                           | Violação do invariante                                   |
+| ---------------------------- | ------------------------------------------ | --------------------------------------------------------- | -------------------------------------------------------- |
+| `REQ-MCP-001` — Transporte   | Handshake e chamada de ferramenta válidos  | Requisição malformada ou capability ausente               | Endpoint acessível sem autenticação                      |
+| `REQ-MCP-002` — Leitura      | Consulta permitida no tenant correto       | UUID inválido ou recurso inacessível                      | Consulta direta a DAO ou acesso cross-tenant             |
+| `REQ-MCP-003` — Propostas    | Criação delegada a `copilot::api`          | Valor monetário inválido ou chave idempotente conflitante | Mutação financeira direta pelo gateway                   |
+| `REQ-MCP-004` — Contexto     | Principal e tenant autenticados propagados | Contexto ausente                                          | Tenant ou principal substituído por argumento do cliente |
+| `REQ-MCP-005` — Capabilities | Fallback de aprovação externa              | Capability ausente ou incompleta                          | Execução automática sem autorização                      |
+| `REQ-MCP-006` — Form         | Confirmação vinculada à proposta correta   | Recusa, cancelamento ou resposta inválida                 | Resposta do agente tratada como autorização humana       |
+| `REQ-MCP-007` — MRTR         | Retomada de interação válida               | Timeout ou repetição da resposta                          | Interação duplicada altera o estado financeiro           |
+| `REQ-MCP-008` — URL          | Acesso autenticado ao fluxo externo        | URL expirada ou inválida                                  | URL reutilizada ou acesso por outro usuário              |
+
+Eu manteria os testes de arquitetura do Modulith e acrescentaria uma verificação explícita de que os contratos públicos de `copilot::api` não dependem de Spring AI nem de tipos MCP, conforme `I-MCP-001`.
+
+---
+
+## 7. Decisões que eu ratificaria antes do PLAN-004.1
+
+Minha recomendação é fechar a SPEC com estas decisões:
+
+| Decisão                    | Recomendação                                                                                     |
+| -------------------------- | ------------------------------------------------------------------------------------------------ |
+| Limite de responsabilidade | O gateway é adaptador de protocolo; `SPEC-004` continua responsável pela proposta e execução.    |
+| Autorização humana         | A resposta de elicitação não contorna a autorização autenticada de `SPEC-004`.                   |
+| Capabilities               | Form e URL devem ser tratados separadamente.                                                     |
+| Fallback                   | Ausência de suporte resulta em proposta pendente e instrução de aprovação externa.               |
+| Transporte                 | O PLAN deve verificar se a modalidade escolhida oferece as capacidades de interação necessárias. |
+| Estado de interação        | Pode ser recuperado sem alterar o TTL ou o estado financeiro da proposta.                        |
+| Idempotência               | Repetições não criam propostas nem aprovações duplicadas.                                        |
+| Segurança HTTP             | A autenticação e autorização do endpoint MCP são obrigatórias.                                   |
+| Precisão monetária         | O contrato deve definir a representação e a validação dos valores.                               |
+| URL Elicitation            | Não é autorização por si só; o acesso deve ser autenticado e limitado.                           |
+| Testes                     | Cobrir falhas, concorrência, repetição e isolamento multi-tenant.                                |
+
+### Veredito
+
+**A estrutura da SPEC-004.1 está boa, mas ainda existem lacunas de contrato que justificam manter o documento em Draft.**
+
+Eu resolveria primeiro três pontos: **a semântica de MRTR na versão de protocolo escolhida, a fronteira entre elicitação e autorização financeira e o modelo de autenticação do endpoint MCP**.
+
+Depois, fecharia os contratos de idempotência, precisão monetária e URL Elicitation. Com isso, o PLAN poderá selecionar as dependências concretas, definir as classes e testes e demonstrar compatibilidade com o baseline do projeto sem misturar decisões de protocolo com regras financeiras.
+
+O princípio arquitetural permanece:
+
+**O agente solicita. O gateway interage. O humano autoriza por um mecanismo confiável. O domínio financeiro decide e executa.**
+
+[1]: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx?utm_source=chatgpt.com "modelcontextprotocol/docs/specification/2026-07-28/client/elicitation.mdx at main · modelcontextprotocol/modelcontextprotocol · GitHub"
+[2]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html?utm_source=chatgpt.com "MCP Server Boot Starter :: Spring AI Reference"
+[3]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-overview.html?utm_source=chatgpt.com "Model Context Protocol (MCP) :: Spring AI Reference"
+[4]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-annotations-special-params.html?utm_source=chatgpt.com "MCP Annotations Special Parameters :: Spring AI Reference"
+[5]: https://ts.sdk.modelcontextprotocol.io/v2/api/index/%40modelcontextprotocol/client/?utm_source=chatgpt.com "index | MCP TypeScript SDK"
+
+
+([GitHub][1])([GitHub][1])([Home][2])([Home][3])
+
+[1]: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx?utm_source=chatgpt.com "modelcontextprotocol/docs/specification/2026-07-28/client/elicitation.mdx at main · modelcontextprotocol/modelcontextprotocol · GitHub"
+[2]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-server-boot-starter-docs.html?utm_source=chatgpt.com "MCP Server Boot Starter :: Spring AI Reference"
+[3]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-overview.html?utm_source=chatgpt.com "Model Context Protocol (MCP) :: Spring AI Reference"
+
+
+([Home][1])([MCP TypeScript SDK][2])([GitHub][3])
+
+[1]: https://docs.spring.io/spring-ai/reference/api/mcp/mcp-annotations-special-params.html?utm_source=chatgpt.com "MCP Annotations Special Parameters :: Spring AI Reference"
+[2]: https://ts.sdk.modelcontextprotocol.io/v2/api/index/%40modelcontextprotocol/client/?utm_source=chatgpt.com "index | MCP TypeScript SDK"
+[3]: https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/docs/specification/2026-07-28/client/elicitation.mdx?utm_source=chatgpt.com "modelcontextprotocol/docs/specification/2026-07-28/client/elicitation.mdx at main · modelcontextprotocol/modelcontextprotocol · GitHub"

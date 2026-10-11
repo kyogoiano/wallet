@@ -1,0 +1,619 @@
+Perfect. Then let's treat `SPEC-000.1` as **closed** and move the roadmap forward to the next business capability:
+
+# SPEC-002 — Financial Goal & Cashflow Strategy Engine
+
+### Module: `br.com.wallet.goals`
+
+I think this is a much more interesting step than Savings because it introduces the first module that is not merely **reactive automation**.
+
+The architecture evolution becomes:
+
+```text
+Ledger
+  │
+  ├── records financial truth
+  │
+  ▼
+Savings
+  │
+  ├── reacts to financial events
+  ├── executes deterministic rules
+  │
+  ▼
+Goals
+  │
+  ├── interprets financial state
+  ├── projects future outcomes
+  ├── creates contribution strategies
+  └── may request actions through Core APIs
+```
+
+The important distinction should be:
+
+> **Savings executes rules. Goals calculates strategy.**
+
+I would preserve that separation very strictly.
+
+---
+
+# Proposed direction for SPEC-002
+
+Before writing the full specification, I suggest defining the conceptual model.
+
+## 1. What is a Financial Goal?
+
+A goal should represent a desired financial state:
+
+```text
+"I want R$ 50,000 by December 2027."
+```
+
+The minimal model:
+
+```java
+public record FinancialGoal(
+        UUID id,
+        UUID walletId,
+        String name,
+        Money targetAmount,
+        LocalDate targetDate,
+        GoalPriority priority,
+        GoalStatus status
+) {}
+```
+
+Potentially:
+
+```java
+public enum GoalPriority {
+    LOW,
+    MEDIUM,
+    HIGH,
+    CRITICAL
+}
+
+public enum GoalStatus {
+    ACTIVE,
+    PAUSED,
+    ACHIEVED,
+    FAILED,
+    CANCELLED
+}
+```
+
+But I would avoid adding too much domain vocabulary before we establish the invariants.
+
+---
+
+# 2. The real core: Cashflow Strategy
+
+This is where `goals` becomes more than CRUD.
+
+For a goal:
+
+```text
+Target:       R$ 50,000
+Current:      R$ 10,000
+Remaining:    R$ 40,000
+
+Deadline:     20 months
+```
+
+The naive contribution is:
+
+```text
+requiredContribution =
+    remainingAmount / remainingPeriods
+```
+
+Therefore:
+
+```text
+R$ 40,000 / 20 = R$ 2,000/month
+```
+
+But your roadmap already mentions:
+
+> Cashflow Safety Buffer
+
+This means the engine should not simply consume all available funds.
+
+Something like:
+
+```text
+AvailableForGoals =
+    projectedAvailableCash
+    - minimumLiquidityReserve
+    - committedObligations
+```
+
+Then:
+
+```text
+RecommendedContribution =
+    min(
+        requiredContribution,
+        availableForGoals
+    )
+```
+
+However, there is an important conceptual question:
+
+### Does V1 of Goals actually know the user's income and cashflow?
+
+At this point, your Wallet does not necessarily have:
+
+```text
+Salary
+Recurring income
+Rent
+Subscriptions
+Monthly expenses
+External bank accounts
+```
+
+Those capabilities appear later in the roadmap through Spending Intelligence.
+
+So I strongly recommend **not pretending Goals has information that does not yet exist**.
+
+Instead, V1 should use an explicit planning input:
+
+```java
+public record CashflowProfile(
+        Money monthlyIncome,
+        Money monthlyCommittedExpenses,
+        Money minimumSafetyBuffer
+) {}
+```
+
+The user/configuration supplies this.
+
+Later:
+
+```text
+SPEC-003 Spending Intelligence
+        │
+        ▼
+Recurring expenses detected
+        │
+        ▼
+Goals recalculates strategy
+```
+
+That gives us a clean capability dependency direction:
+
+```text
+Savings ──────────────┐
+                      │
+                      ▼
+                 Financial Core
+                      │
+                      ▼
+                    Goals
+                      ▲
+                      │
+Spending Intelligence ┘
+```
+
+Though, at the Modulith dependency level, I would avoid making Goals depend directly on the future Spending module initially. Integration should preferably happen through published API/events.
+
+---
+
+# 3. The most important invariant
+
+I think SPEC-002 needs a stronger equivalent of:
+
+```text
+I-SAVINGS-002
+No Direct Ledger Mutation
+```
+
+For Goals:
+
+### `I-GOAL-001 — Strategy Is Not Execution`
+
+```text
+The Goals module SHALL calculate, recommend, and simulate
+financial contribution strategies.
+
+A strategy calculation MUST NOT directly mutate account balances,
+ledger entries, or execute transfers.
+```
+
+This is fundamental.
+
+The engine should produce:
+
+```java
+GoalContributionStrategy
+```
+
+not:
+
+```java
+TransferFundsUseCase.handle(...)
+```
+
+at least initially.
+
+That keeps this architecture clean:
+
+```text
+Goals
+   │
+   ▼
+Strategy Proposal
+   │
+   ▼
+Savings / User / Future AI Copilot
+   │
+   ▼
+Core Use Case
+   │
+   ▼
+Ledger
+```
+
+---
+
+# 4. I would separate simulation from execution
+
+There are really two operations.
+
+### Simulation
+
+```java
+GoalStrategy simulate(
+        Goal goal,
+        CashflowProfile cashflow
+);
+```
+
+Example:
+
+```text
+Goal:
+R$ 50,000 by Dec 2027
+
+Cashflow:
+Income: R$ 10,000
+Expenses: R$ 6,000
+Safety buffer: R$ 2,000
+
+Result:
+Available contribution: R$ 2,000/month
+Required contribution: R$ 1,666/month
+
+Probability/status:
+ON_TRACK
+```
+
+No persistence necessarily required.
+
+### Strategy adoption
+
+The user may accept a strategy:
+
+```text
+"Contribute R$ 1,700/month"
+```
+
+That could create:
+
+```java
+GoalContributionPlan
+```
+
+But even then, the actual automated transfer could remain the responsibility of Savings or a future dedicated execution capability.
+
+---
+
+# 5. Proposed goal feasibility states
+
+Instead of immediately introducing AI predictions, I would keep V1 deterministic.
+
+```java
+public enum GoalFeasibility {
+
+    ON_TRACK,
+
+    AT_RISK,
+
+    UNACHIEVABLE
+}
+```
+
+The calculation:
+
+```text
+requiredMonthlyContribution =
+    remainingAmount / monthsRemaining
+```
+
+Then:
+
+```text
+if availableCashflow >= requiredContribution
+    → ON_TRACK
+
+if availableCashflow > 0
+    → AT_RISK
+
+if availableCashflow <= 0
+    → UNACHIEVABLE
+```
+
+Potentially:
+
+```text
+remainingAmount <= 0
+    → ACHIEVED
+```
+
+This is deterministic, testable, and perfect for your SDD approach.
+
+---
+
+# 6. Safety buffer invariant
+
+I think this should become a first-class mathematical invariant.
+
+### `I-GOAL-002 — Liquidity Preservation`
+
+```text
+The contribution strategy SHALL NEVER recommend or automatically
+allocate an amount that would reduce projected available liquidity
+below the configured safety buffer.
+```
+
+Mathematically:
+
+```text
+safeContributionCapacity =
+    max(
+        0,
+        projectedAvailableCash - safetyBuffer
+    )
+```
+
+And:
+
+```text
+recommendedContribution ≤ safeContributionCapacity
+```
+
+This invariant should later be directly testable.
+
+---
+
+# 7. Another important invariant: deterministic calculation
+
+### `I-GOAL-003 — Deterministic Strategy Calculation`
+
+For identical inputs:
+
+```text
+Goal
++ Current balance
++ Cashflow profile
++ Current date
+```
+
+The engine must always produce:
+
+```text
+same strategy
+```
+
+No hidden database state, random factors, or external AI calls in the strategy engine.
+
+```text
+Strategy =
+f(
+    goal,
+    financialState,
+    cashflowProfile,
+    evaluationDate
+)
+```
+
+This will be particularly valuable later when the MCP/AI layer arrives.
+
+The AI can say:
+
+> "I recommend this strategy."
+
+But the actual numbers come from:
+
+```text
+Goals deterministic engine
+```
+
+not from the LLM.
+
+---
+
+# 8. Module topology
+
+Following what you did with `savings`, I would start with:
+
+```text
+br.com.wallet.goals
+│
+├── package-info.java
+│
+├── api
+│   ├── FinancialGoalUseCase.java
+│   ├── GoalStrategyUseCase.java
+│   ├── GoalQueryUseCase.java
+│   │
+│   ├── domain
+│   │   ├── FinancialGoal.java
+│   │   ├── CashflowProfile.java
+│   │   ├── GoalStrategy.java
+│   │   ├── GoalPriority.java
+│   │   ├── GoalStatus.java
+│   │   └── GoalFeasibility.java
+│   │
+│   └── dto
+│       ├── CreateGoalCommand.java
+│       ├── UpdateCashflowProfileCommand.java
+│       └── GoalStrategyResponse.java
+│
+└── internal
+    ├── engine
+    │   ├── ContributionCalculator.java
+    │   ├── CashflowCapacityCalculator.java
+    │   └── GoalStrategyEngine.java
+    │
+    ├── service
+    │   ├── FinancialGoalService.java
+    │   ├── GoalStrategyService.java
+    │   └── GoalQueryService.java
+    │
+    └── persistence
+        ├── FinancialGoalDao.java
+        └── CashflowProfileDao.java
+```
+
+I would initially avoid an event listener.
+
+Why?
+
+Because Savings has a natural event-driven behavior:
+
+```text
+DepositCompleted
+       ↓
+Evaluate rule
+       ↓
+Sweep
+```
+
+Goals is primarily:
+
+```text
+User requests strategy
+       ↓
+Calculate deterministic plan
+       ↓
+Return recommendation
+```
+
+Later we can add:
+
+```text
+DepositCompletedEvent
+TransferCompletedEvent
+SavingsExecutedEvent
+        ↓
+Goals invalidates/recalculates strategy
+```
+
+But I wouldn't make that mandatory for SPEC-002 unless you specifically want the strategy to be continuously recalculated.
+
+---
+
+# My proposed SPEC-002 scope
+
+I would define the first version around these five capabilities:
+
+### 1. Goal lifecycle
+
+```text
+Create
+Update
+Pause
+Resume
+Cancel
+Mark achieved
+```
+
+### 2. Target planning
+
+```text
+Target amount
+Target date
+Priority
+```
+
+### 3. Cashflow profile
+
+```text
+Monthly income
+Committed expenses
+Safety buffer
+```
+
+### 4. Deterministic strategy simulation
+
+```text
+Current position
+Remaining amount
+Time remaining
+Required contribution
+Safe contribution capacity
+Feasibility
+```
+
+### 5. Strategy recommendation
+
+For example:
+
+```text
+Goal: New Home
+
+Target:               R$ 100,000
+Current allocation:    R$ 30,000
+Remaining:             R$ 70,000
+Deadline:              24 months
+
+Required/month:        R$ 2,916.67
+Safe capacity/month:   R$ 3,500.00
+
+Status:                ON_TRACK
+Recommended:           R$ 2,916.67
+```
+
+---
+
+## My strongest recommendation
+
+For `SPEC-002`, I would establish this architectural boundary from day one:
+
+```text
+┌───────────────────────────────────────┐
+│              Goals Module             │
+│                                       │
+│  Analyze                              │
+│  Calculate                            │
+│  Simulate                             │
+│  Recommend                            │
+└─────────────────────┬─────────────────┘
+                      │
+                      │ NEVER
+                      ▼
+              Direct Ledger Mutation
+```
+
+And only after that, potentially:
+
+```text
+Goals
+  │
+  ▼
+Contribution Proposal
+  │
+  ├── User approval
+  │
+  ├── Savings Automation
+  │
+  └── Future AI Copilot
+           │
+           ▼
+     TransferFundsUseCase
+```
+
+That gives us a very clean progression toward your future MCP capability: **Goals becomes the deterministic financial reasoning engine, while AI remains an orchestration and conversational layer around it.**
+
+My next step would be to draft the complete `SPEC-002-financial-goal-engine.md` in exactly the same structure and quality level as your Savings spec, ready for **Gate 1 / Clarification**.

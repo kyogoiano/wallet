@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "wallet-platform.fullname" . }}-edge
+  labels:
+    {{- include "wallet-platform.labels" . | nindent 4 }}
+    {{- include "wallet-platform.edgeSelectorLabels" . | nindent 4 }}
+spec:
+  type: {{ .Values.edge.service.type }}
+  ports:
+    - name: http
+      port: {{ .Values.edge.service.port }}
+      targetPort: 8080
+      protocol: TCP
+    - name: quic
+      port: {{ .Values.edge.service.quicPort }}
+      targetPort: 8443
+      protocol: UDP
+  selector:
+    {{- include "wallet-platform.edgeSelectorLabels" . | nindent 4 }}

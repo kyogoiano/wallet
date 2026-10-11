@@ -1,0 +1,29 @@
+{
+  "caseId": "CASE-002-smurfing",
+  "archetype": "SMURFING",
+  "targetSubject": "MASK_USER_TARGET",
+  "evidenceItems": [
+    {
+      "id": "GRAPH-002",
+      "type": "DISPERSED_COUNTERPARTY_FANOUT",
+      "subject": "MASK_USER_TARGET",
+      "facts": { "counterpartyCount": 85, "fanOutRatio": 0.85 }
+    },
+    {
+      "id": "TEMPORAL-020",
+      "type": "MICRO_BURST_VELOCITY",
+      "subject": "MASK_USER_TARGET",
+      "facts": { "transactionCount": 450, "avgAmount": 150.0 }
+    }
+  ],
+  "expectedClaims": [
+    {
+      "type": "HIGH_VELOCITY",
+      "evidenceReferences": ["TEMPORAL-020"]
+    },
+    {
+      "type": "ARCHETYPE_SIMILARITY",
+      "evidenceReferences": ["GRAPH-002"]
+    }
+  ]
+}

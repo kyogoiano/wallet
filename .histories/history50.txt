@@ -1,0 +1,707 @@
+Yes. The scratch is a good starting point, and I would **not** turn this into a giant enterprise IAM/security spec.
+
+The direction I would take is:
+
+> **cryptographic authentication at the Edge, zero-DB verification, tenant isolation, bounded rate limiting, and authenticated Edge→Core propagation — using JDK 27/TLS 1.3 capabilities wherever they actually reduce complexity or latency.**
+
+Your scratch already identifies the major holes: spoofable `X-Tenant-Id`, authorization stub, noisy-neighbor risk, and lack of tenant ownership in Core.
+
+I would, however, **change the proposed architecture before writing the final spec**.
+
+### My preferred security model
+
+| Layer                         | V1 choice                                            | Why                                                      |
+| ----------------------------- | ---------------------------------------------------- | -------------------------------------------------------- |
+| Client → Edge                 | **TLS 1.3**                                          | Mandatory transport encryption                           |
+| Partner/server-to-server auth | **HMAC-SHA-256 request signing**                     | Very fast, deterministic, no JWT parsing/JWKS dependency |
+| Human/user API auth           | **JWT/JWKS**                                         | Natural fit for user-facing clients                      |
+| Edge → Core                   | **NATS credentials + TLS 1.3**                       | Core is not publicly reachable                           |
+| Tenant identity               | **Derived from verified credential**                 | Never trust `X-Tenant-Id`                                |
+| Replay protection             | timestamp + nonce/request ID                         | Required for financial commands                          |
+| Edge authorization            | in-memory policy                                     | O(1), zero DB                                            |
+| Rate limiting                 | `(tenantId, principalId)`                            | Prevent noisy-neighbor starvation                        |
+| Core authorization            | tenant ownership check                               | Final security boundary                                  |
+| PostgreSQL RLS                | **optional defense-in-depth**, not primary mechanism | Avoid unnecessary complexity on hot path                 |
+
+And importantly, I would **not make mTLS mandatory for every client** in this spec. It is excellent for controlled B2B environments, but forcing certificates onto every consumer makes the system considerably more operationally complex.
+
+Your scratch currently presents JWT and HMAC as alternatives.  I think we can make the distinction much cleaner:
+
+**JWT for identity-oriented clients; HMAC for high-frequency financial machine-to-machine APIs.**
+
+Both can coexist behind the same `AuthenticatedPrincipal`.
+
+---
+
+# SPEC-000.9.3
+
+I suggest the title:
+
+> **SPEC-000.9.3 — Cryptographic Edge Security & Multi-Tenant Command Boundary**
+
+rather than the longer *“Edge Perimeter Security, Signed Ingress & Multi-Tenant Boundaries.”*
+
+The former better describes what we're actually protecting.
+
+### Core mantra
+
+> **Authenticate once at the Edge, derive tenant identity cryptographically, propagate only verified identity, and enforce tenant ownership again at the Core — without introducing a database dependency into the synchronous Edge path.**
+
+---
+
+## 1. Scope
+
+`Wallet V4.x — Phase 000.9.3`
+
+Bounded contexts:
+
+```text
+:edge
+:core
+:contracts
+:infrastructure
+```
+
+Depends on:
+
+```text
+SPEC-000.9   Reactive Edge Gateway
+SPEC-000.9.1 Edge/Core Process Separation
+```
+
+Security objective:
+
+```text
+Client
+  │
+  │ TLS 1.3
+  │
+  ▼
+┌──────────────────────────┐
+│ EDGE                     │
+│                          │
+│ Authenticate             │
+│ Verify signature/JWT     │
+│ Derive tenant            │
+│ Authorize                │
+│ Rate-limit               │
+│ Anti-replay              │
+│                          │
+│ ZERO DB                  │
+└────────────┬─────────────┘
+             │
+             │ authenticated CommandEnvelope
+             ▼
+        NATS JetStream
+             │
+             ▼
+┌──────────────────────────┐
+│ CORE                     │
+│                          │
+│ Verify command identity  │
+│ Verify tenant ownership  │
+│ Execute transaction      │
+│                          │
+│ PostgreSQL               │
+└──────────────────────────┘
+```
+
+---
+
+# 2. Security invariants
+
+### I-SEC-001 — No implicit identity
+
+`tenantId`, `principalId`, roles and authorization attributes **MUST NOT originate from untrusted HTTP headers**.
+
+`X-Tenant-Id` therefore becomes informational at most and must never determine authorization.
+
+### I-SEC-002 — Cryptographic identity
+
+Every financial mutation MUST have an authenticated principal established by:
+
+```text
+JWT
+OR
+HMAC request signature
+OR
+mTLS identity
+```
+
+depending on configured authentication profile.
+
+### I-SEC-003 — Zero relational dependency at Edge
+
+Authentication, authorization and admission control MUST execute without PostgreSQL/JDBC access.
+
+This preserves the 000.9.1 Edge constraint.
+
+### I-SEC-004 — Tenant identity derivation
+
+```text
+verified credential
+        ↓
+AuthenticatedPrincipal
+        ↓
+tenantId
+principalId
+keyId
+roles/scopes
+```
+
+The client does not choose the authoritative tenant.
+
+### I-SEC-005 — Core is final authorization boundary
+
+Edge authorization is not sufficient.
+
+Before financial mutation:
+
+```text
+Command.tenantId
+       ==
+SourceAccount.tenantId
+       ==
+TargetAccount.tenantId
+```
+
+must hold unless an explicitly configured inter-tenant operation exists.
+
+### I-SEC-006 — Replay resistance
+
+A valid signature/token MUST NOT permit unlimited replay of a financial command.
+
+`operationId` remains the financial idempotency key.
+
+### I-SEC-007 — Constant bounded security path
+
+Security verification SHOULD remain:
+
+```text
+O(1)
+bounded memory
+bounded CPU
+no blocking I/O
+no database access
+```
+
+### I-SEC-008 — Authentication failure is fail-closed
+
+Invalid:
+
+* signature
+* token
+* expiration
+* issuer
+* audience
+* timestamp
+* nonce
+* credential
+
+→ request rejected.
+
+Never degraded to unauthenticated processing.
+
+---
+
+# 3. Authentication profiles
+
+## REQ-SEC-001 — TLS 1.3
+
+External financial endpoints MUST support TLS 1.3.
+
+TLS 1.2 may be retained only as an explicit compatibility profile if required by deployment/customer constraints.
+
+TLS configuration should use the JDK 27 TLS implementation rather than introducing another cryptographic stack.
+
+---
+
+## REQ-SEC-002 — HMAC financial API profile
+
+For high-frequency server-to-server clients:
+
+```http
+X-Key-Id
+X-Timestamp
+X-Nonce
+X-Signature
+```
+
+Signature input:
+
+```text
+timestamp
+nonce
+HTTP method
+canonical path
+canonical query
+content digest
+operationId
+```
+
+Conceptually:
+
+```text
+signature =
+HMAC-SHA256(
+    secret,
+    canonicalRequest
+)
+```
+
+I would **not** sign the raw JSON string.
+
+Instead:
+
+```text
+SHA-256(canonical payload)
+```
+
+so JSON field ordering/formatting cannot create accidental signature mismatches.
+
+---
+
+## REQ-SEC-003 — JWT profile
+
+JWT validation MUST verify:
+
+```text
+signature
+iss
+aud
+sub
+exp
+nbf
+tenant_id
+scopes/roles
+```
+
+Keys are resolved from a locally cached JWKS representation.
+
+Critical point:
+
+> **JWKS refresh must never become a synchronous dependency of a financial request.**
+
+If the key is not locally available:
+
+```text
+reject/degrade
+```
+
+rather than blocking the Edge waiting for an identity provider.
+
+---
+
+# 4. AuthenticatedPrincipal
+
+I'd introduce a very small security contract:
+
+```java
+public record AuthenticatedPrincipal(
+    String principalId,
+    String tenantId,
+    String credentialId,
+    Set<String> scopes,
+    AuthenticationMethod method
+) {}
+```
+
+where:
+
+```java
+enum AuthenticationMethod {
+    HMAC,
+    JWT,
+    MTLS
+}
+```
+
+The Edge creates it.
+
+The Core receives the resulting identity inside the authenticated command contract.
+
+---
+
+# 5. CommandEnvelope
+
+I'd evolve the existing envelope toward:
+
+```text
+CommandEnvelope
+ ├── operationId
+ ├── tenantId
+ ├── principalId
+ ├── credentialId
+ ├── commandType
+ ├── issuedAt
+ ├── traceContext
+ ├── payload
+ └── securityContext
+```
+
+But there is an important security point:
+
+**do not blindly trust the Edge-produced tenant fields merely because they came through NATS.**
+
+The Edge→Core channel itself needs authentication.
+
+---
+
+# 6. Edge → Core security
+
+The NATS connection becomes part of the security boundary:
+
+```text
+Edge
+  │
+  │ TLS
+  │ NATS credentials
+  ▼
+NATS JetStream
+  │
+  │ authenticated consumer
+  ▼
+Core
+```
+
+Core MUST reject commands arriving through anything other than the configured authenticated NATS path.
+
+And:
+
+```text
+commands.wallet.<commandType>
+```
+
+can remain the canonical subject.
+
+I would **not put tenantId into the subject in V1**.
+
+Your scratch proposes:
+
+```text
+commands.wallet.<tenantId>.<commandType>
+```
+
+
+
+That sounds attractive, but it creates unnecessary coupling between:
+
+* NATS subject topology
+* tenant cardinality
+* authorization
+* consumer configuration
+* wildcard subscriptions.
+
+Keep tenant identity in the authenticated envelope.
+
+---
+
+# 7. Anti-replay
+
+This is one area I'd make stronger than the scratch.
+
+For HMAC:
+
+```text
+timestamp
++
+nonce
++
+operationId
++
+canonical request
+```
+
+The Edge verifies:
+
+```text
+abs(now - timestamp) <= configured_window
+```
+
+For example:
+
+```text
+±30 seconds
+```
+
+Then:
+
+```text
+nonce / operationId
+```
+
+provides replay protection.
+
+Because `operationId` already exists for financial idempotency, we should avoid inventing an additional expensive distributed mechanism unless required.
+
+The simplest model is:
+
+```text
+operationId
+      ↓
+existing idempotency machinery
+      +
+short timestamp acceptance window
+      +
+cryptographic signature
+```
+
+That fits your “simple and fast” objective very well.
+
+---
+
+# 8. Tenant rate limiting
+
+The scratch correctly identifies the noisy-neighbor problem.
+
+I'd use:
+
+```text
+(tenantId, principalId)
+```
+
+rather than:
+
+```text
+(tenantId, clientIp)
+```
+
+as the primary identity.
+
+IP remains a secondary perimeter control.
+
+Therefore:
+
+```text
+Global limiter
+       +
+Tenant limiter
+       +
+Principal limiter
+       +
+Global inflight bulkhead
+```
+
+but **don't create four complicated distributed systems**.
+
+The first implementation can remain Edge-local:
+
+```text
+O(1) token bucket
+bounded cardinality
+TTL/eviction
+```
+
+Dragonfly can become the distributed limiter later if actual multi-Edge requirements demand it.
+
+---
+
+# 9. Core tenant boundary
+
+This is the most important database change.
+
+Every tenant-owned financial entity needs:
+
+```text
+tenant_id
+```
+
+at minimum:
+
+```text
+accounts
+wallet_operations
+ledger entries
+```
+
+with the exact ledger modeling depending on the existing schema.
+
+Before executing:
+
+```text
+TRANSFER
+```
+
+Core verifies:
+
+```text
+sourceAccount.tenantId == command.tenantId
+
+targetAccount.tenantId == command.tenantId
+```
+
+The check happens **inside the same PostgreSQL transaction** as the financial mutation.
+
+This is much more important than putting RLS everywhere immediately.
+
+---
+
+# 10. PostgreSQL RLS
+
+I'd deliberately make RLS:
+
+> **SHOULD / defense-in-depth**
+
+rather than:
+
+> **MUST**
+
+for V1.
+
+Why?
+
+Because your primary architecture already has:
+
+```text
+Edge authentication
+       ↓
+authenticated command
+       ↓
+Core tenant authorization
+       ↓
+transactional account ownership
+```
+
+Adding PostgreSQL session tenant context + RLS to every connection introduces additional connection-pool/session-state complexity.
+
+We can benchmark and add it later if the threat model requires database-level isolation.
+
+---
+
+# 11. SSE security
+
+Your scratch correctly calls this out.
+
+For:
+
+```http
+GET /operations/{operationId}/stream
+```
+
+the authenticated principal must be checked against the durable operation:
+
+```text
+operation.tenantId
+      ==
+principal.tenantId
+```
+
+Never:
+
+```text
+operationId alone → stream access
+```
+
+And because 000.9.1 already introduced durable status recovery, the sequence should be:
+
+```text
+authenticate
+    ↓
+authorize operation
+    ↓
+load durable status
+    ↓
+emit current state
+    ↓
+subscribe live updates
+```
+
+---
+
+# 12. Threat matrix
+
+Keep this small and executable:
+
+| Threat                      | Control                          |
+| --------------------------- | -------------------------------- |
+| Tenant spoofing             | cryptographic tenant derivation  |
+| Payload tampering           | HMAC/JWT                         |
+| Replay                      | timestamp + operationId/nonce    |
+| Credential theft            | expiration/key rotation          |
+| Noisy tenant                | tenant limiter                   |
+| Cross-tenant transfer       | Core ownership transaction       |
+| SSE enumeration             | tenant authorization             |
+| Edge DB compromise path     | zero DB at Edge                  |
+| NATS injection              | TLS + NATS credentials           |
+| Duplicate financial command | existing operationId idempotency |
+| JWKS outage                 | local cached keys                |
+| Key rotation                | overlapping validity window      |
+
+---
+
+# 13. What I would explicitly NOT put into 000.9.3
+
+This is important for keeping the spec fast and maintainable.
+
+**No:**
+
+* OAuth authorization server implementation
+* Keycloak
+* external IAM dependency
+* Vault dependency
+* dedicated API gateway
+* WAF implementation
+* service mesh
+* SPIFFE/SPIRE
+* blockchain-style signing
+* database RLS as mandatory
+* distributed rate limiter as mandatory
+* separate security microservice
+* ML fraud authentication
+* elaborate certificate PKI
+
+Those can be future infrastructure/platform specs.
+
+---
+
+## The resulting security path
+
+The architecture becomes extremely clean:
+
+```text
+                 INTERNET
+                    │
+                 TLS 1.3
+                    │
+                    ▼
+        ┌───────────────────────┐
+        │       EDGE            │
+        │                       │
+        │ HMAC / JWT / mTLS     │
+        │        ↓              │
+        │ AuthenticatedPrincipal│
+        │        ↓              │
+        │ Authorization         │
+        │        ↓              │
+        │ Anti-Replay           │
+        │        ↓              │
+        │ Tenant Rate Limit     │
+        │        ↓              │
+        │ Idempotency           │
+        │        ↓              │
+        │ Durable Acceptance    │
+        └───────────┬───────────┘
+                    │
+                JetStream
+                    │
+                    ▼
+        ┌───────────────────────┐
+        │       CORE            │
+        │                       │
+        │ authenticated NATS    │
+        │        ↓              │
+        │ tenant ownership      │
+        │        ↓              │
+        │ PostgreSQL TX         │
+        │        ↓              │
+        │ Ledger + Operation    │
+        └───────────────────────┘
+```
+
+That gives us a very strong property:
+
+> **The Edge is responsible for proving who is asking. The Core is responsible for proving what that identity is allowed to touch.**
+
+And it preserves the architecture we've been building: **no DB in Edge, O(1) synchronous security checks, JetStream as the process boundary, PostgreSQL as financial truth, and no unnecessary infrastructure.**
+
+I would make this **SPEC-000.9.3**, then create **PLAN-000.9.3** and **TASKS-000.9.3** only after we ratify the authentication decision. The one architectural decision I'd lock first is **HMAC + JWT as the two V1 profiles, with mTLS optional for controlled B2B deployments**, rather than forcing a single mechanism onto every client.

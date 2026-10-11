@@ -1,0 +1,709 @@
+Yes. Having both specs in front of us makes the architecture much clearer. **I think the separation into 000.8.1 and 000.9.4 is correct**, but I would not ratify either one unchanged yet.
+
+The two specs have different purposes:
+
+```text
+SPEC-000.9.4
+Dragonfly 2.0
+     │
+     ├── infrastructure compatibility
+     ├── hot-path correctness
+     ├── state isolation
+     └── performance optimization
+              │
+              ▼
+       existing fraud engine
+              │
+              ▼
+SPEC-000.8.1
+Typed AI evaluation
+     │
+     ├── nearline/offline only
+     ├── evidence grounding
+     ├── typed decisions
+     └── experimental benchmark
+```
+
+That is a good architecture boundary.
+
+However, I see **several things worth fixing before TASKS are generated**.
+
+---
+
+# 1. SPEC-000.8.1 — conceptually strong, but one invariant is too aggressive
+
+The strongest part is this:
+
+> `Deps(SynchronousTxPath) ∩ {LLM, SLM, Jevify, Ollama} = ∅`
+
+I would absolutely keep that.
+
+It gives us a very clean architecture:
+
+```text
+                 FINANCIAL HOT PATH
+                        │
+         ┌──────────────┼──────────────┐
+         ▼              ▼              ▼
+       Rules           ONNX        Dragonfly
+         │              │              │
+         └──────────────┼──────────────┘
+                        ▼
+                  Fraud Decision
+                        │
+                        ▼
+                     Ledger
+```
+
+while:
+
+```text
+                 NEARLINE / OFFLINE
+                        │
+         ┌──────────────┼──────────────┐
+         ▼              ▼              ▼
+      pgvector       Graph         Evidence
+         │              │              │
+         └──────────────┼──────────────┘
+                        ▼
+                Typed AI Evaluation
+                        │
+                        ▼
+                Analyst / Investigation
+```
+
+That's exactly the separation I'd want.
+
+---
+
+# 2. But `I-TYPED-004` currently mixes different concepts
+
+You have:
+
+```text
+Accuracy_candidate >= Accuracy_baseline
+Brier_candidate <= Brier_baseline
+P99_candidate <= P99_SLM_baseline
+```
+
+The problem is that **accuracy, calibration and latency aren't necessarily comparable in that direct way**.
+
+For example, the baseline may be:
+
+```text
+Rules + ONNX + Graph Risk
+```
+
+while the candidate is:
+
+```text
+SLM/Jevify semantic evaluator
+```
+
+They may have **different tasks**.
+
+You actually need to compare them on the **same labeled task**.
+
+I'd change the conceptual invariant to:
+
+```text
+I-TYPED-004
+
+A candidate typed decision engine SHALL NOT be adopted for a
+bounded workload unless it demonstrates non-inferior predictive
+quality and satisfies the workload's latency, resource,
+calibration and determinism gates against an explicitly defined
+baseline performing the same task.
+```
+
+Then the benchmark can define:
+
+```text
+Task:
+    "Is this behavior inconsistent with historical profile?"
+
+Baseline:
+    existing deterministic evaluator
+
+Candidate:
+    typed model
+
+Dataset:
+    identical
+
+Labels:
+    identical
+
+Metrics:
+    identical
+```
+
+That is much more scientifically defensible.
+
+---
+
+# 3. The 100% schema requirement needs to be separated from correctness
+
+This:
+
+> `SchemaValidity(Output) = 100%`
+
+is useful, but schema validity is **not model correctness**.
+
+A model can produce:
+
+```json
+{
+  "risk": 0.92
+}
+```
+
+100% validly while being completely wrong.
+
+So I'd explicitly distinguish:
+
+```text
+Schema validity
+        ≠
+Semantic correctness
+        ≠
+Calibration
+        ≠
+Grounding
+```
+
+Your benchmark should therefore have four separate gates:
+
+```text
+1. Contract validity
+2. Evidence grounding
+3. Predictive correctness
+4. Calibration
+```
+
+That will make 000.8.1 considerably stronger.
+
+---
+
+# 4. I really like the typed-question concept
+
+This is probably the most interesting part of 000.8.1:
+
+```text
+Q1 BOOLEAN
+Q2 BOOLEAN
+Q3 NUMERIC [0,1]
+```
+
+Because it changes the role of AI from:
+
+> "Generate an answer."
+
+to:
+
+> "Evaluate a precisely defined proposition over evidence."
+
+That's much more compatible with your SDD/TDD philosophy.
+
+I'd actually formalize this into a domain object:
+
+```java
+record TypedDecisionQuestion(
+    String questionId,
+    QuestionType type,
+    EvidenceSet evidence,
+    DecisionRubric rubric
+)
+```
+
+and:
+
+```java
+record TypedDecisionResult(
+    String questionId,
+    DecisionValue value,
+    CalibrationMetadata calibration,
+    EvidenceReferences evidence
+)
+```
+
+Then Jevify—or another implementation—becomes an **adapter**.
+
+That's important because I wouldn't want:
+
+```text
+SPEC-000.8.1
+      ↓
+Jevify
+```
+
+I'd want:
+
+```text
+SPEC-000.8.1
+      ↓
+TypedDecisionEngine SPI
+      │
+      ├── Jevify adapter
+      ├── baseline adapter
+      └── future implementation
+```
+
+Then we're evaluating an architectural capability, not committing Wallet to a particular AI library.
+
+---
+
+# 5. `I-TYPED-005` needs a correction
+
+You currently have:
+
+```text
+InferenceFailure
+    ⇒ FallbackTo(ONNX ⊕ Rules)
+```
+
+That is potentially wrong for **nearline investigation**.
+
+ONNX + Rules may be an appropriate **risk fallback**, but it isn't necessarily an equivalent replacement for an investigation semantic evaluation.
+
+For example:
+
+```text
+Question:
+"Is there evidence of coordinated mule activity?"
+```
+
+If the SLM fails, the system can't necessarily answer that with ONNX.
+
+I'd instead define:
+
+```text
+InferenceFailure
+    ⇒ deterministic bounded fallback
+    ⇒ mark evaluation UNAVAILABLE
+    ⇒ investigation continues
+    ⇒ ledger remains unaffected
+```
+
+Then, where a deterministic model actually exists:
+
+```text
+risk evaluation failure
+    ⇒ ONNX + Rules fallback
+```
+
+So:
+
+```text
+NEARLINE AI FAILURE
+       │
+       ├── deterministic equivalent exists
+       │       ↓
+       │    use it
+       │
+       └── no equivalent exists
+               ↓
+           UNAVAILABLE
+               ↓
+       don't fabricate confidence
+```
+
+That is much safer.
+
+---
+
+# 6. `REQ-TYPED-005` should not demand `<2 GB` universally
+
+You currently say:
+
+> Operational Cost: Memory and CPU footprint suitable for edge appliances (`<2GB RAM allocation`).
+
+That's good as a **deployment constraint**, but not necessarily a universal property of every candidate.
+
+I'd say:
+
+```text
+Candidate MUST be evaluated under the target appliance resource
+profile.
+
+For the constrained appliance profile, the candidate MUST fit
+within the allocated resource budget defined by the benchmark.
+```
+
+Then define the actual budget separately.
+
+Otherwise a future useful offline model could be rejected simply because it needs 2.1 GB.
+
+---
+
+# 7. SPEC-000.9.4 has a more serious issue
+
+This requirement:
+
+```text
+MemoryUsage(DF2.0) <= 0.70 * MemoryUsage(DF1.40)
+Throughput(DF2.0) >= 1.30 * Throughput(DF1.40)
+```
+
+is too strong as an **invariant**.
+
+You're turning the vendor's reported improvement into a Wallet architectural requirement.
+
+Those numbers should be **benchmark targets / acceptance gates**, not fundamental invariants.
+
+I'd change:
+
+```text
+I-DF20-002
+```
+
+to something like:
+
+> DF2.0 MUST NOT regress throughput, latency, or memory efficiency against the 1.40 baseline under the defined production-equivalent workload. Report measured deltas; adoption of optimization opportunities is governed by the benchmark acceptance criteria.
+
+Then the benchmark can have:
+
+```text
+Target:
+    >= 30% memory improvement
+    >= 30% throughput improvement
+
+Minimum:
+    no regression
+```
+
+This is much better.
+
+If the real result is:
+
+```text
+memory: -24%
+throughput: +42%
+latency: -18%
+```
+
+you don't want the entire upgrade declared a failure merely because it missed a vendor-derived 30% memory target.
+
+---
+
+# 8. `I-DF20-003` is mathematically problematic
+
+You have:
+
+```text
+Counter(t) = Σ TxCount(t-k)
+```
+
+for a sliding window.
+
+But your actual implementation uses sorted sets / timestamps, so the authoritative semantic is really:
+
+```text
+Count(W, t) =
+    | { transaction | t-W < occurredAt <= t } |
+```
+
+or, if amount-based velocity:
+
+```text
+Amount(W, t) =
+    Σ amount_i
+    where t-W < occurredAt_i <= t
+```
+
+This is important because your Dragonfly Lua script is supposed to guarantee **atomic evaluation**, not necessarily a discrete per-second counter model.
+
+I'd rewrite `I-DF20-003` around the actual domain invariant.
+
+---
+
+# 9. `I-DF20-004` needs to be generalized
+
+You currently define:
+
+```text
+fraud:velocity:{tenant}:{user}
+risk_profile:{tenant}:{entity}:{id}
+```
+
+That's good, but the invariant says **every key** must include `tenantId`.
+
+That could become overly restrictive for genuinely global infrastructure keys.
+
+For example:
+
+```text
+system:version
+health:...
+```
+
+may not represent tenant data.
+
+I'd say:
+
+> Every **tenant-scoped** Dragonfly key MUST include the cryptographically verified `tenantId`.
+
+That aligns directly with `I-SEC-010`.
+
+So:
+
+```text
+tenant-scoped state
+       ↓
+tenantId mandatory
+
+global infrastructure state
+       ↓
+explicitly classified GLOBAL
+```
+
+That's cleaner.
+
+---
+
+# 10. The biggest opportunity in 000.9.4 is actually the audit
+
+This is the part I would expand:
+
+> `DF20-AUDIT`
+
+Because upgrading Dragonfly gives us a reason to inspect **every access pattern**.
+
+I'd make the audit classify every interaction:
+
+```text
+Dragonfly Access Inventory
+
+┌─────────────────────┬───────────────┬──────────────┬─────────────┐
+│ Access              │ Tenant scoped │ Atomic       │ Round trips │
+├─────────────────────┼───────────────┼──────────────┼─────────────┤
+│ Velocity            │ YES           │ Lua          │ 1           │
+│ Risk profile        │ YES           │ ?            │ ?           │
+│ Block cache         │ YES           │ ?            │ ?           │
+│ Rate limiter        │ YES           │ ?            │ ?           │
+│ Fraud graph cache   │ YES           │ ?            │ ?           │
+│ ...                 │               │              │             │
+└─────────────────────┴───────────────┴──────────────┴─────────────┘
+```
+
+And then classify:
+
+```text
+A = optimal
+B = safe but improvable
+C = redundant
+D = race-prone
+E = incorrectly scoped
+F = obsolete
+```
+
+That could uncover more value than the version upgrade itself.
+
+---
+
+# 11. One thing I would explicitly add to 000.9.4
+
+Because we're changing a **state engine underneath financial/fraud decisions**, I want a dual-version compatibility test:
+
+```text
+same input
+     │
+     ├── Dragonfly 1.40
+     │
+     └── Dragonfly 2.0
+           │
+           ▼
+     normalized result
+```
+
+For deterministic operations:
+
+```text
+Result_1.40 == Result_2.0
+```
+
+For performance:
+
+```text
+measure separately
+```
+
+This is especially valuable for:
+
+* Lua velocity
+* sliding windows
+* block decisions
+* TTL behavior
+* rate limiter
+* tenant isolation
+
+I would call it something like:
+
+```text
+DragonflyBehavioralCompatibilityIT
+```
+
+That gives us a migration oracle.
+
+---
+
+# 12. I would also reconsider `I-DF20-005`
+
+You currently have:
+
+```text
+Timeout(RedisFuture) <= 100ms
+```
+
+That is inconsistent with your stated hot-path requirement.
+
+If Dragonfly's hot-path operation is supposed to be:
+
+```text
+P99 < 0.5 ms
+```
+
+then a **100 ms timeout** can be an emergency circuit-breaker boundary, but it cannot be considered a normal hot-path timeout.
+
+I'd separate:
+
+```text
+Normal operation:
+    P99 < 0.5 ms
+
+Degradation trigger:
+    bounded timeout
+
+Emergency timeout:
+    e.g. 5/10/20 ms
+```
+
+The exact number should come from the existing resilience policy, not be invented here.
+
+And most importantly:
+
+> **Don't let a 100 ms Dragonfly timeout happen inside a database transaction thread.**
+
+Your spec already recognizes this with:
+
+> `ThreadLeak(Fallback) = 0`
+
+I'd make that an explicit architecture test.
+
+---
+
+# 13. The two specs should eventually connect, but not depend on each other
+
+I would make the relationship:
+
+```text
+             SPEC-000.9.4
+             Dragonfly 2.0
+                   │
+                   ▼
+        better/faster hot state
+                   │
+                   ▼
+             SPEC-000.8
+             Signal Fusion
+                   │
+                   ▼
+             SPEC-000.8.1
+          Typed AI Evaluation
+                   │
+                   ▼
+          nearline investigation
+```
+
+But **000.8.1 must remain valid even if Jevify fails the benchmark**.
+
+Likewise:
+
+**000.9.4 must remain valuable even if the AI experiment is abandoned.**
+
+That's good architectural decoupling.
+
+---
+
+# My recommended final structure
+
+I would keep the two specs but make these changes before ratification:
+
+### SPEC-000.8.1
+
+**Keep:**
+
+* hot-path airgap
+* typed questions
+* nearline/offline execution
+* baseline comparison
+* schema validation
+* calibration
+* deterministic fallback
+* no cloud LLM dependency
+
+**Change:**
+
+1. Make `TypedDecisionEngine` an SPI; Jevify is an implementation candidate.
+2. Separate schema validity from semantic correctness.
+3. Make benchmark comparison task-equivalent.
+4. Change AI failure fallback to `UNAVAILABLE` where no deterministic equivalent exists.
+5. Make `<2 GB` a benchmark resource profile, not a universal invariant.
+6. Explicitly define evidence grounding/provenance.
+7. Add reproducibility/model-version metadata to every evaluation.
+
+### SPEC-000.9.4
+
+**Keep:**
+
+* 3-gate migration
+* codebase-wide audit
+* Lua audit
+* TTL audit
+* tenant isolation
+* UDS/TCP comparison
+* performance benchmarking
+* optimization inventory
+
+**Change:**
+
+1. Vendor improvement numbers → benchmark targets, not invariants.
+2. Rewrite sliding-window mathematical invariant.
+3. Say **tenant-scoped** keys must contain tenant ID.
+4. Add 1.40 vs 2.0 behavioral compatibility testing.
+5. Separate normal latency from emergency timeout.
+6. Audit every Dragonfly access pattern.
+7. Explicitly test that fallback doesn't block DB threads.
+
+---
+
+## And there's a very nice strategic outcome
+
+If we do this correctly, Wallet gets three increasingly sophisticated layers:
+
+```text
+                    WALLET V4
+                       │
+        ┌──────────────┼──────────────┐
+        │              │              │
+        ▼              ▼              ▼
+   DETERMINISTIC     MICRO-ML       SEMANTIC AI
+        │              │              │
+     Rules          ONNX          Typed SLM
+        │              │              │
+        └──────────────┼──────────────┘
+                       │
+                 Evidence/Fusion
+                       │
+             ┌─────────┴─────────┐
+             │                   │
+          HOT PATH            NEARLINE
+          < 2 ms              async
+             │                   │
+             ▼                   ▼
+          Ledger             Investigator
+```
+
+And Dragonfly 2.0 sits underneath the first two layers as the **fast state substrate**, while 000.8.1 explores whether typed AI can make the **investigation/fusion layer more correct without contaminating financial availability**.
+
+That is a much stronger architecture than simply "upgrade Dragonfly and add an AI library."

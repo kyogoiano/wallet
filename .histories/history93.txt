@@ -1,0 +1,465 @@
+Agora sim. Comparando **PLAN-003.2 diretamente com a SPEC-003.2 que você trouxe**, o plano incorporou corretamente os principais fechamentos que discutimos: ocorrência projetada, `t0` via `Clock`, separação de `L_H` vs. monthly committed, Goals como boundary, forecast efêmero e tenant autenticado.
+
+Eu o classificaria como:
+
+# 🟢 PLAN-003.2 — Approved / Ready for Tasks
+
+Mas há **4 pontos que eu fecharia antes de gerar TASKS-003.2**. São menores que os problemas que tínhamos na primeira versão da SPEC.
+
+---
+
+## 1. 🔴 `BI_WEEKLY` + `MONTHLY` + `ANNUAL`: intervalo fixo está correto, mas precisa preservar o contrato de 003.1
+
+O PLAN define:
+
+```text
+Δt_cadence ∈ {7, 14, 30, 365}
+```
+
+Isso é coerente com `SPEC-003.1`, que definiu as projeções por cadence.
+
+Porém, existe uma sutileza:
+
+`003.1` calcula cadence a partir de:
+
+```text
+avg Δt
+```
+
+e `nextExpectedAt`:
+
+```text
+last + round(avg Δt)
+```
+
+Enquanto `003.2` passa a projetar usando:
+
+```text
+7 / 14 / 30 / 365
+```
+
+Isso significa que, por exemplo, uma série classificada como `MONTHLY` com média histórica de **28 dias** será projetada como exatamente 30 dias.
+
+Isso é provavelmente **desejável**, porque estamos transformando uma classe semântica em um calendário estável.
+
+Mas precisa ser explicitado como decisão:
+
+> **Forecasting uses the canonical interval associated with the classified cadence, not the historical average interval.**
+
+Caso contrário o implementador pode interpretar que deve reutilizar `averageInterval`.
+
+Eu adicionaria isso ao ADR-003.2.1.
+
+---
+
+# 2. 🔴 `IRREGULAR` ainda tem uma pequena inconsistência conceitual
+
+O PLAN diz:
+
+> For `IRREGULAR`, `O_H` contains at most `S.nextExpectedAt`
+
+Isso é coerente com a SPEC atual.
+
+Mas `003.1` também definiu:
+
+```text
+IRREGULAR → nextExpectedAt = null
+```
+
+no PLAN anterior.
+
+Portanto, na prática:
+
+```text
+IRREGULAR
+    ↓
+nextExpectedAt = null
+    ↓
+O_H = ∅
+```
+
+A frase:
+
+> contains at most `S.nextExpectedAt`
+
+fica tecnicamente redundante/impossível se a regra de 003.1 for seguida.
+
+Eu não tentaria inventar uma previsão para IRREGULAR.
+
+A implementação deveria simplesmente fazer:
+
+```text
+IRREGULAR → no projected occurrences
+```
+
+e:
+
+```text
+L_H contribution = 0
+```
+
+Isso também é muito mais seguro financeiramente.
+
+**Eu corrigiria essa frase antes do TASKS.**
+
+---
+
+# 3. 🟡 `AccountUseCase.find(walletId)` está aparecendo sem necessidade clara
+
+No topology:
+
+```text
+CashflowService
+    ↓
+AccountUC
+```
+
+e ADR:
+
+> `userId` is obtained via `AccountUseCase.find(walletId).userId()`
+
+Mas o PLAN não mostra **para que `userId` é necessário** no cálculo do forecast.
+
+Ele parece existir exclusivamente para o Goals integration.
+
+Aqui precisamos verificar o contrato real de:
+
+```text
+CashflowProfileUseCase
+```
+
+porque não devemos inventar uma dependência só para obter `userId`.
+
+Se `CashflowProfileUseCase` realmente exige `(userId, walletId, tenantId)`, perfeito.
+
+Se ele trabalha diretamente com `walletId`, então `AccountUseCase` é uma dependência desnecessária.
+
+### Minha recomendação
+
+Não alterar a arquitetura sem verificar o contrato existente.
+
+No TASKS, colocar:
+
+> use the existing `goals::api` contract; do not introduce new identity-resolution semantics.
+
+Isso mantém o PLAN baseado no sistema real.
+
+---
+
+# 4. 🟡 `sync-goals` precisa ficar claramente fora do cálculo do forecast
+
+Hoje:
+
+```text
+CashflowForecastingService
+ ├── ForecastEngine
+ ├── SubDao
+ ├── BalanceUC
+ ├── AccountUC
+ └── CashflowUC
+```
+
+Funciona, mas cria uma classe com cinco responsabilidades.
+
+Eu não mudaria necessariamente o topology agora, mas o TASKS deve separar:
+
+```text
+GET projections
+    ↓
+calculate forecast
+
+POST sync-goals
+    ↓
+calculate committed expenses
+    ↓
+Goals API
+```
+
+O `ForecastEngine` deve ser **pure/domain-oriented**:
+
+```text
+subscriptions + t0
+        ↓
+Forecast
+```
+
+e não conhecer:
+
+* REST
+* Goals
+* database
+* authentication
+* `TenantContextHolder`
+* `BalanceUseCase`
+
+Isso é particularmente importante porque queremos conseguir testar:
+
+```text
+CashflowForecastingEngineTest
+```
+
+sem Spring context.
+
+---
+
+# O que ficou excelente
+
+## Occurrence expansion
+
+Agora está correto:
+
+```text
+Subscription
+    ↓
+nextExpectedAt
+    ↓
++ cadence interval
+    ↓
++ cadence interval
+    ↓
+...
+    ↓
+H
+```
+
+E o teste:
+
+> Weekly R$50 / 30 days → 4 occurrences → R$200
+
+é exatamente o teste que estava faltando.
+
+---
+
+## Current balance vs forecast
+
+Também ficou corretamente separado:
+
+```text
+L_H
+   +
+current Balance
+   ↓
+Shortfall
+```
+
+e **não**:
+
+```text
+future income
+future deposits
+future balance
+```
+
+Isso mantém o MVP determinístico e evita que `REQ-CASH-007` `[COULD]` contamine os `[MUST]`.
+
+Eu manteria exatamente assim.
+
+---
+
+# `monthlyCommittedExpenses` está bem definido
+
+A separação:
+
+```text
+                 ┌── L_H
+Subscription ────┤
+                 └── monthlyCommitted
+```
+
+é uma decisão importante.
+
+Exemplo:
+
+```text
+MONTHLY subscription
+amount = R$100
+
+L30 = R$100
+
+monthlyCommitted = R$100
+```
+
+Esses valores podem coincidir numericamente, mas **não são a mesma métrica**.
+
+E o PLAN explicitamente proíbe:
+
+```text
+L_H + monthlyCommitted
+```
+
+para shortfall.
+
+Muito bom.
+
+---
+
+# Goals boundary
+
+Este trecho está particularmente correto:
+
+> `intelligence` accesses only `goals::api`, never querying goals tables or DAOs.
+
+Isso preserva a arquitetura modular.
+
+O fluxo é:
+
+```text
+intelligence
+     │
+     ▼
+goals::api
+     │
+     ▼
+goals implementation
+     │
+     ▼
+CashflowProfile
+```
+
+e não:
+
+```text
+intelligence
+     │
+     └──> goals repository ❌
+```
+
+Isso deve virar um **ArchUnit assertion** no TASKS.
+
+---
+
+# Forecast efêmero
+
+Também concordo totalmente com:
+
+> No `cashflow_forecasts` table in V1.
+
+Não há razão para materializar uma projeção determinística que pode ser recalculada.
+
+Fica:
+
+```text
+subscriptions = source
+balance        = source
+forecast       = derived
+```
+
+Muito mais limpo.
+
+---
+
+# Um detalhe que eu adicionaria aos testes
+
+O triad de occurrence expansion deveria ter também:
+
+```text
+MONTHLY:
+t0 = Jan 1
+nextExpectedAt = Jan 10
+H = 30
+
+→ Jan 10
+→ Feb 9/10 dependendo da canonical cadence semantics
+```
+
+Na verdade, esse exemplo revela por que precisamos fechar o ponto #1.
+
+Como estamos usando:
+
+```text
++30 days
+```
+
+e não "mesmo dia do mês", o resultado pode ser:
+
+```text
+Jan 10
+Feb 9
+Mar 11
+```
+
+por causa da duração variável dos meses.
+
+Isso **não é necessariamente errado**, mas deve ser intencional.
+
+Para o modelo atual, eu manteria:
+
+> cadence interval is an exact number of days.
+
+Então:
+
+```text
+MONTHLY = +30 days
+ANNUAL  = +365 days
+```
+
+e não calendar-month arithmetic.
+
+Isso torna o algoritmo determinístico e consistente com a matemática de `003.1`.
+
+---
+
+# Traceability está boa
+
+A matriz:
+
+```text
+REQ-CASH-001 → Engine
+REQ-CASH-002 → Engine + BalanceUC
+REQ-CASH-003 → Engine
+REQ-CASH-004 → Controller + Service
+REQ-CASH-005 → Controller + Goals API
+```
+
+está coerente.
+
+E gostei particularmente de:
+
+```text
+REQ-CASH-009 [WON'T]
+    ↓
+I-CASH-008
+    ↓
+ephemeral architecture
+```
+
+porque evita que alguém introduza persistência só para "facilitar".
+
+---
+
+# Minha classificação
+
+| Área                          | Status                  |
+| ----------------------------- | ----------------------- |
+| Occurrence expansion          | 🟢                      |
+| `L7/L14/L30`                  | 🟢                      |
+| Shortfall                     | 🟢                      |
+| Current balance semantics     | 🟢                      |
+| Monthly normalization         | 🟢                      |
+| Installment partition         | 🟢                      |
+| Anti-double-counting          | 🟢                      |
+| Goals boundary                | 🟢                      |
+| Tenant isolation              | 🟢                      |
+| `Clock` / deterministic tests | 🟢                      |
+| Ephemeral architecture        | 🟢                      |
+| IRREGULAR semantics           | 🟡 corrigir wording     |
+| Canonical cadence interval    | 🟡 explicitar           |
+| `AccountUseCase` necessity    | 🟡 verificar contrato   |
+| Service responsibility        | 🟡 TASKS deve controlar |
+
+## Conclusão
+
+**PLAN-003.2 está essencialmente pronto.**
+
+Eu faria apenas esses pequenos ajustes, **sem reabrir a arquitetura da SPEC**:
+
+1. `IRREGULAR → O_H = ∅`.
+2. Declarar que forecast usa **canonical cadence interval**, não `avgInterval`.
+3. Verificar o contrato real de `CashflowProfileUseCase` antes de obrigar `AccountUseCase`.
+4. Garantir que `CashflowForecastingEngine` permaneça puro e que orchestration/Goals/REST permaneçam no service.
+
+Depois disso, eu consideraria:
+
+**`PLAN-003.2 → 🟢 Ready for TASKS-003.2`**
+
+E os TASKS devem seguir o mesmo padrão de `003.1`: primeiro `[MUST]`, com os testes matemáticos escritos antes da implementação do engine.

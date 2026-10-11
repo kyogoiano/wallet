@@ -9,6 +9,8 @@ import org.aspectj.lang.annotation.Around;
 import org.aspectj.lang.annotation.Aspect;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.UUID;
@@ -19,24 +21,38 @@ public class TracingAspect {
 
     private static final Logger log = LoggerFactory.getLogger(TracingAspect.class);
     public static final String OPERATION_ID = "operation.id";
+    public static final String USER_ID = "user.id";
     private final Tracer tracer;
 
     public TracingAspect(final Tracer tracer) {
         this.tracer = tracer;
     }
 
+    @Autowired
+    public TracingAspect(final ObjectProvider<Tracer> tracerProvider) {
+        this.tracer = tracerProvider.getIfAvailable();
+    }
+
     @Around("@annotation(traceable)")
     public Object trace(final ProceedingJoinPoint pjp, final Traceable traceable) throws Throwable {
+        if (tracer == null) {
+            return pjp.proceed();
+        }
+
         log.debug("Aspect triggered for: {}", traceable.value());
 
         final ScopedSpan span = tracer.startScopedSpan(traceable.value());
         
         String operationId = null;
+        String userId = null;
         for (final Object arg : pjp.getArgs()) {
             if (arg instanceof TraceContext ctx) {
                 ctx.traceTags().forEach(span::tag);
                 if (ctx.operationId() != null) {
                     operationId = ctx.operationId().toString();
+                }
+                if(ctx.userId() != null) {
+                    userId = ctx.userId().toString();
                 }
             }
             if (arg instanceof UUID uuid && operationId == null) {
@@ -44,14 +60,24 @@ public class TracingAspect {
             }
         }
 
-        // crates a baggage for cross-service propagation
-        try (final BaggageInScope baggage = tracer.createBaggageInScope(OPERATION_ID, operationId)) {
-            if (operationId != null) {
-                span.tag(OPERATION_ID, operationId); // normalized names ( attribute promotion easily observable)
-            }
+        // creates baggage for cross-service propagation
+        BaggageInScope opBaggage = null;
+        BaggageInScope userBaggage = null;
 
+        if (operationId != null) {
+            span.tag(OPERATION_ID, operationId); // normalized names ( attribute promotion easily observable)
+            opBaggage = tracer.createBaggageInScope(OPERATION_ID, operationId);
+            log.debug("Operation baggage attached: {}", opBaggage.get());
+        }
+
+        if (userId != null) {
+            span.tag(USER_ID, userId);
+            userBaggage = tracer.createBaggageInScope(USER_ID, userId);
+            log.debug("User baggage attached: {}", userBaggage.get());
+        }
+
+        try {
             return pjp.proceed();
-
         } catch (IdempotencyException ex) {
             log.warn("IdempotencyException caught in aspect: {}", ex.getMessage());
             span.tag("status", "IDEMPOTENT_IGNORE");
@@ -68,6 +94,18 @@ public class TracingAspect {
             span.tag("status", "FAILED");
             throw ex;
         } finally {
+            if (userBaggage != null) {
+                try {
+                    userBaggage.close();
+                } catch (Exception ignored) {
+                }
+            }
+            if (opBaggage != null) {
+                try {
+                    opBaggage.close();
+                } catch (Exception ignored) {
+                }
+            }
             span.end();
             log.debug("Aspect finished for: {}", traceable.value());
         }

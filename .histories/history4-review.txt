@@ -1,0 +1,197 @@
+Um ponto que eu ajustaria: nomenclatura core
+
+Agora existe uma pequena ambiguidade arquitetural:
+
+br.com.wallet.core
+
+é o subproject compartilhado, mas o verdadeiro núcleo financeiro agora é:
+
+br.com.wallet.ledger
+
+Então, daqui para frente, eu tomaria cuidado para não chamar :core de Wallet Core.
+
+Eu estabeleceria:
+
+Wallet Core / Financial Core
+        =
+ledger module
+
+Enquanto:
+
+:core
+        =
+Shared Foundation
+
+Isso evita confusão futura.
+
+Outro pequeno ajuste: a SPEC-000 tem uma referência residual a I-CAPABILITY-001
+
+Na failure table aparece:
+
+External adapter attempts to inject AccountDao directly
+→ I-CAPABILITY-001 / REQ-ALIGN-004
+
+Mas I-CAPABILITY-001 ainda pertence conceitualmente à plataforma futura e não está definido nesta SPEC.
+
+Eu trocaria por algo específico, por exemplo:
+
+I-MODULITH-001 — Internal Encapsulation
+
+No module outside ledger SHALL directly access
+types contained in ledger.internal.
+
+E:
+
+I-MODULITH-002 — Published API Access
+
+Cross-module interactions with ledger SHALL occur
+exclusively through ledger.api.
+
+Isso deixa a SPEC-000 completamente autocontida.
+
+Depois, em SPEC-001, podemos definir:
+
+I-CAPABILITY-001
+
+e ele passa a se apoiar em I-MODULITH-001.
+
+A hierarquia ficaria ótima:
+
+SPEC-000
+│
+├── I-MODULITH-001
+│   Internal Encapsulation
+│
+└── I-MODULITH-002
+    Published API Access
+
+        ↓ enables
+
+SPEC-001
+│
+├── I-CAPABILITY-001
+│   No Direct Ledger Mutation
+│
+└── I-CAPABILITY-002
+    Zero Security Bypass
+O ponto mais importante para a próxima SPEC
+
+Agora que o Modulith existe, eu mudaria bastante a antiga SPEC-001.
+
+Antes estávamos pensando:
+
+Capability Platform SPI
+    │
+    ├── WalletCapability
+    ├── WalletEventListener
+    └── WalletCommandDispatcher
+
+Agora eu não criaria isso automaticamente.
+
+A pergunta da SPEC-001 passa a ser:
+
+What additional contracts are actually required beyond Spring Modulith application modules, published APIs, and domain events?
+
+Talvez a resposta seja:
+
+Nothing.
+
+E isso seria uma ótima resposta.
+
+Podemos ter:
+
+ledger
+    │
+    │ publishes event
+    ▼
+savings
+    │
+    │ invokes
+    ▼
+ledger.api
+
+sem precisar de:
+
+WalletCapability
+CapabilityRegistry
+PluginManager
+CommandDispatcher
+
+Só porque inicialmente imaginamos que seriam necessários.
+
+Eu revisaria o roadmap assim
+PHASE 0 — Architecture Baseline
+
+SPEC-000
+Architecture Alignment & Spring Modulith
+        │
+        ▼
+Modulith verified
+        │
+        ▼
+Published APIs established
+        │
+        ▼
+Module boundaries enforced
+
+Depois:
+
+PHASE 1 — First Capability
+
+SPEC-001
+Smart Savings Automation
+        │
+        ▼
+First peer application module:
+
+br.com.wallet.savings
+
+Eu sinceramente consideraria eliminar a SPEC genérica de “Capability Platform”, a menos que durante o planejamento do Smart Savings descubramos uma abstração realmente necessária.
+
+A própria implementação do primeiro capability vai nos dizer se precisamos de uma SPI.
+
+Esse seria meu modelo preferido agora:
+
+SPEC-000
+    Architecture Alignment
+            │
+            ▼
+      ledger.api
+            │
+            │
+    ┌───────┼───────────┐
+    ▼       ▼           ▼
+ savings   goals   intelligence
+    │       │           │
+    └───────┼───────────┘
+            │
+            ▼
+         copilot
+            │
+            ▼
+         MCP Edge
+Minha conclusão
+
+Eu não acho que você precise fazer mais uma grande refatoração agora.
+
+Pelo que está especificado, você atingiu exatamente o objetivo necessário:
+
+o Ledger tem uma API publicada;
+implementações e DAOs ficaram encapsulados;
+adapters dependem da API;
+os módulos são verificáveis automaticamente;
+os invariantes financeiros foram explicitamente preservados;
+:core e :fraud não sofreram uma reestruturação desnecessária;
+o caminho para adicionar savings, goals, intelligence e copilot está aberto.
+
+Minha recomendação é: congelar o baseline, concluir PLAN-000 e TASKS-000/convergência se ainda faltarem, e então partir para o primeiro módulo de negócio real:
+
+SPEC-001 — Smart Savings Automation
+
+Agora sim, em vez de projetarmos uma plataforma abstrata para plugins, podemos construir:
+
+br.com.wallet.savings
+
+como um Spring Modulith Application Module real, aprender com ele e só extrair uma abstração comum quando houver pelo menos um segundo módulo exigindo a mesma coisa.
+
+Isso é muito mais YAGNI e, honestamente, uma evolução arquitetural mais madura do que o plano inicial.

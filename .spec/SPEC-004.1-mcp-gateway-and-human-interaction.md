@@ -1,10 +1,10 @@
 # 📋 Specification: SPEC-004.1 — MCP Gateway & Human Interaction
 
-- **Status**: Draft (Created per History 96 & 97)
+- **Status**: 📝 Approved / Ratified (Refined per History 104)
 - **Author**: Antigravity Orchestrator & System Architect
-- **Date**: 2026-10-08
+- **Date**: 2026-10-09
 - **Target Release / Milestone**: Wallet Service V4 — Phase 4.1
-- **Bounded Context / Package**: `br.com.wallet.copilot.internal.mcp`
+- **Bounded Context / Package**: `br.com.wallet.copilot.internal.mcp` (Edge Adapter)
 - **Spec Slicing Scope**: Max 250 lines (`I-SDD-006`). Domain engine defined in `SPEC-004`.
 
 ---
@@ -12,36 +12,38 @@
 ## 0. Pre-Flight History & Context Audit
 
 - **Histories Audited**:
-  - `.histories/history95.txt`: MCP is strictly transport/adapter; capability ≠ module ≠ tool.
-  - `.histories/history96.txt`: Streamable HTTP replaces legacy SSE; Spring AI MCP WebFlux; MCP Form & URL Elicitation; MRTR (`input_required`); interaction state $\ne$ proposal state.
-  - `.histories/history97.txt`: Slicing into SPEC-004.1; Spring Boot 4.2.0-M2 compatibility; elicitation capability negotiation.
+  - `.histories/history95.txt`–`97.txt`: MCP is strictly transport adapter; capability $\ne$ module $\ne$ tool; Spring AI WebFlux/WebMvc Streamable HTTP.
+  - `.histories/history102.txt`–`104.txt`: Streamable HTTP with session vs stateless; Form elicitation response $\ne$ authorization credential; URL elicitation anti-bearer contract (opaque correlation token, independent human auth); multi-instance safe tracker (fail-safe to Web/CLI, zero TTL extension, zero duplicate execution); tool idempotency scoped to `(tenantId, idempotencyKey)` with canonical payload normalization; Spring AI ownership of JSON-RPC framing.
+- **Architectural Mantra**: *"The agent requests. The gateway interacts. The human authorizes via a trusted, independent mechanism. The financial domain decides and executes."*
 - **Foundational Constraints (`constitution.md`)**:
-  - `I-AI-001` (Human-in-the-Loop): AI agents never execute mutations directly.
-  - `I-AI-002` (Critical Path Isolation): Ingress performance/availability isolated from core banking.
-  - `I-AI-003` (Modulith Boundary): Tool adapters consume public `.api` contracts only.
+  - `I-AI-001` (Human-in-the-Loop Gate): AI agents never execute mutations directly.
+  - `I-AI-004` (Authenticated Tenant & 404 Non-Disclosure): Zero client spoofing; cross-tenant resource hiding.
+  - `I-TDD-002` (Zero Vibe Coding): Exact `BigDecimal` scale 2 arithmetic; mandatory test triads.
 
 ---
 
 ## 1. Intent & Business Value
 
-Expose Wallet capabilities (`ledger`, `intelligence`, `goals`, `savings`) to external AI agents through the standardized Model Context Protocol (MCP). The MCP Gateway acts as a protocol adapter on Spring AI with Streamable HTTP and reactive WebFlux, providing read-only inquiry tools and mutation proposal tools backed by MCP Elicitation and Multi-Round-Trip Requests (MRTR), delegating all financial authorization to `SPEC-004` (`copilot::api`).
+Expose Wallet capabilities (`ledger`, `intelligence`, `goals`, `savings`) to external AI agents via the Model Context Protocol (MCP). The MCP Gateway serves as an authenticated protocol adapter using Spring AI with Streamable HTTP (`STREAMABLE` session-oriented transport). It delivers read-only inquiry tools and mutation proposal tools backed by MCP Elicitation and Multi-Round-Trip Requests (MRTR), delegating financial authorization and lifecycle strictly to `SPEC-004` (`copilot.api.ProposalUseCase`).
 
 ---
 
 ## 2. Scope & Non-Goals
 
 ### In Scope
-- **Spring AI MCP Server**: WebFlux with Streamable HTTP transport conforming to Spring Boot 4.2.0-M2 baseline.
-- **Read-Only Tool Catalog**: Pure queries (`balance`, `cashflow_projections`, `subscriptions`, `simulate_goal`).
-- **Mutation Proposal Tools**: Thin adapters delegating to `copilot::api` (`CreateProposalCommand`).
-- **MCP Elicitation Support**: Form Elicitation for interactive approval; URL Elicitation for out-of-band sensitive flows.
-- **Capability Negotiation**: Graceful degradation to external approval when client lacks elicitation support.
-- **Context & Security**: Propagating authenticated tenant/principal into all tool invocations.
+- **Authenticated Spring AI MCP Server**: Streamable HTTP with session; server-enforced transport security before tool execution (`I-MCP-005`).
+- **Read-Only Tool Catalog**: Pure queries asserting resource tenant ownership before executing downstream use cases.
+- **Mutation Proposal Tools**: Adapters delegating to `copilot.api.ProposalUseCase.createProposal` with mandatory idempotency key and canonical scale-2 bounds.
+- **Three-Tier Capability Negotiation**: Separate inspection for Form and URL Elicitation with deterministic external Web/CLI fallback (`REQ-MCP-005`).
+- **Human Verification Gate**: Treating elicitation `accept` as an interaction event, requiring independent human credentials before calling `approveProposal()`.
+- **Anti-Bearer URL Elicitation**: Opaque single-use tokens over HTTPS requiring independent web authentication and user matching.
+- **Multi-Instance Safe Interaction Tracking**: Ephemeral tracker failing safe to Web/CLI without altering proposal TTL or duplicating execution.
 
 ### Non-Goals
-- Financial proposal persistence, lifecycle, or downstream execution (owned by `SPEC-004`).
-- Embedding LLM weights, fine-tuning, or GPU management inside the service.
-- Transmitting sensitive financial credentials (passwords, PINs, card numbers) via MCP forms (`I-MCP-003`).
+- Financial proposal persistence, leases, state machine, or downstream execution (owned by `SPEC-004`).
+- Treating agent responses or unverified elicitation payloads as financial authorization (`I-MCP-002`, `I-MCP-007`).
+- Requesting or transmitting sensitive credentials (passwords, PINs, PANs) via MCP forms (`I-MCP-003`).
+- Custom reimplementation of JSON-RPC 2.0 envelopes already provided by Spring AI.
 
 ---
 
@@ -49,60 +51,66 @@ Expose Wallet capabilities (`ledger`, `intelligence`, `goals`, `savings`) to ext
 
 | Participating Module | Affected Flow / Contract | Potential Side Effect / Failure Mode | Invariant / Mitigation |
 | :--- | :--- | :--- | :--- |
-| **`copilot.domain`** (`SPEC-004`) | Proposal creation via `copilot::api` | Mismatched parameters or unauthenticated caller | `I-AI-004`: Security context propagation; parameters validation |
-| **`ledger.api`** | Balance queries (`BalanceUseCase`) | Excess connection holding via long-lived MCP streams | Streamable HTTP with stateless MRTR; non-locking reads |
-| **`intelligence.api`** | Projections & subscriptions inquiry | Heavy repeated queries from AI conversational loops | Perimeter rate limiting; ephemeral calculation |
-| **`security`** | Agent credential authentication | Client header spoofing | Authenticated principal resolution only; ignore `X-Tenant-Id` |
+| **`copilot.domain`** (`SPEC-004`) | Proposal creation and approval dispatch | Agent attempts to bypass human gate | `I-AI-001`, `I-MCP-002`: Elicitation never bypasses `ProposalUseCase.approveProposal` |
+| **`security`** | Endpoint authentication | Header spoofing / unauthenticated access | `I-MCP-005`: Server-validated SecurityContext; tool params cannot override tenant |
+| **`ledger.api`** | Read queries (`BalanceUseCase`) | Connection exhaustion via open streams | Stateless MRTR; non-locking balance projections (`I-CASH-006`) |
+| **`intelligence.api`** | Cashflow & subscription queries | Conversational polling loops | Ingress rate limiting; tenant ownership check prior to query |
+| **`goals.api`** | Strategy simulation tool | Accidental state mutation during simulation | Tool contract is strictly pure simulation; zero write methods called |
 
 ---
 
 ## 4. Mathematical & System Invariants
 
-- **`I-MCP-001` (Transport Adapter Isolation)**:
-  MCP transport is strictly an external edge adapter. Domain types and use cases in `br.com.wallet.copilot.api` MUST NOT depend on MCP or Spring AI types.
-- **`I-MCP-002` (Elicitation Non-Bypass Gate)**:
-  Absence of client elicitation support MUST NEVER result in automatic mutation execution. If elicitation is unsupported, the gateway creates a proposal and returns the external approval URI:
-  $$\text{ClientElicitation}(\text{Unsupported}) \implies \text{Status} = \text{PROPOSED} \land \text{RequireExternalApproval}()$$
-- **`I-MCP-003` (Zero Sensitive Credentials in MCP)**:
-  Authentication credentials, passwords, PINs, and full card PANs MUST NOT be requested via MCP Form Elicitation. Sensitive flows MUST use URL Elicitation or out-of-band channels.
-- **`I-MCP-004` (Protocol vs Financial State Decoupling)**:
-  MCP interaction state (`CALL` $\to$ `INPUT_REQUIRED` $\to$ `INPUT_RESPONSE`) MUST remain decoupled from durable `FinancialProposal` state (`PROPOSED` $\to$ `EXECUTED`).
+- **`I-MCP-001` (Transport Adapter Isolation)**: `br.com.wallet.copilot.api` MUST NOT import or reference Spring AI or MCP types.
+- **`I-MCP-002` (Elicitation Non-Bypass & Decoupled Authorization Gate)**:
+  Client elicitation responses (`accept`, `confirmed: true`) are interaction events, NEVER financial authorization credentials. Approval MUST be dispatched through `SPEC-004` with independent server-validated human principal. If unverified, proposal remains `PROPOSED` with external Web/CLI instructions.
+- **`I-MCP-003` (Zero Sensitive Credentials & Anti-Bearer URL Security)**:
+  Passwords, PINs, and PANs MUST NOT be requested via MCP forms. URL Elicitation MUST use HTTPS, opaque single-use tokens, zero plain parameters, and require independent human authentication and subject matching. Consuming or viewing a URL MUST NOT constitute authorization.
+- **`I-MCP-004` (Interaction vs Financial Lifecycle Decoupling & Multi-Instance Safety)**:
+  MCP interaction state is ephemeral and decoupled from `FinancialProposal` state. Lost correlation, pod restarts, or multi-instance routing fail safe to external Web/CLI. Interaction events NEVER recreate proposals, renew TTL, or trigger duplicate downstream execution.
+- **`I-MCP-005` (Strict Server-Enforced Authentication & Zero Agent Spoofing)**:
+  `tenantId` and `userId` MUST derive exclusively from server-validated `SecurityContext`. Tool arguments MUST NOT override authenticated tenant/user. Unauthenticated requests MUST fail immediately (HTTP 401/403).
+- **`I-MCP-006` (Monetary Precision & Mandatory Idempotency)**:
+  Tool transfer amounts MUST be canonical scale-2 strings (`^[0-9]+\.[0-9]{2}$`), bounded in $[0.01, 100000000.00]$, converted directly to `BigDecimal`. `idempotencyKey` scoped to `(tenantId, idempotencyKey)` is mandatory; identical payload returns existing proposal, divergent payload returns conflict.
+- **`I-MCP-007` (Three-Identity Non-Conflation Gate)**:
+  Transport Principal (HTTP token) $\ne$ Agent Client (LLM runtime) $\ne$ Human Authorizer (account owner). An agent client MUST NOT authorize financial proposals on behalf of a human. Approval strictly requires authenticated human principal verification via `SPEC-004`.
 
 ---
 
 ## 5. Functional Requirements (MoSCoW — `I-SDD-004`)
 
 ### 5.1 Must Have (`[MUST]`)
-- **`REQ-MCP-001 [MUST]`**: Configure Spring AI MCP Server utilizing Streamable HTTP on Spring Boot 4.2.0-M2 and WebFlux.
-- **`REQ-MCP-002 [MUST]`**: Implement Read-Only MCP Tool Catalog:
-  - `wallet_get_balance(walletId)` $\to$ queries `ledger.api.BalanceUseCase`.
-  - `wallet_get_cashflow_projections(walletId)` $\to$ queries `intelligence.api.CashflowForecastingUseCase`.
-  - `wallet_get_active_subscriptions(walletId)` $\to$ queries `intelligence.api.SubscriptionQueryUseCase`.
-  - `wallet_simulate_goal_strategy(goalId, targetAmount, targetDate)` $\to$ queries `goals.api.GoalUseCase`.
-- **`REQ-MCP-003 [MUST]`**: Implement Mutation Proposal Tools creating `FinancialProposal` via `copilot::api`:
-  - `copilot_propose_savings_rule(planId, ruleType, targetRatio, threshold)`
-  - `copilot_propose_goal_adjustment(goalId, newTargetAmount, newTargetDate)`
-  - `copilot_propose_transfer(sourceWalletId, targetWalletId, amount, description)`
-- **`REQ-MCP-004 [MUST]`**: Propagate Authenticated Security Context (`tenantId`, `userId`) to all tool invocations.
-- **`REQ-MCP-005 [MUST]`**: Implement Elicitation Capability Negotiation: inspect client handshake; if elicitation is not supported, return proposal details and instructions for external human approval.
+- **`REQ-MCP-001 [MUST]`**: Configure Spring AI MCP Server utilizing Streamable HTTP (`STREAMABLE` protocol mode) with server-enforced transport authentication (`I-MCP-005`).
+- **`REQ-MCP-002 [MUST]`**: Implement Read-Only MCP Tool Catalog asserting resource tenant ownership before query:
+  - `wallet_get_balance(walletId)` $\to$ `ledger.api.BalanceUseCase`
+  - `wallet_get_cashflow_projections(walletId)` $\to$ `intelligence.api.CashflowQueryUseCase`
+  - `wallet_get_active_subscriptions(walletId)` $\to$ `intelligence.api.SubscriptionQueryUseCase`
+  - `wallet_simulate_goal_strategy(goalId, targetAmount, targetDate)` $\to$ pure stateless simulation via `goals.api.GoalStrategyUseCase`
+- **`REQ-MCP-003 [MUST]`**: Implement Mutation Proposal Tools delegating to `copilot.api.ProposalUseCase.createProposal` with mandatory `idempotencyKey` and canonical scale-2 amount:
+  - `copilot_propose_transfer(sourceWalletId, targetWalletId, amount, description, idempotencyKey)`
+  - `copilot_propose_savings_rule(planId, ruleType, percentage, threshold, step, idempotencyKey)`
+  - `copilot_propose_goal_adjustment(goalId, name, targetAmount, targetDate, priority, idempotencyKey)`
+- **`REQ-MCP-004 [MUST]`**: Propagate Authenticated Security Context (`tenantId`, `userId`) to all tool executions; reject tool argument tenant overrides.
+- **`REQ-MCP-005 [MUST]`**: Implement Dual-Capability Negotiation: separately inspect client capabilities for `form_elicitation` and `url_elicitation`. If neither is supported, return proposal details and instructions for external human approval (`I-MCP-002`).
 
 ### 5.2 Should Have (`[SHOULD]`)
-- **`REQ-MCP-006 [SHOULD]`**: Implement interactive Form Elicitation (`confirm_proposal`) on compatible MCP clients.
-- **`REQ-MCP-007 [SHOULD]`**: Support Multi-Round-Trip Requests (MRTR) emitting `input_required` without holding open server streams.
-- **`REQ-MCP-008 [SHOULD]`**: Implement URL Elicitation redirects for sensitive confirmation workflows.
+- **`REQ-MCP-006 [SHOULD]`**: Implement interactive Form Elicitation for compatible clients, verifying independent human credentials before dispatching to `ProposalUseCase.approveProposal` (`I-MCP-002`, `I-MCP-007`).
+- **`REQ-MCP-007 [SHOULD]`**: Support MRTR Request Resumption with ephemeral multi-instance safe tracking, failing safe to Web/CLI without altering proposal TTL (`I-MCP-004`).
+- **`REQ-MCP-008 [SHOULD]`**: Implement Secure URL Elicitation with short-lived single-use opaque tokens over HTTPS, requiring independent authentication and subject matching (`I-MCP-003`).
 
 ### 5.3 Could Have (`[COULD]`)
-- **`REQ-MCP-009 [COULD]`**: Format financial projection summaries with rich Markdown tables for conversational AI agents.
+- **`REQ-MCP-009 [COULD]`**: Format financial projection and subscription summaries with markdown tables for conversational clients.
 
 ### 5.4 Won't Have This Time (`[WON'T]`)
-- Unilateral financial execution without proposal creation (`I-AI-001`).
-- MCP tools modifying internal database tables directly (`I-MODULITH-001`).
+- Autonomous mutation execution bypassing `SPEC-004` human authorization (`I-AI-001`).
+- Direct database DAO access or bypass of Spring Modulith `.api` packages (`I-MODULITH-001`).
+- Custom reinvention of JSON-RPC envelopes handled natively by Spring AI.
 
 ---
 
-## 6. Interface Contracts
+## 6. Interface Contracts & Interaction Flows
 
-### 6.1 MCP Tool Schema (Streamable HTTP JSON-RPC)
+### 6.1 Mutation Proposal Tool Schema
 ```json
 {
   "name": "copilot_propose_transfer",
@@ -112,29 +120,31 @@ Expose Wallet capabilities (`ledger`, `intelligence`, `goals`, `savings`) to ext
     "properties": {
       "sourceWalletId": { "type": "string", "format": "uuid" },
       "targetWalletId": { "type": "string", "format": "uuid" },
-      "amount": { "type": "number", "minimum": 0.01 },
+      "amount": { "type": "string", "pattern": "^[0-9]+\\.[0-9]{2}$", "description": "Canonical scale-2 monetary amount" },
       "description": { "type": "string" },
-      "idempotencyKey": { "type": "string" }
+      "idempotencyKey": { "type": "string", "description": "Mandatory client idempotency key" }
     },
-    "required": ["sourceWalletId", "targetWalletId", "amount"]
+    "required": ["sourceWalletId", "targetWalletId", "amount", "idempotencyKey"]
   }
 }
 ```
 
-### 6.2 MRTR Elicitation Response (`input_required`)
-```json
-{
-  "type": "input_required",
-  "proposalId": "e1000000-0000-0000-0000-000000000001",
-  "message": "Transfer R$ 50.00 from Wallet A to Wallet B?",
-  "schema": {
-    "type": "object",
-    "properties": {
-      "confirmed": { "type": "boolean", "description": "Confirm or reject transfer" }
-    },
-    "required": ["confirmed"]
-  }
-}
+### 6.2 Elicitation-to-Authorization Protocol Flow
+```text
+[Agent] ──(1. callTool)──> [MCP Gateway] ──(2. createProposal)──> [copilot.api] (Status: PROPOSED)
+                                │
+          ┌─────────────────────┴──────────────────────┐
+          ▼ (Client supports Form)                     ▼ (No Elicitation / Fallback)
+   [3a. Form Elicitation]                       [3b. Return Proposal Response]
+          │                                            │ (external instructions)
+   [4a. Interaction Response: accept]                  ▼
+          │                                      [Human Approves via Web/CLI]
+   [5a. Gateway verifies HUMAN principal]              │
+        (fails? -> directs to Web/CLI)                 ▼
+        (verified? -> approveProposal())        [SPEC-004 Domain executes]
+          │                                            │
+          ▼                                            │
+   [6a. Status: EXECUTED] <────────────────────────────┘
 ```
 
 ---
@@ -143,21 +153,22 @@ Expose Wallet capabilities (`ledger`, `intelligence`, `goals`, `savings`) to ext
 
 | Requirement | 1. Positive Canonical Test | 2. Boundary / Invalid Input Gate | 3. Invariant Breach Gate |
 | :--- | :--- | :--- | :--- |
-| `REQ-MCP-002` (Read Tools) | Tool returns balance/projections for $(T, W)$ | Invalid UUID or missing parameters $\to$ Schema validation error | Tool queries internal DAOs $\to$ Architecture test failure (`I-MODULITH-001`) |
-| `REQ-MCP-003` (Proposals) | Mutation tool generates proposal via `copilot::api` | Negative amount or empty targets $\to$ Tool error response | Tool attempts direct transfer $\to$ Invariant breach (`I-AI-001`) |
-| `REQ-MCP-005` (Negotiation) | Client without elicitation gets proposal confirmation | Malformed client capabilities $\to$ Fallback to proposal return | Unsupported elicitation triggers auto-execution $\to$ Breach (`I-MCP-002`) |
-| `REQ-MCP-004` (Context) | Authenticated tenant context applied to queries | Missing security context $\to$ Tool authentication failure | Cross-tenant tool inquiry $\to$ 404 / Non-disclosure (`I-AI-004`) |
+| `REQ-MCP-001` (Transport & Auth) | Authenticated handshake & tool execution | Unauthenticated request $\to$ 401/403 | Missing security context allows execution (`I-MCP-005`) |
+| `REQ-MCP-002` (Read Tools) | Returns balance for verified owner wallet | Invalid UUID or cross-tenant wallet $\to$ 404 | Tool bypasses `ledger.api` to read DB (`I-MCP-001`) |
+| `REQ-MCP-003` (Proposals) | Creates proposal via `copilot.api` | Scale $> 2$, missing key, negative amount $\to$ error | Tool executes transfer directly (`I-AI-001`) |
+| `REQ-MCP-004` (Context) | Verified principal propagated to domain | Caller provides mismatched `tenantId` in params | Tool param overrides security context (`I-MCP-005`) |
+| `REQ-MCP-005` (Negotiation) | Client without elicitation gets external URL | Partial capability declaration (Form only) | Unsupported client triggers auto-execution (`I-MCP-002`) |
+| `REQ-MCP-006` (Form Elicitation)| Verified human confirm triggers approval | Agent accept without human credentials rejected | Agent response treated as human approval (`I-MCP-002`, `I-MCP-007`) |
+| `REQ-MCP-007` (MRTR Resumption) | Reconnected client resumes pending interaction| Pod restart / tracker loss falls back to Web/CLI | Resumption duplicates proposal or extends TTL (`I-MCP-004`) |
+| `REQ-MCP-008` (URL Elicitation) | Single-use opaque HTTPS token rendered | Token opened by wrong user or expired $\to$ 403 | Plain credentials or token acts as bearer auth (`I-MCP-003`) |
 
 ---
 
 ## 8. Acceptance Criteria & Practical Verification (`I-SDD-002`)
 
-### 8.1 Acceptance Criteria
-- [ ] All `[MUST]` requirements implemented with unit & integration tests (`./gradlew test`).
-- [ ] Modulith architecture tests verify `copilot.internal.mcp` does not violate module boundaries.
-- [ ] MCP Streamable HTTP handshake and tools negotiation verified with protocol tests.
-
-### 8.2 Practical Verification Invariants
-1. **Transport Isolation**: Domain use cases function completely independently of the MCP server.
-2. **Elicitation Non-Bypass**: Inability of client to process elicitation yields a `PROPOSED` entity awaiting external approval.
-3. **Protocol Decoupling**: Disconnecting or timing out during MCP MRTR does not alter proposal validity.
+- [ ] Spring AI MCP Server configured on Streamable HTTP with endpoint security filter.
+- [ ] Tool catalog verified: all 4 read tools and 3 proposal tools operate exclusively via module `.api` contracts.
+- [ ] Modulith architecture verification passes with zero dependency leaks from `copilot.api` to MCP.
+- [ ] Handshake capability test proves deterministic fallback to external URI when client lacks elicitation.
+- [ ] Security test proves agent cannot approve proposal without verified human credentials (`testAgentCannotApprove`).
+- [ ] Concurrency & resumption tests prove multi-instance state loss does not compromise proposal integrity.

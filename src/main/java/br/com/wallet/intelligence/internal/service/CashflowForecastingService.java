@@ -27,12 +27,14 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
+import br.com.wallet.intelligence.api.CashflowQueryUseCase;
+
 /**
  * Service orchestrating forward cashflow projection calculations and Goals CashflowProfile synchronization (REQ-CASH-004, REQ-CASH-005).
  * Guarantees non-locking balance reads (I-CASH-006) and strict preservation of goals safety buffers (I-CASH-004).
  */
 @Service
-public class CashflowForecastingService {
+public class CashflowForecastingService implements CashflowQueryUseCase {
 
     private final SubscriptionDao subscriptionDao;
     private final BalanceUseCase balanceUseCase;

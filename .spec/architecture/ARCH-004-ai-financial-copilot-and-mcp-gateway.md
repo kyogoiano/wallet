@@ -139,3 +139,8 @@ flowchart TD
 | **`I-AI-010`** | **Failure Segregation** | Precondition failures $\to$ `INVALIDATED`. Infrastructure timeouts remain retryable under lease. | `DownstreamBridge` |
 | **`I-MCP-001`** | **Adapter Isolation** | MCP transport is strictly an external edge adapter. Domain types must not depend on MCP. | Module Packaging |
 | **`I-MCP-002`** | **Elicitation Non-Bypass**| Inability of client to process elicitation yields external review; NEVER triggers auto-execution. | `McpGateway` |
+| **`I-MCP-003`** | **Zero Sensitive Credentials** | Passwords, PINs, PANs forbidden in forms; URL Elicitation uses HTTPS and opaque single-use tokens. | Tool / Transport Boundary |
+| **`I-MCP-004`** | **Protocol Decoupling** | MCP interaction state is decoupled from proposal state. Disconnection/timeout never alters proposal TTL. | Resumption Engine |
+| **`I-MCP-005`** | **Transport Security** | Tenant and user derive strictly from server SecurityContext; tool argument overrides rejected. | Auth Filter / Gateway |
+| **`I-MCP-006`** | **Monetary Precision** | Tool transfer amounts require exact string scale 2 precision; idempotencyKey is mandatory. | Tool Input Schemas |
+| **`I-MCP-007`** | **Three-Identity Isolation** | Transport Principal != Agent Client != Human Authorizer. Agent response never approves financial mutations. | Elicitation / Approval Gate |

@@ -4,5 +4,6 @@ public enum OperationOrigin {
     USER,
     SAVINGS_AUTOMATION,
     SYSTEM,
-    REVERSAL
+    REVERSAL,
+    AGENT
 }

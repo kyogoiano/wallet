@@ -19,11 +19,13 @@ ext {
 	archunitVersion = "1.5.1"
 	asmVersion = "9.10.1"
 	caffeineVersion = "3.3.0"
+	springAiVersion = "2.1.0-M1"
 }
 
 dependencyManagement {
 	imports {
 		mavenBom "org.springframework.modulith:spring-modulith-bom:${modulithVersion}"
+		mavenBom "org.springframework.ai:spring-ai-bom:${springAiVersion}"
 	}
 	dependencies {
 		dependency "com.tngtech.archunit:archunit:${archunitVersion}"
@@ -132,6 +134,7 @@ dependencies {
 	implementation("io.lettuce:lettuce-core:${lettuceVersion}")
 	implementation("io.netty:netty-transport-native-epoll")
 	implementation("io.netty:netty-transport-native-epoll:${nettyVersion}:linux-x86_64")
+	implementation 'org.springframework.ai:spring-ai-starter-mcp-server-webmvc'
 
 	// Test dependencies
 	testImplementation 'org.springframework.boot:spring-boot-starter-test'
